@@ -26,9 +26,6 @@ class CDEHandler(BaseHandler):
     - neuralcde-r
     - neuralcde-c
     - neuralcde-h
-    - ancde
-    - exit
-    - leap
     """
 
     name: str = "cde"
@@ -39,9 +36,6 @@ class CDEHandler(BaseHandler):
         "neuralcde-r": {"family": "neuralcde", "use_intensity": False, "control": "rectilinear", "time_aware_vf": True},
         "neuralcde-c": {"family": "neuralcde", "use_intensity": False, "control": "cubic", "time_aware_vf": True},
         "neuralcde-h": {"family": "neuralcde", "use_intensity": False, "control": "hermite", "time_aware_vf": True},
-        "ancde": {"family": "ancde", "use_intensity": False, "control": "natural"},
-        "exit": {"family": "exit", "use_intensity": False, "control": "natural"},
-        "leap": {"family": "leap", "use_intensity": False, "control": "natural"},
     }
     CDE_ALLOWED_METHODS = {"euler", "midpoint", "rk4", "dopri5"}
     CDE_METHOD_ALIASES = {
@@ -137,104 +131,6 @@ class CDEHandler(BaseHandler):
                 initial=True,
                 control=control_mode,
             )
-        elif family == "ancde":
-            from ..module.cde.ancde.ancde_model import ANCDE
-            from ..module.cde.ancde.vector_fields import FinalTanh as ANCDEFinalTanh
-            from ..module.cde.ancde.vector_fields import FinalTanh_ff6 as ANCDEFinalTanhFF6
-
-            func_f = ANCDEFinalTanhFF6(
-                input_channels=control_channels,
-                hidden_atten_channels=hidden_dim,
-                hidden_hidden_atten_channels=hidden_dim,
-                num_hidden_layers=num_layers,
-            )
-            func_g = ANCDEFinalTanh(
-                input_channels=control_channels,
-                hidden_channels=hidden_dim,
-                hidden_hidden_channels=hidden_dim,
-                num_hidden_layers=num_layers,
-            )
-            model = ANCDE(
-                func_f=func_f,
-                func_g=func_g,
-                input_channels=control_channels,
-                hidden_channels=hidden_dim,
-                attention_channel=hidden_dim,
-                output_channels=hidden_dim,
-                file=file_path,
-                initial=True,
-            )
-        elif family == "exit":
-            from ..module.cde.exit.exit_model import NeuralCDE_IDEA4
-            from ..module.cde.exit.vector_fields import FinalTanh_g as EXITFinalTanhG
-            from ..module.cde.exit.vector_fields import ODEFunc_f as EXITODEFuncF
-
-            func_k = NeuralCDEFinalTanh(
-                input_channels=control_channels,
-                hidden_channels=hidden_dim,
-                hidden_hidden_channels=hidden_dim,
-                num_hidden_layers=num_layers,
-            )
-            func_g = EXITFinalTanhG(
-                input_channels=control_channels,
-                hidden_channels=hidden_dim,
-                hidden_hidden_channels=hidden_dim,
-                num_hidden_layers=num_layers,
-            )
-            func_f = EXITODEFuncF(
-                input_channels=control_channels,
-                hidden_channels=hidden_dim,
-                hidden_hidden_channels=hidden_dim,
-                num_hidden_layers=num_layers,
-            )
-            model = NeuralCDE_IDEA4(
-                func=func_k,
-                func_f=func_f,
-                func_g=func_g,
-                input_channels=control_channels,
-                hidden_channels=hidden_dim,
-                output_channels=hidden_dim,
-                kinetic_energy_coef=1,
-                jacobian_norm2_coef=1,
-                div_samples=1,
-                initial=True,
-            )
-        elif family == "leap":
-            from ..module.cde.leap.leap_model import NeuralCDE_Learnable
-            from ..module.cde.leap.vector_fields import Mapping_f as LEAPMappingF
-            from ..module.cde.leap.vector_fields import ODEFunc_ff as LEAPODEFuncFF
-
-            func_k = NeuralCDEFinalTanh(
-                input_channels=control_channels,
-                hidden_channels=hidden_dim,
-                hidden_hidden_channels=hidden_dim,
-                num_hidden_layers=num_layers,
-            )
-            func_g = NeuralCDEFinalTanh(
-                input_channels=control_channels,
-                hidden_channels=hidden_dim,
-                hidden_hidden_channels=hidden_dim,
-                num_hidden_layers=num_layers,
-            )
-            func_f = LEAPODEFuncFF(
-                input_channels=control_channels,
-                hidden_channels=hidden_dim,
-            )
-            mapping = LEAPMappingF(
-                input_channels=control_channels,
-                hidden_channels=hidden_dim,
-            )
-            model = NeuralCDE_Learnable(
-                func_k=func_k,
-                func_g=func_g,
-                func_f=func_f,
-                mapping=mapping,
-                input_channels=control_channels,
-                hidden_channels=hidden_dim,
-                output_channels=hidden_dim,
-                file=file_path,
-                initial=True,
-            )
         else:
             raise ValueError(f"Unsupported CDE family: {family}")
 
@@ -320,19 +216,6 @@ class CDEHandler(BaseHandler):
         call_kwargs = self._build_call_kwargs(model, kwargs)
 
         model_name = kwargs.get("model_name", getattr(model, "model_name", ""))
-        if model_name == "leap":
-            # Upstream LEAP assumes an integer-grid control path, while this
-            # package builds coeffs on normalized [0, 1] times. Keep forward-time
-            # semantics aligned with the packaged coeffs here.
-            out, hn, loss = model(times, coeffs, data["final_index"], **call_kwargs)
-            out, hn = self._normalize_outputs(out, hn, seq.shape[0], data["x"].shape[1])
-            return out, hn, loss
-
-        if model_name == "exit":
-            out, hn, reg = model(times, coeffs, data["final_index"], **call_kwargs)
-            out, hn = self._normalize_outputs(out, hn, seq.shape[0], data["x"].shape[1])
-            return out, hn, reg
-
         out, hn = model(times, coeffs, data["final_index"], **call_kwargs)
         out, hn = self._normalize_outputs(out, hn, seq.shape[0], data["x"].shape[1])
         return out, hn

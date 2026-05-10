@@ -26,12 +26,6 @@ _NATURAL_INTERPOLATION_MODELS = frozenset(
         "latentode",
         "gru-ode-bayes",
         "neuralcde",
-        "neuralrde-1",
-        "neuralrde-2",
-        "neuralrde-3",
-        "ancde",
-        "exit",
-        "leap",
     ]
 )
 
@@ -40,7 +34,6 @@ _HERMITE_INTERPOLATION_MODELS = frozenset(
         "neural_lsde",
         "neural_lnsde",
         "neural_gsde",
-        "neural_physgsde",
         "naive_cde",
         "neural_ode",
         "neural_ode_t",
@@ -56,7 +49,13 @@ _INTERPOLATION_OVERRIDES = {
     "neuralcde-h": "hermite",
 }
 
-_INTENSITY_MODELS = frozenset(["gru-dt", "gru-d", "ode-rnn-spline"])
+_INTENSITY_MODELS = frozenset(
+    [
+        "gru-dt",
+        "gru-d",
+        "ode-rnn-spline",
+    ]
+)
 
 _BASIC_SEQUENCE_MODELS = frozenset(
     [
@@ -64,17 +63,12 @@ _BASIC_SEQUENCE_MODELS = frozenset(
         "rnn",
         "lstm",
         "gru",
-        "gru-simple",
-        "bilstm",
-        "tlstm",
-        "plstm",
-        "tglstm",
     ]
 )
-_ATTENTION_MODELS = frozenset(["sand", "mtan", "miam", "transformer"])
-_ATTENTION_NUM_LAYERS_MODELS = frozenset(["transformer"])
+_ATTENTION_MODELS = frozenset()
+_ATTENTION_NUM_LAYERS_MODELS = frozenset()
 
-_AUXILIARY_LOSS_MODELS = frozenset(["leap", "exit", "neural_physgsde"])
+_AUXILIARY_LOSS_MODELS = frozenset()
 _FLOW_DEFAULT_DEPTH = 2
 _FLOW_DEFAULT_HEAD_DEPTH = 1
 
@@ -86,12 +80,7 @@ def _default_head_depth_for_model(canonical_name: str, *, base_num_layers: int) 
 
 
 def _default_flow_depth_for_model(canonical_name: str) -> int:
-    if canonical_name.startswith("neuralflow-"):
-        return 3
-    if canonical_name.startswith("dualdynamics-"):
-        return 2
-    if canonical_name.startswith("flowpath-"):
-        return 1
+    del canonical_name
     return _FLOW_DEFAULT_DEPTH
 
 
@@ -163,9 +152,7 @@ def _resolve_runtime_depth_config(
 def get_data_config(model_name: str) -> dict:
     """Return model-specific preprocessing policy."""
     model_name = normalize_tsde_method_alias(normalize_flow_alias(str(model_name)))
-    if model_name.startswith("neuraldsde_"):
-        interpolation = "hermite"
-    elif model_name in _INTERPOLATION_OVERRIDES:
+    if model_name in _INTERPOLATION_OVERRIDES:
         interpolation = _INTERPOLATION_OVERRIDES[model_name]
     elif model_name in _HERMITE_INTERPOLATION_MODELS:
         interpolation = "hermite"

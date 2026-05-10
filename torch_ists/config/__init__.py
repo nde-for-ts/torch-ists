@@ -66,7 +66,6 @@ _SOURCE_BASED_DEFAULT_METHODS = {
     "neural_lsde": "srk",
     "neural_lnsde": "srk",
     "neural_gsde": "srk",
-    "neural_physgsde": "srk",
     "ode-rnn-spline": "rk4",
     "ode-rnn": "euler",
     "latentode": "dopri5",

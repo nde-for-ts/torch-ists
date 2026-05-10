@@ -2,74 +2,17 @@
 
 from __future__ import annotations
 
-FLOW_ALIAS_TO_CANONICAL = {
-    "neuralflow_x_r": "neuralflow-r",
-    "neuralflow_x_g": "neuralflow-g",
-    "neuralflow_x_c": "neuralflow-c",
-    "neuralflowcde_x_r": "flowpath-r",
-    "neuralflowcde_x_g": "flowpath-g",
-    "neuralflowcde_x_c": "flowpath-c",
-    "flowpath_x_r": "flowpath-r",
-    "flowpath_x_g": "flowpath-g",
-    "flowpath_x_c": "flowpath-c",
-    "dualdynamics_x_r": "dualdynamics-r",
-    "dualdynamics_x_g": "dualdynamics-g",
-    "dualdynamics_x_c": "dualdynamics-c",
-    "neuralcontrolledflow_x_r": "dualdynamics-r",
-    "neuralcontrolledflow_x_g": "dualdynamics-g",
-    "neuralcontrolledflow_x_c": "dualdynamics-c",
-}
+FLOW_ALIAS_TO_CANONICAL = {}
 
-TSDE_METHOD_ALIAS_TO_CANONICAL = {
-    "tandem": "neuraltsde_4_17_3_5",
-    "ca-nsde": "neuraltsde_4_17_3_11",
-}
+TSDE_METHOD_ALIAS_TO_CANONICAL = {}
 
-FLOW_CANONICAL_MODELS = frozenset(
-    {
-        "neuralflow-r",
-        "neuralflow-g",
-        "neuralflow-c",
-        "flowpath-r",
-        "flowpath-g",
-        "flowpath-c",
-        "dualdynamics-r",
-        "dualdynamics-g",
-        "dualdynamics-c",
-    }
-)
+FLOW_CANONICAL_MODELS = frozenset()
 
-FLOW_STRICT_RAW_CANONICAL_MODELS = frozenset(
-    {
-        "neuralflow-r",
-        "neuralflow-g",
-        "neuralflow-c",
-        "flowpath-r",
-        "flowpath-g",
-        "flowpath-c",
-    }
-)
+FLOW_STRICT_RAW_CANONICAL_MODELS = frozenset()
 
-FLOW_STRICT_RAW_ALIAS_MODELS = frozenset(
-    {
-        "neuralflow_x_r",
-        "neuralflow_x_g",
-        "neuralflow_x_c",
-        "neuralflowcde_x_r",
-        "neuralflowcde_x_g",
-        "neuralflowcde_x_c",
-        "flowpath_x_r",
-        "flowpath_x_g",
-        "flowpath_x_c",
-    }
-)
+FLOW_STRICT_RAW_ALIAS_MODELS = frozenset()
 
-TSDE_CANONICAL_MODELS = frozenset(
-    {
-        "neuraltsde_4_17_3_5",
-        "neuraltsde_4_17_3_11",
-    }
-)
+TSDE_CANONICAL_MODELS = frozenset()
 
 
 def normalize_flow_alias(name: str) -> str:

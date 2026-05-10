@@ -79,7 +79,6 @@ def default_method_for_model(model_name: str) -> str:
             "neural_lsde",
             "neural_lnsde",
             "neural_gsde",
-            "neural_physgsde",
         }:
             return "srk"
         if normalized == "ode-rnn-spline":

@@ -2,12 +2,12 @@
 
 Architecture:
 - Handler pattern: HandlerRegistry routes model creation to handlers.
-- Supported handlers: BasicHandler + SourceODEHandler + ODEHandler + ODELSTMHandler + CDEHandler + FlowHandler + VariationalSDEHandler + DSDEHandler + TSDEHandler + SDEHandler + AttentionHandler.
+- Supported handlers: BasicHandler + SourceODEHandler + ODEHandler + ODELSTMHandler + CDEHandler + SDEHandler.
 - Standalone: self-contained handlers and module implementations.
 
 Behavior notes:
 - ``use_intensity=None`` resolves from ``get_data_config(model_name)``.
-- Active release scope is enforced through packaged runtime metadata.
+- Active package scope is enforced through packaged runtime metadata.
 - Non-finite hidden states and sequence outputs hard-fail with ``RuntimeError`` instead of being silently masked.
 """
 

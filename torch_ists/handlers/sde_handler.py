@@ -7,7 +7,6 @@ from typing import Any, Dict
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 from .base import BaseHandler
 from ..config import (
@@ -36,7 +35,6 @@ class SDEHandler(BaseHandler):
         "neural_lsde",
         "neural_lnsde",
         "neural_gsde",
-        "neural_physgsde",
         "naive_cde",
         "neural_ode",
         "neural_ode_t",
@@ -49,14 +47,6 @@ class SDEHandler(BaseHandler):
         "fixed_heun": "heun",
     }
     STOCHASTIC_KWARG_KEYS = {"bm", "names", "extra", "logqp"}
-    PHYSGSDE_BASE_MODEL = "neural_gsde"
-    PHYSGSDE_DEFAULTS = {
-        "log_space": True,
-        "monotone_drift": True,
-        "diffusion_floor": 1e-3,
-        "physics_loss_weight": 0.05,
-        "arrhenius_loss_weight": 0.0,
-    }
 
     @staticmethod
     def _reject_explicit_adjoint(
@@ -122,58 +112,6 @@ class SDEHandler(BaseHandler):
 
         return solver_kwargs
 
-    @classmethod
-    def _extract_physics_config(cls, config: Dict[str, Any]) -> Dict[str, Any]:
-        physics = deepcopy(cls.PHYSGSDE_DEFAULTS)
-        direct = config.get("physics")
-        if isinstance(direct, dict):
-            physics.update(direct)
-        model_params = config.get("model_params")
-        if isinstance(model_params, dict):
-            nested = model_params.get("physics")
-            if isinstance(nested, dict):
-                physics.update(nested)
-        return physics
-
-    @staticmethod
-    def _configure_physgsde_runtime(model: nn.Module, physics_config: Dict[str, Any]) -> None:
-        model.physics_config = dict(physics_config)
-        vector_field = getattr(getattr(model, "seq_layer", None), "func", None)
-        if vector_field is None:
-            return
-        vector_field.monotone_drift = bool(physics_config.get("monotone_drift", True))
-        vector_field.diffusion_floor = float(physics_config.get("diffusion_floor", 0.0))
-
-    @staticmethod
-    def _compute_physgsde_aux_loss(out: torch.Tensor, physics_config: Dict[str, Any]) -> torch.Tensor:
-        weight = float(physics_config.get("physics_loss_weight", 0.0))
-        if weight <= 0.0:
-            return out.new_zeros(())
-
-        primary = out[..., :1]
-        if bool(physics_config.get("log_space", True)):
-            state = torch.exp(primary.clamp(min=-8.0, max=4.0))
-        else:
-            state = F.softplus(primary)
-
-        penalties = []
-        if state.shape[1] > 1:
-            monotone_violation = torch.relu(state[:, 1:, :] - state[:, :-1, :]).mean()
-            penalties.append(monotone_violation)
-        else:
-            penalties.append(state.new_zeros(()))
-
-        arrhenius_weight = float(physics_config.get("arrhenius_loss_weight", 0.0))
-        if arrhenius_weight > 0.0 and out.shape[-1] > 1 and state.shape[1] > 1:
-            temp_proxy = torch.sigmoid(out[:, 1:, 1:2])
-            degradation = (state[:, :-1, :] - state[:, 1:, :]).clamp(min=0.0)
-            penalties.append(arrhenius_weight * F.mse_loss(degradation, temp_proxy))
-
-        total = penalties[0]
-        for penalty in penalties[1:]:
-            total = total + penalty
-        return total * weight
-
     def create_model(self, model_name: str, config: Dict[str, Any], device: str) -> nn.Module:
         if not self.can_handle(model_name):
             raise ValueError(
@@ -185,7 +123,7 @@ class SDEHandler(BaseHandler):
         num_hidden_layers = max(1, int(config.get("num_hidden_layers", config.get("num_layers", 1))))
         use_intensity = bool(config.get("use_intensity", False))
 
-        registry_key = self.PHYSGSDE_BASE_MODEL if model_name == "neural_physgsde" else model_name
+        registry_key = model_name
         merged_config = get_default_config("sde")
         merged_config = merge_configs(merged_config, deepcopy(MODEL_REGISTRY.get(registry_key, {})))
         merged_config = merge_configs(merged_config, self._extract_nested_overrides(config))
@@ -237,8 +175,6 @@ class SDEHandler(BaseHandler):
         model.solver_method = solver_config.get("method")
         model.solver_options = dict(solver_config.get("options") or {})
         model.solver_kwargs = dict(solver_kwargs)
-        if model_name == "neural_physgsde":
-            self._configure_physgsde_runtime(model, self._extract_physics_config(config))
         model.to(device)
         return model
 
@@ -298,10 +234,4 @@ class SDEHandler(BaseHandler):
         elif hn.dim() != 2:
             hn = out[:, -1, :]
 
-        if getattr(model, "model_name", None) == "neural_physgsde":
-            aux_loss = self._compute_physgsde_aux_loss(
-                out,
-                getattr(model, "physics_config", self.PHYSGSDE_DEFAULTS),
-            )
-            return out, hn, aux_loss
         return out, hn
