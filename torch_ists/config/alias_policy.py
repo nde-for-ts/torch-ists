@@ -22,13 +22,13 @@ def normalize_flow_alias(name: str) -> str:
 
 
 def normalize_tsde_method_alias(name: str) -> str:
-    """Normalize exact TSDE public method labels to canonical TSDE names."""
+    """Normalize known TSDE labels to canonical names when present."""
     raw_name = str(name).strip()
     return TSDE_METHOD_ALIAS_TO_CANONICAL.get(raw_name.lower(), raw_name)
 
 
 def is_flow_family_name(name: str) -> bool:
-    """Return True for any flow-family canonical or alias model name."""
+    """Return True for any supported flow canonical or alias model name."""
     raw_name = str(name)
     if raw_name in FLOW_ALIAS_TO_CANONICAL:
         return True
@@ -36,7 +36,7 @@ def is_flow_family_name(name: str) -> bool:
 
 
 def is_tsde_public_name(name: str) -> bool:
-    """Return True for canonical TSDE names or exact public method aliases."""
+    """Return True for canonical TSDE names or supported alias labels."""
     raw_name = str(name).strip()
     if raw_name.lower() in TSDE_METHOD_ALIAS_TO_CANONICAL:
         return True

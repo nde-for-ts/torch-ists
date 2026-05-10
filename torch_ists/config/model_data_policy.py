@@ -42,6 +42,20 @@ _HERMITE_INTERPOLATION_MODELS = frozenset(
     ]
 )
 
+_CUBIC_INTERPOLATION_MODELS = frozenset(
+    [
+        "cnn",
+        "rnn",
+        "lstm",
+        "gru",
+        "gru-simple",
+        "bilstm",
+        "transformer",
+        "transformer-mask",
+        "ode-lstm",
+    ]
+)
+
 _INTERPOLATION_OVERRIDES = {
     "neuralcde-l": "linear",
     "neuralcde-r": "rectilinear",
@@ -70,11 +84,13 @@ _BASIC_SEQUENCE_MODELS = frozenset(
 _ATTENTION_MODELS = frozenset(
     [
         "transformer",
+        "transformer-mask",
     ]
 )
 _ATTENTION_NUM_LAYERS_MODELS = frozenset(
     [
         "transformer",
+        "transformer-mask",
     ]
 )
 
@@ -168,6 +184,8 @@ def get_data_config(model_name: str) -> dict:
         interpolation = "hermite"
     elif model_name in _NATURAL_INTERPOLATION_MODELS:
         interpolation = "natural"
+    elif model_name in _CUBIC_INTERPOLATION_MODELS:
+        interpolation = "cubic"
     else:
         interpolation = "hermite"
 

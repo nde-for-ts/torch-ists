@@ -1,4 +1,4 @@
-"""SDEModel wrapper for Tier1 baseline SDE-family models."""
+"""SDEModel wrapper for the packaged SDE runtime family."""
 
 from __future__ import annotations
 
@@ -55,4 +55,3 @@ class SDEModel(nn.Module):
 
     def forward(self, coeffs: torch.Tensor, times: torch.Tensor, **kwargs: Any):
         return self.seq_layer(coeffs, times, **kwargs)
-

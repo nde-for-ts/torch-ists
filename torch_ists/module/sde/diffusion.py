@@ -1,7 +1,7 @@
-"""Diffusion model primitives for Tier1 SDE baselines.
+"""Diffusion model primitives for packaged SDE baselines.
 
-This module is adapted from the legacy/refactoring NSDE implementation and
-restricted to runtime functionality required by the 8 SDE baseline models.
+This module is adapted from an earlier NSDE implementation and restricted to
+runtime functionality required by the packaged SDE baseline models.
 """
 
 from __future__ import annotations
@@ -14,8 +14,8 @@ import torch.nn.functional as F
 class Diffusion_model(torch.nn.Module):
     """SDE drift/diffusion vector field.
 
-    Supports input_option (0-6) and noise_option (0-19) used by Tier1 SDE
-    baseline models.
+    Supports input_option (0-6) and noise_option (0-19) used by the packaged
+    SDE baseline models.
     """
 
     def __init__(

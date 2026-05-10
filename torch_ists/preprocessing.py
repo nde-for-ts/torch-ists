@@ -219,7 +219,7 @@ def preprocess(
         X: Input data [N, D, L] as numpy array or torch tensor.
         missing_rate: Missing rate in [0, 1). If None or 0, no additional injection.
         interpolate: One of {"natural", "linear", "rectilinear", "cubic", "hermite"}.
-            Defaults to "natural" if neither this nor `model_name` is set.
+            Defaults to "cubic" if neither this nor `model_name` is set.
         use_intensity: Whether to include intensity channels. If None, derived
             from `model_name` (or defaults to True for backward compatibility).
         seed: RNG seed for missingness.
@@ -245,12 +245,12 @@ def preprocess(
 
         data_config = get_data_config(model_name)
         if resolved_interpolate is None:
-            resolved_interpolate = data_config.get("interpolation", "natural")
+            resolved_interpolate = data_config.get("interpolation", "cubic")
         if resolved_use_intensity is None:
             resolved_use_intensity = bool(data_config.get("use_intensity", False))
 
     if resolved_interpolate is None:
-        resolved_interpolate = "natural"
+        resolved_interpolate = "cubic"
     if resolved_use_intensity is None:
         resolved_use_intensity = True
 

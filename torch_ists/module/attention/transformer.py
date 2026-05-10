@@ -57,13 +57,16 @@ class TransformerBackbone(nn.Module):
         self.seq_layer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
         self.transformer_out = nn.Linear(hidden_dim, hidden_dim)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        src_key_padding_mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         hn = self.transformer_in(x)
         hn = self.positional_encoding(hn)
-        hn = self.seq_layer(hn)
+        hn = self.seq_layer(hn, src_key_padding_mask=src_key_padding_mask)
         out = self.transformer_out(hn)
         return out
 
 
 __all__ = ["PositionalEncoding", "TransformerBackbone"]
-

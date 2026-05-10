@@ -78,13 +78,12 @@ def _enforce_active_scope_or_raise(model_name: str, *, allow_flow_extension: boo
 
 
 def _normalize_model_name_or_raise(model_name: str) -> str:
-    # Alias normalization SoT:
+    # Alias normalization mapping:
     # - flow aliases: config.alias_policy.normalize_flow_alias
     # - SDE aliases: config.models.SDE_MODEL_ALIASES
     if model_name == "latentsde-kl":
         raise ValueError(
             "Model 'latentsde-kl' is not available in this package. "
-            "This preview package does not include LatentSDE. "
             "Use get_active_model_list() to see the list of available models."
         )
     normalized_flow_name = normalize_flow_alias(model_name)

@@ -1,4 +1,4 @@
-"""Neural SDE solver wrapper for Tier1 SDE baselines."""
+"""Neural SDE solver wrapper for the packaged SDE runtime models."""
 
 from __future__ import annotations
 
@@ -66,4 +66,3 @@ class NeuralSDE(torch.nn.Module):
         out = self.linear(z)
         hn = z[:, -1, :]
         return out, hn
-

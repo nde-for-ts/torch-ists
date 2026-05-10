@@ -44,8 +44,22 @@ each model comes from and which upstream implementation our copy is based on.
 | `bilstm` | Bidirectional LSTM baseline | Plain bidirectional `nn.LSTM` (this package) |
 | `gru-simple` | Simplified GRU baseline | Plain `nn.GRU` baseline variant (this package) |
 
-These baselines do not invoke any ODE / CDE / SDE solver. They consume the
-`(values, mask, time-deltas)` channel stack as a regular tensor.
+These baselines do not invoke any ODE / CDE / SDE solver and do not consume
+interpolation coefficients. They consume the `(values, mask, time-deltas)`
+channel stack as a regular tensor, and the packaged runtime replaces `NaN`
+values with `0.0` before the backbone forward pass.
+
+**Blind-spot note.** `cnn`, `rnn`, `lstm`, `gru`, and `bilstm` are
+intentionally naive baselines in this package. The mask channel is available
+in the input tensor but is not consumed by these backbones at forward time.
+After `nan_to_num(..., nan=0.0)`, the model cannot distinguish a true zero or
+normalized-mean value from a missing position. In the bundled scripts, the
+sequence values are z-scored with training-only statistics before this step,
+so the fallback is mathematically equivalent to per-channel mean imputation in
+raw value space. Outside that normalized workflow it is literal zero-fill.
+When missingness awareness matters, prefer the packaged alternatives:
+`gru-simple`, `tlstm` / `plstm` / `tglstm`, `gru-d`, `gru-dt`, and the ODE /
+CDE / SDE families.
 
 ---
 
@@ -54,10 +68,23 @@ These baselines do not invoke any ODE / CDE / SDE solver. They consume the
 | Model | Origin | Implementation in this package |
 |---|---|---|
 | `transformer` | Transformer encoder baseline ([*Attention Is All You Need*, 2017](https://arxiv.org/abs/1706.03762)) | Packaged sequence-attention bridge routed through `AttentionHandler` with a fixed classifier head for irregular time-series classification |
+| `transformer-mask` | Packaged attention variant built on the same Transformer encoder backbone as `transformer` | Zero-fill sequence-attention variant that additionally applies `src_key_padding_mask` from the packaged observation mask before the classifier head |
 
-`transformer` is the only attention-backed model included in `0.1.1`. The
-broader attention family (`miam`, `mtan`, `sand`) remains outside the current
-public package scope.
+Version `0.1.1` includes two attention-backed rows. Both use the direct
+sequence stack and do not consume interpolation coefficients in the packaged
+runtime.
+
+**Blind-spot note.** The packaged `transformer` follows the same naive
+missing-data treatment as the sequence baselines: it zero-fills `NaN`,
+ignores interpolation coefficients, and does not apply
+`src_key_padding_mask` in the current runtime. Use it as a direct attention
+baseline rather than a missingness-aware attention model.
+
+**Masked variant note.** `transformer-mask` keeps the same backbone and
+zero-fill preprocessing, but it applies `src_key_padding_mask` using the
+packaged observation mask. Treat it as a package-specific mitigation variant,
+not as a separate external paper-backed method. The broader attention family
+(`miam`, `mtan`, `sand`) remains outside the current public package scope.
 
 ---
 
@@ -148,6 +175,9 @@ reference architectures and are not bound to any single paper claim.
 
 For continuous-time rows in this package, prefer `preprocess(X, model_name=...)`
 so interpolation mode and channel count match the selected model by default.
+Sequence baselines, `transformer`, `transformer-mask`, `ode-lstm`, `ode-rnn`,
+`latentode`, and `gru-ode-bayes` can use the direct sequence stack with
+`coeffs=None`.
 
 ---
 

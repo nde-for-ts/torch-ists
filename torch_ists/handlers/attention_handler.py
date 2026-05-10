@@ -13,15 +13,16 @@ from .base import BaseHandler
 class AttentionHandler(BaseHandler):
     """Handler for attention-based time series models.
 
-    Supports 4 models:
+    Supports 5 models:
     - transformer: vanilla transformer backbone
+    - transformer-mask: transformer backbone with padding-mask-aware attention
     - miam: Missing Information Attention Model
     - mtan: Multi-Time Attention Network
     - sand: Simply Attend and Diagnose
     """
 
     name: str = "attention"
-    ATTENTION_MODELS = {"transformer", "miam", "mtan", "sand"}
+    ATTENTION_MODELS = {"transformer", "transformer-mask", "miam", "mtan", "sand"}
 
     def can_handle(self, model_name: str) -> bool:
         return model_name in self.ATTENTION_MODELS
@@ -42,7 +43,7 @@ class AttentionHandler(BaseHandler):
         seq_len = int(config.get("seq_len", 100))
         dropout = float(config.get("dropout", 0.1))
 
-        if model_name == "transformer":
+        if model_name in {"transformer", "transformer-mask"}:
             from ..module.attention import TransformerBackbone
 
             model = TransformerBackbone(
@@ -114,8 +115,12 @@ class AttentionHandler(BaseHandler):
         x = torch.nan_to_num(data["x"], nan=0.0)
         seq_ts = data["seq_ts"]
 
-        if model_name in {"transformer", "sand"}:
-            result = model(x)
+        if model_name in {"transformer", "transformer-mask", "sand"}:
+            if model_name == "transformer-mask":
+                attention_mask = data["seq_mask"] <= 0
+                result = model(x, src_key_padding_mask=attention_mask)
+            else:
+                result = model(x)
             if isinstance(result, tuple) and len(result) == 2:
                 out, hn = result
             else:

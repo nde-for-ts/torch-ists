@@ -114,7 +114,7 @@ DEFAULT_SOLVER_SDE: SolverConfig = {
 }
 
 DEFAULT_DATA: DataConfig = {
-    "interpolation": "natural",
+    "interpolation": "cubic",
     "use_intensity": True,
 }
 

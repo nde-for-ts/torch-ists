@@ -6,6 +6,7 @@
 > **Status**: Public package reference
 > **Scope**: Exported runtime APIs and packaged scripts shipped in `0.1.1`
 > **Note**: This document describes the public `0.1.1` package release. Features outside the model and task lists below are not part of this package contract.
+> **Policy**: This API reference intentionally stays narrow and appendix-free.
 
 ---
 
@@ -417,7 +418,7 @@ def preprocess(
 |-----------|------|---------|-------------|
 | `X` | `np.ndarray` or `torch.Tensor` | (required) | Input data `[N, D, L]` |
 | `missing_rate` | `Optional[float]` | `None` | Missing rate (0-1, None=skip missingness) |
-| `interpolate` | `Optional[str]` | `None` | Interpolation mode (`natural`/`linear`/`rectilinear`/`cubic`/`hermite`). If omitted and `model_name` is not set, defaults to `natural`. |
+| `interpolate` | `Optional[str]` | `None` | Interpolation mode (`natural`/`linear`/`rectilinear`/`cubic`/`hermite`). If omitted and `model_name` is not set, defaults to `cubic`. |
 | `use_intensity` | `Optional[bool]` | `None` | Whether to include intensity channels. If omitted and `model_name` is not set, defaults to `True` for backward compatibility. |
 | `seed` | `int` | `0` | RNG seed used when synthetic missingness is injected. |
 | `channel_sync` | `bool` | `False` | If `True`, synchronize injected missing positions across channels. |
@@ -450,17 +451,17 @@ X_missing, X_mask, X_delta, coeffs = preprocess(
 When `model_name` is set, `interpolate` and `use_intensity` default to
 `get_data_config(model_name)`. Explicit values for those kwargs still override
 the model-derived defaults. If `model_name` is omitted, the legacy defaults
-remain `interpolate="natural"` and `use_intensity=True`.
+remain `interpolate="cubic"` and `use_intensity=True`.
 
 #### Interpolation Modes
 
 | Mode | Method | Use Case |
 |------|--------|----------|
-| `'natural'` | Natural cubic spline | Default when neither `interpolate` nor `model_name` resolves a different mode |
+| `'natural'` | Natural cubic spline | Source-natural control-path families such as `neuralcde`, `gru-d*`, and advanced CDE rows |
 | `'linear'` | Linear interpolation | Fast, piecewise linear |
 | `'rectilinear'` | Rectilinear linear interpolation | Stepwise observation paths |
-| `'cubic'` | Cubic spline | Smooth curves |
-| `'hermite'` | Hermite cubic spline | SDE models (auto-selected) |
+| `'cubic'` | Cubic spline | Global fallback and coeff scaffolding for basic/attention rows |
+| `'hermite'` | Hermite cubic spline | SDE/TSDE/DSDE families (auto-selected) |
 
 ---
 
@@ -685,6 +686,14 @@ Behavior notes:
   effective solver behavior after argument normalization remains
   family-specific; version `0.1.1` does not promise one package-wide default
   across ODE/CDE/SDE families.
+- For sequence baselines and `transformer`, the packaged runtime applies
+  `torch.nan_to_num(..., nan=0.0)` before the backbone call and does not pass
+  a padding mask into the attention backbone.
+- `transformer-mask` uses the same zero-filled values, but it also applies
+  `src_key_padding_mask` derived from the packaged observation mask.
+- In the bundled script pipeline, train-only z-score normalization makes this
+  zero-fill path behave like per-channel mean imputation in raw value space;
+  outside that workflow it is literal zero-fill.
 - Non-finite backbone outputs, hidden states, or logits raise `RuntimeError`; the package does not silently zero-fill them.
 
 ### 6.2 `ists_model` (Experimental)
@@ -736,6 +745,14 @@ Behavior notes:
 - `method` is accepted for continuous-time backbones, but effective
   `dt/step_size/rtol/atol/adjoint` behavior remains family-specific and should
   not be read as a single global runtime default contract.
+- For sequence baselines and `transformer`, the packaged runtime applies
+  `torch.nan_to_num(..., nan=0.0)` before the backbone call and does not pass
+  a padding mask into the attention backbone.
+- `transformer-mask` uses the same zero-filled values, but it also applies
+  `src_key_padding_mask` derived from the packaged observation mask.
+- In the bundled script pipeline, train-only z-score normalization makes this
+  zero-fill path behave like per-channel mean imputation in raw value space;
+  outside that workflow it is literal zero-fill.
 - Some continuous-time rows honor `method` only at model creation.
 - Some compatibility models accept solver-shaped inputs only for backward compatibility and may emit a runtime warning.
 - Unsupported solver knobs raise `ValueError` instead of silently changing family behavior.
@@ -796,7 +813,8 @@ available from `torch_ists.config.models`.
 
 ### 7.1 `get_data_config()`
 
-Get model-specific data preprocessing settings.
+Get model-specific preprocessing settings used by
+`preprocess(X, model_name=...)`.
 
 #### Signature
 
@@ -810,14 +828,23 @@ def get_data_config(model_name: str) -> Dict[str, Any]:
 - `'interpolation'`: `str` - Interpolation mode (`'natural'`, `'linear'`, `'rectilinear'`, `'cubic'`, `'hermite'`)
 - `'use_intensity'`: `bool` - Compute intensity channel
 
+`get_data_config()` describes the defaults that `preprocess()` applies when a
+`model_name` is provided. It does not mean every packaged model consumes the
+returned interpolation coefficients at forward time.
+
 #### Rules
 
-| Package scope | `interpolation` | `use_intensity` |
-|------------|--------------|---------------|
-| `cnn`, `rnn`, `lstm`, `gru` | `'hermite'` | `False` |
-| `neuralcde` | `'natural'` | `False` |
-| `neuralcde-l/r/c/h` | override (`linear/rectilinear/cubic/hermite`) | `False` |
-| `naive_cde`, `neural_ode`, `neural_ode_t`, `neural_sde`, `neural_sde_t`, `neural_lsde`, `neural_lnsde`, `neural_gsde` | `'hermite'` | `False` |
+| Packaged row(s) | `interpolation` | `use_intensity` | Runtime note |
+|------------|--------------|---------------|--------------|
+| `cnn`, `rnn`, `lstm`, `gru`, `bilstm`, `gru-simple`, `transformer` | `'cubic'` | `False` | `coeffs` ignored; packaged handlers use the sequence stack directly, replace `NaN` with `0.0`, and do not apply an attention padding mask |
+| `transformer-mask` | `'cubic'` | `False` | `coeffs` ignored; packaged handler uses the sequence stack directly, replaces `NaN` with `0.0`, and applies `src_key_padding_mask` from the packaged observation mask |
+| `neuralcde` | `'natural'` | `False` | consumes `coeffs` |
+| `neuralcde-l/r/c/h` | override (`linear/rectilinear/cubic/hermite`) | `False` | consumes `coeffs` |
+| `gru-d`, `gru-dt`, `ode-rnn-spline` | `'natural'` | `True` | consumes `coeffs` with intensity channels |
+| `gru-ode` | `'natural'` | `False` | consumes `coeffs` |
+| `ode-lstm` | `'cubic'` | `False` | packaged handler ignores `coeffs`; uses values, timestamps, and mask directly |
+| `ode-rnn`, `latentode`, `gru-ode-bayes` | `'natural'` | `False` | packaged handler ignores `coeffs`; uses the sequence stack and reconstructed times directly |
+| `naive_cde`, `neural_ode`, `neural_ode_t`, `neural_sde`, `neural_sde_t`, `neural_lsde`, `neural_lnsde`, `neural_gsde` | `'hermite'` | `False` | consumes `coeffs` |
 
 #### Example
 
@@ -831,9 +858,22 @@ print(config)  # {'interpolation': 'hermite', 'use_intensity': False}
 # CDE model
 config = get_data_config('neuralcde')
 print(config)  # {'interpolation': 'natural', 'use_intensity': False}
+
+# Sequence baseline
+config = get_data_config('cnn')
+print(config)  # {'interpolation': 'cubic', 'use_intensity': False}
 ```
 
 If `ists_classifier()` or `ists_model()` is called with `use_intensity=None`, the runtime resolves the flag from this policy.
+
+For sequence baselines, `transformer`, and `transformer-mask`, this policy
+mainly matters when you call `preprocess(X, model_name=...)`; the packaged
+forward path still uses `coeffs=None`. In those rows, `'cubic'` is a
+preprocessing contract rather than a control-path runtime contract. The
+packaged runtime zero-fills `NaN` before the backbone call, and
+`transformer-mask` additionally applies `src_key_padding_mask`. In the bundled
+scripts, prior train-only z-score normalization makes this behave like
+per-channel mean imputation in raw value space.
 
 This reference documents only the locked `0.1.1` package scope. Names outside
 the model list above are not part of the public package contract.
@@ -878,8 +918,10 @@ This API reference intentionally stays narrow and appendix-free.
 
 - For the packaged model roster, per-family origin notes, and current package exclusions, use [Model Reference v0.1.1](model_reference_v0.1.1.md).
 - For bundled CLI scripts, flags, output artifacts, and pipeline order, use [Scripts Reference v0.1.1](scripts_reference_v0.1.1.md).
-- For installation and the public package overview, use the [package README](../README.md).
+- For installation and the public package overview, use the [package README](../README_public.md).
 
 ---
 
 **End of API Reference v0.1.1**
+
+**End of Package API Reference v0.1.1**

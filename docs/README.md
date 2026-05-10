@@ -30,5 +30,4 @@ Reference docs for the public `0.1.1` package release.
 
 - classification is the primary supported packaged workflow
 - the bundled scripts cover split creation, parameter search, and evaluation
-- version `0.1.1` adds the basic/attention bridge: `bilstm`, `gru-simple`, `transformer`
-- flow-family, LatentSDE, custom-data, and TSDE-family backbones remain outside version `0.1.1`
+- the docs in this directory describe the models and scripts shipped in version `0.1.1`

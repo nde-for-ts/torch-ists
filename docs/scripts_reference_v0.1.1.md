@@ -111,7 +111,7 @@ python scripts/param_search.py \
 | `--seed` | `int` | `0` | Global seed for split selection and reproducibility. |
 | `--datasets` | `str` | (required) | Comma-separated dataset list. |
 | `--dataset-source` | `str` | `default` | Dataset source backend (`{default}`). |
-| `--models` | `str` | (active list) | Comma-separated model list. Defaults to `get_active_model_list()` (28 active models in v0.1.1). |
+| `--models` | `str` | (active list) | Comma-separated model list. Defaults to `get_active_model_list()` (29 active models in v0.1.1). |
 | `--missing-rate` | `float` | `0.0` | Single missing rate applied uniformly during tuning. |
 | `--num-samples` | `int` | `20` | Ray Tune `num_samples` — hyperparameter trial budget. |
 | `--max-num-epochs` | `int` | `10` | Per-trial training budget. |

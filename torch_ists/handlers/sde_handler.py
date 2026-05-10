@@ -1,4 +1,4 @@
-"""SDEHandler for Tier1 SDE baseline models."""
+"""SDEHandler for the current packaged SDE runtime models."""
 
 from __future__ import annotations
 
@@ -21,9 +21,9 @@ from ..module.sde import SDEModel
 
 
 class SDEHandler(BaseHandler):
-    """Handler for SDE-family baseline models.
+    """Handler for the packaged SDE runtime family.
 
-    Supported models (Tier1 baseline 8):
+    Supported models:
     - neural_lsde, neural_lnsde, neural_gsde
     - naive_cde, neural_ode, neural_ode_t
     - neural_sde, neural_sde_t

@@ -9,6 +9,7 @@ models:
   - bilstm
   - gru-simple
   - transformer
+  - transformer-mask
   - neuralcde
   - neuralcde-l
   - neuralcde-r

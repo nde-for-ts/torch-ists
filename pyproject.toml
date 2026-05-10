@@ -52,8 +52,8 @@ ode = [
     "torchdyn>=1.0.6",
 ]
 
-# CDE models: neuralcde, neuralcde-l/r/c/h
-# (ancde / exit / leap are in the wider release scope but not part of v0.1.0)
+# CDE models included in the packaged 0.1.1 public scope:
+# neuralcde, neuralcde-l/r/c/h
 cde = [
     "torchdiffeq>=0.2.2",
     "torchcde>=0.2.5",
