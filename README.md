@@ -1,29 +1,23 @@
 # torch-ists
 
-**PyTorch toolkit for irregular time series classification with neural ODE, CDE, and SDE models.**
-
-[![Python](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/)
-[![PyTorch](https://img.shields.io/badge/pytorch-2.0+-orange.svg)](https://pytorch.org/)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](#license)
-[![Status](https://img.shields.io/badge/status-preview-yellow.svg)](#project-status)
-[![Site](https://img.shields.io/badge/site-nde--for--ts-informational.svg)](https://nde-for-ts.github.io/)
+**PyTorch toolkit for irregular time series classification with neural ODE, CDE, SDE, and attention models.**
 
 **Related docs**:
 [Docs index](docs/README.md) ·
-[API Reference v0.1.0](docs/api_reference_v0.1.0.md) ·
-[Model Reference v0.1.0](docs/model_reference_v0.1.0.md) ·
+[API Reference v0.1.1](docs/api_reference_v0.1.1.md) ·
+[Model Reference v0.1.1](docs/model_reference_v0.1.1.md) ·
+[Scripts Reference v0.1.1](docs/scripts_reference_v0.1.1.md) ·
 [Project site](https://nde-for-ts.github.io/)
 
 ## Overview
 
 `torch-ists` provides a unified interface for training and evaluating neural
 differential equation models on irregularly-sampled multivariate time series.
-Version `0.1.0` ships 25 packaged architectures across sequence, CDE, ODE,
-and SDE families, including the **Stable Neural SDE** family from
-[Oh et al., ICLR 2024](https://openreview.net/forum?id=4VIgNuQ1pY).
+Version `0.1.1` ships 28 packaged architectures across sequence, attention,
+CDE, ODE, and SDE families.
 
 The package centers on the `ists_classifier` classification path. The
-lower-level `ists_model` constructor is also available for advanced
+lower-level `ists_model` constructor remains available for advanced
 experimentation.
 
 ## Installation
@@ -50,13 +44,13 @@ PYTHONNOUSERSITE=1 python -m pip install -e .[tune]
 # ODE backends
 PYTHONNOUSERSITE=1 python -m pip install -e .[ode]
 
-# CDE backends (packaged NeuralCDE path uses both torchcde and torchdiffeq)
+# CDE backends
 PYTHONNOUSERSITE=1 python -m pip install -e .[cde]
 
 # SDE backends
 PYTHONNOUSERSITE=1 python -m pip install -e .[sde]
 
-# Full optional stack for the continuous-time models included in version 0.1.0
+# Full optional stack for the continuous-time models included in version 0.1.1
 PYTHONNOUSERSITE=1 python -m pip install -e .[all]
 ```
 
@@ -69,7 +63,7 @@ from torch_ists import ists_classifier, set_global_seed
 set_global_seed(0)
 
 model = ists_classifier(
-    model_name="cnn",
+    model_name="transformer",
     num_class=2,
     input_dim=8,
     seq_len=64,
@@ -91,173 +85,36 @@ python scripts/model_run.py
 
 ## Models Included
 
-Version `0.1.0` includes 25 models across six families:
+Version `0.1.1` includes 28 models across seven families:
 
 | Family | Models |
 |--------|--------|
-| **Sequence baselines** | `cnn`, `rnn`, `lstm`, `gru` |
-| **ODE runtime family** | `gru-dt`¹, `gru-d`¹, `gru-ode`², `ode-rnn-spline`², `ode-lstm` |
+| **Sequence baselines** | `cnn`, `rnn`, `lstm`, `gru`, `bilstm`, `gru-simple` |
+| **Attention bridge** | `transformer` |
+| **Neural CDE** | `neuralcde`, `neuralcde-l`, `neuralcde-r`, `neuralcde-c`, `neuralcde-h` |
+| **ODE runtime family** | `gru-dt`, `gru-d`, `gru-ode`, `ode-rnn-spline`, `ode-lstm` |
 | **Additional ODE models** | `ode-rnn`, `latentode`, `gru-ode-bayes` |
-| **Neural CDE**³ | `neuralcde`, `neuralcde-l`, `neuralcde-r`, `neuralcde-c`, `neuralcde-h` |
-| **Continuous-time baselines**⁴ | `naive_cde`, `neural_ode`, `neural_ode_t`, `neural_sde`, `neural_sde_t` |
-| **Stable Neural SDE** ([Oh et al., 2024](https://openreview.net/forum?id=4VIgNuQ1pY)) | `neural_lsde`, `neural_lnsde`, `neural_gsde` |
-
-> ¹ `gru-d` / `gru-dt` are missing-data-aware GRU variants re-implemented
-> from the [NeuralCDE](https://github.com/patrick-kidger/NeuralCDE) baseline
-> code ([*Neural Controlled Differential Equations*, NeurIPS 2020](https://arxiv.org/abs/2005.08926)).
-> Canonical GRU-D: [*Recurrent Neural Networks for Multivariate Time Series
-> with Missing Values* (Sci. Rep. 2018)](https://arxiv.org/abs/1606.01865)
-> ([repo](https://github.com/Han-JD/GRU-D)).
->
-> ² `gru-ode` / `ode-rnn-spline` are **package names** for NeuralCDE-style
-> variants on the same infrastructure as note ¹ (`controldiffeq` + natural
-> cubic spline). They share method families with the canonical
-> implementations in *Additional ODE models*:
-> [*GRU-ODE-Bayes* (NeurIPS 2019)](https://arxiv.org/abs/1905.12374)
-> ([repo](https://github.com/edebrouwer/gru_ode_bayes)) and
-> [*Latent ODEs for Irregularly-Sampled Time Series* (NeurIPS 2019)](https://arxiv.org/abs/1907.03907)
-> ([repo](https://github.com/YuliaRubanova/latent_ode)). `latentode` is the
-> encoder–decoder Latent ODE from the same paper — a distinct model.
->
-> ³ `neuralcde` uses the original `controldiffeq` reference path; the
-> `-l/-r/-c/-h` variants (linear / rectilinear / cubic / hermite) use
-> [torchcde](https://github.com/patrick-kidger/torchcde), the maintained
-> follow-up library.
->
-> ⁴ Baseline-lineage models implemented on
-> [torchsde](https://github.com/google-research/torchsde); the `_t`
-> suffix adds explicit time conditioning. `naive_cde` is a control-path
-> baseline for SDE-handler comparisons.
-
-See [`docs/model_reference_v0.1.0.md`](docs/model_reference_v0.1.0.md) for
-the full per-model origin/repo table, and
-[`docs/api_reference_v0.1.0.md`](docs/api_reference_v0.1.0.md) for the API
-specification.
-
-## Features
-
-- Unified handler architecture across sequence, CDE, ODE, and SDE families
-- Reproducible train/validation/test splits with stratification
-- Missing-data injection (MCAR) and robustness evaluation utilities
-- Hyperparameter search via Ray Tune
-- Standalone numpy data loading
+| **Continuous-time baselines** | `naive_cde`, `neural_ode`, `neural_ode_t`, `neural_sde`, `neural_sde_t` |
+| **Stable Neural SDE** | `neural_lsde`, `neural_lnsde`, `neural_gsde` |
 
 ## Packaged Scripts
 
 - `scripts/set_splits.py` — generate reproducible train/validation/test splits
-- `scripts/param_search.py` — Ray Tune-based parameter search for packaged
-  models and datasets
+- `scripts/param_search.py` — Ray Tune-based parameter search for packaged models and datasets
 - `scripts/model_run.py` — train and evaluate a selected packaged model
-
-For the bundled `0.1.0` command-line workflow, continuous-time models use
-model-specific default solvers. Most users can leave those defaults unchanged.
-Advanced solver arguments are mainly for custom experiments, and unsupported
-solver settings raise `ValueError` instead of being ignored silently.
 
 ## Documentation
 
-- [Docs index](docs/README.md) — table of contents and install notes
-- [API Reference](docs/api_reference_v0.1.0.md) — module / class / function reference
-- [Model Reference](docs/model_reference_v0.1.0.md) — origin paper, canonical
-  repo, and implementation notes for each model
-- [Quick Start tutorial](docs/api_reference_v0.1.0.md#1-quick-start) — minimal
-  example walkthrough
-- [Project site](https://nde-for-ts.github.io/) — overview, papers, and related work
+- `docs/README.md` — docs index for the current public package
+- `docs/api_reference_v0.1.1.md` — exported runtime API and packaged script contract
+- `docs/model_reference_v0.1.1.md` — per-model origin paper, canonical repo, and implementation note
+- `docs/scripts_reference_v0.1.1.md` — bundled CLI scripts: flags, outputs, and pipeline order
 
 ## Project Status
 
-This is a **preview** release (`v0.1.0`):
+This is a **preview** release (`v0.1.1`):
 
 - Core classification pipeline is reproducible
-- All 25 packaged models pass smoke and integration tests
-- Validation across supported environments is in progress
-- Custom-data workflows, additional model families (Flow, LatentSDE, TSDE), and
-  stable/parity-verified claims are planned for future releases
-
-`ists_classifier` is the primary supported entry point for classification.
-Additional task modes exposed by `ists_model` are available for advanced use,
-but they are experimental and may change in future releases.
-
-## Citation
-
-If you use this package in academic work, please cite the following papers:
-
-**Stable Neural SDE (ICLR 2024)** — [arXiv:2402.14989](https://arxiv.org/abs/2402.14989)
-
-```bibtex
-@inproceedings{oh_stable_2024,
-    title     = {Stable {Neural} {Stochastic} {Differential} {Equations}
-                 in {Analyzing} {Irregular} {Time} {Series} {Data}},
-    author    = {Oh, YongKyung and Lim, Dong-Young and Kim, Sungil},
-    year      = 2024,
-    month     = may,
-    booktitle = {The {Twelfth} {International} {Conference} on
-                 {Learning} {Representations}, {ICLR} 2024,
-                 {Vienna}, {Austria}, {May} 7-11, 2024},
-    publisher = {OpenReview.net},
-    url       = {https://arxiv.org/abs/2402.14989}
-}
-```
-
-**DualDynamics (AAAI 2025)** — [arXiv:2401.04979](https://arxiv.org/abs/2401.04979)
-
-```bibtex
-@inproceedings{oh_dualdynamics_2025,
-    title      = {{DualDynamics}: {Synergizing} {Implicit} and {Explicit}
-                  {Methods} for {Robust} {Irregular} {Time} {Series} {Analysis}},
-    shorttitle = {{DualDynamics}},
-    author     = {Oh, YongKyung and Lim, Dong-Young and Kim, Sungil},
-    year       = 2025,
-    month      = feb,
-    booktitle  = {{AAAI}-25, {Sponsored} by the {Association} for the
-                  {Advancement} of {Artificial} {Intelligence},
-                  {February} 25 - {March} 4, 2025,
-                  {Philadelphia}, {PA}, {USA}},
-    publisher  = {AAAI Press},
-    pages      = {19730--19739},
-    doi        = {10.1609/aaai.v39i18.34173},
-    editor     = {Walsh, Toby and Shah, Julie and Kolter, Zico},
-    url        = {https://arxiv.org/abs/2401.04979}
-}
-```
-
-**Neural Differential Equations Survey (IJCAI 2025)** — [arXiv:2502.09885](https://arxiv.org/abs/2502.09885)
-
-```bibtex
-@inproceedings{oh_comprehensive_2025,
-    title     = {Comprehensive {Review} of {Neural} {Differential}
-                 {Equations} for {Time} {Series} {Analysis}},
-    author    = {Oh, YongKyung and Kam, Seungsu and Lee, Jonghun and
-                 Lim, Dong-Young and Kim, Sungil and Bui, Alex A. T.},
-    year      = 2025,
-    month     = aug,
-    booktitle = {Proceedings of the {Thirty}-{Fourth} {International}
-                 {Joint} {Conference} on {Artificial} {Intelligence},
-                 {IJCAI}-25},
-    publisher = {International Joint Conferences on
-                 Artificial Intelligence Organization},
-    pages     = {10621--10631},
-    doi       = {10.24963/ijcai.2025/1179},
-    editor    = {Kwok, James},
-    note      = {Survey Track},
-    url       = {https://arxiv.org/abs/2502.09885}
-}
-```
-
-## License
-
-Released under the [MIT License](https://opensource.org/licenses/MIT).
-Copyright © 2024-2026 YongKyung Oh.
-
-## Acknowledgments
-
-Built on top of [PyTorch](https://pytorch.org/),
-[torchdiffeq](https://github.com/rtqichen/torchdiffeq),
-[torchcde](https://github.com/patrick-kidger/torchcde),
-[torchsde](https://github.com/google-research/torchsde), and
-[diffrax](https://github.com/patrick-kidger/diffrax).
-
-Several baseline models reuse code from
-[NeuralCDE](https://github.com/patrick-kidger/NeuralCDE).
-See the [Model Reference](docs/model_reference_v0.1.0.md) for per-model
-upstream sources.
+- The current public line includes the basic/attention bridge (`bilstm`, `gru-simple`, `transformer`)
+- Custom-data, custom-model, flow-family, LatentSDE, and TSDE-family backbones remain outside version `0.1.1`
+- Stable/parity-verified claims remain outside the preview package scope

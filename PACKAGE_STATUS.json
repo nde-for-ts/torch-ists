@@ -1,6 +1,6 @@
 {
   "package_stage": "preview",
-  "package_version": "0.1.0",
-  "scope": "basic runtime, NeuralCDE, ODE family, SDE baseline/stable SDE, and core classification pipeline",
-  "included_models": ["cnn", "rnn", "lstm", "gru", "neuralcde", "neuralcde-l", "neuralcde-r", "neuralcde-c", "neuralcde-h", "gru-dt", "gru-d", "gru-ode", "ode-rnn-spline", "ode-lstm", "ode-rnn", "latentode", "gru-ode-bayes", "naive_cde", "neural_ode", "neural_ode_t", "neural_sde", "neural_sde_t", "neural_lsde", "neural_lnsde", "neural_gsde"]
+  "package_version": "0.1.1",
+  "scope": "basic runtime, attention bridge, NeuralCDE, ODE family, SDE baseline/stable SDE, and core classification pipeline",
+  "included_models": ["cnn", "rnn", "lstm", "gru", "bilstm", "gru-simple", "transformer", "neuralcde", "neuralcde-l", "neuralcde-r", "neuralcde-c", "neuralcde-h", "gru-dt", "gru-d", "gru-ode", "ode-rnn-spline", "ode-lstm", "ode-rnn", "latentode", "gru-ode-bayes", "naive_cde", "neural_ode", "neural_ode_t", "neural_sde", "neural_sde_t", "neural_lsde", "neural_lnsde", "neural_gsde"]
 }

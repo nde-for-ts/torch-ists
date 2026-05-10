@@ -6,6 +6,9 @@ models:
   - rnn
   - lstm
   - gru
+  - bilstm
+  - gru-simple
+  - transformer
   - neuralcde
   - neuralcde-l
   - neuralcde-r

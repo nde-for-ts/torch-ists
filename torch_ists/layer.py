@@ -2,7 +2,7 @@
 
 Architecture:
 - Handler pattern: HandlerRegistry routes model creation to handlers.
-- Supported handlers: BasicHandler + SourceODEHandler + ODEHandler + ODELSTMHandler + CDEHandler + SDEHandler.
+- Supported handlers: BasicHandler + SourceODEHandler + ODEHandler + ODELSTMHandler + CDEHandler + SDEHandler + AttentionHandler.
 - Standalone: self-contained handlers and module implementations.
 
 Behavior notes:

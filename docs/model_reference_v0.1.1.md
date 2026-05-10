@@ -1,19 +1,20 @@
-# torch-ists Model Reference v0.1.0
+# torch-ists Model Reference v0.1.1
 
-> **Reference Version**: 0.1.0 (matches package version)
-> **Package Version**: 0.1.0
+> **Reference Version**: 0.1.1 (matches package version)
+> **Package Version**: 0.1.1
 > **Date**: 2026-05-10
 > **Scope**: Origin paper, canonical repository, and implementation note for
-> every model shipped in `v0.1.0`.
+> every model shipped in `v0.1.1`.
 
 **Related docs**:
 [Package overview](../README.md) ·
 [Docs index](README.md) ·
-[API Reference v0.1.0](api_reference_v0.1.0.md) ·
+[API Reference v0.1.1](api_reference_v0.1.1.md) ·
+[Scripts Reference v0.1.1](scripts_reference_v0.1.1.md) ·
 [Project site](https://nde-for-ts.github.io/)
 
 This document is a companion to
-[`api_reference_v0.1.0.md`](api_reference_v0.1.0.md). Use the API reference
+[`api_reference_v0.1.1.md`](api_reference_v0.1.1.md). Use the API reference
 for class signatures and call patterns; use this document to look up where
 each model comes from and which upstream implementation our copy is based on.
 
@@ -22,12 +23,13 @@ each model comes from and which upstream implementation our copy is based on.
 ## Table of Contents
 
 1. [Sequence baselines](#1-sequence-baselines)
-2. [ODE runtime family](#2-ode-runtime-family)
-3. [Additional ODE models](#3-additional-ode-models)
-4. [Neural CDE](#4-neural-cde)
-5. [SDE baselines](#5-sde-baselines)
-6. [Stable Neural SDE](#6-stable-neural-sde)
-7. [How to cite](#7-how-to-cite)
+2. [Attention bridge](#2-attention-bridge)
+3. [ODE runtime family](#3-ode-runtime-family)
+4. [Additional ODE models](#4-additional-ode-models)
+5. [Neural CDE](#5-neural-cde)
+6. [SDE baselines](#6-sde-baselines)
+7. [Stable Neural SDE](#7-stable-neural-sde)
+8. [How to cite](#8-how-to-cite)
 
 ---
 
@@ -39,13 +41,27 @@ each model comes from and which upstream implementation our copy is based on.
 | `rnn` | Standard RNN baseline | Plain `nn.RNN` (this package) |
 | `lstm` | Hochreiter & Schmidhuber, *Long Short-Term Memory* (1997) | Plain `nn.LSTM` (this package) |
 | `gru` | Cho et al., *Learning Phrase Representations using RNN Encoder–Decoder* (2014) | Plain `nn.GRU` (this package) |
+| `bilstm` | Bidirectional LSTM baseline | Plain bidirectional `nn.LSTM` (this package) |
+| `gru-simple` | Simplified GRU baseline | Plain `nn.GRU` baseline variant (this package) |
 
 These baselines do not invoke any ODE / CDE / SDE solver. They consume the
 `(values, mask, time-deltas)` channel stack as a regular tensor.
 
 ---
 
-## 2. ODE runtime family
+## 2. Attention bridge
+
+| Model | Origin | Implementation in this package |
+|---|---|---|
+| `transformer` | Transformer encoder baseline ([*Attention Is All You Need*, 2017](https://arxiv.org/abs/1706.03762)) | Packaged sequence-attention bridge routed through `AttentionHandler` with a fixed classifier head for irregular time-series classification |
+
+`transformer` is the only attention-backed model included in `0.1.1`. The
+broader attention family (`miam`, `mtan`, `sand`) remains outside the current
+public package scope.
+
+---
+
+## 3. ODE runtime family
 
 This section mixes two ODE-family slices that are both shipped in the public
 package.
@@ -77,11 +93,11 @@ package.
   read as different implementations within the same broader method families.
 - The rows in this section keep the packaged NeuralCDE-style implementations.
 - The repo-backed reference implementations are listed separately in
-  [§3](#3-additional-ode-models).
+  [§4](#4-additional-ode-models).
 
 ---
 
-## 3. Additional ODE models
+## 4. Additional ODE models
 
 Canonical implementations from the original papers / repositories.
 
@@ -98,7 +114,7 @@ observations; `latentode` is the encoder–decoder Latent ODE that uses
 
 ---
 
-## 4. Neural CDE
+## 5. Neural CDE
 
 | Model | Interpolation | Underlying library | Origin |
 |---|---|---|---|
@@ -115,7 +131,7 @@ suffix selects the interpolation scheme used to build the control path.
 
 ---
 
-## 5. SDE baselines
+## 6. SDE baselines
 
 | Model | Origin | Implementation in this package |
 |---|---|---|
@@ -130,9 +146,12 @@ with cubic-spline interpolation built via `torchcde`). The four `neural_*`
 entries are baseline-lineage models — they exist in this package as
 reference architectures and are not bound to any single paper claim.
 
+For continuous-time rows in this package, prefer `preprocess(X, model_name=...)`
+so interpolation mode and channel count match the selected model by default.
+
 ---
 
-## 6. Stable Neural SDE
+## 7. Stable Neural SDE
 
 The Stable Neural SDE family comes from a single paper:
 
@@ -154,7 +173,7 @@ implementation).
 
 ---
 
-## 7. How to cite
+## 8. How to cite
 
 If you use the **Stable Neural SDE** family (`neural_lsde`, `neural_lnsde`,
 `neural_gsde`) in academic work, please cite:
@@ -185,4 +204,4 @@ overall design are listed in the [main README](../README.md#citation):
 
 ---
 
-**End of Model Reference v0.1.0**
+**End of Model Reference v0.1.1**

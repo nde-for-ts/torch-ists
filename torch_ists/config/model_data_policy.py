@@ -63,10 +63,20 @@ _BASIC_SEQUENCE_MODELS = frozenset(
         "rnn",
         "lstm",
         "gru",
+        "gru-simple",
+        "bilstm",
     ]
 )
-_ATTENTION_MODELS = frozenset()
-_ATTENTION_NUM_LAYERS_MODELS = frozenset()
+_ATTENTION_MODELS = frozenset(
+    [
+        "transformer",
+    ]
+)
+_ATTENTION_NUM_LAYERS_MODELS = frozenset(
+    [
+        "transformer",
+    ]
+)
 
 _AUXILIARY_LOSS_MODELS = frozenset()
 _FLOW_DEFAULT_DEPTH = 2

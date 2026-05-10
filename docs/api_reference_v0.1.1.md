@@ -1,16 +1,19 @@
-# torch-ists API Reference v0.1.0
+# torch-ists API Reference v0.1.1
 
-> **Reference Version**: 0.1.0 (matches package version)
-> **Package Version**: 0.1.0
+> **Reference Version**: 0.1.1 (matches package version)
+> **Package Version**: 0.1.1
 > **Date**: 2026-05-10
 > **Status**: Public package reference
-> **Scope**: Exported runtime APIs and packaged scripts shipped in `0.1.0`
-> **Note**: This document describes the public `0.1.0` package release. Features outside the model and task lists below are not part of this package contract.
+> **Scope**: Exported runtime APIs and packaged scripts shipped in `0.1.1`
+> **Note**: This document describes the public `0.1.1` package release. Features outside the model and task lists below are not part of this package contract.
+
+---
 
 **Related docs**:
 [Package overview](../README.md) ·
 [Docs index](README.md) ·
-[Model Reference v0.1.0](model_reference_v0.1.0.md) ·
+[Model Reference v0.1.1](model_reference_v0.1.1.md) ·
+[Scripts Reference v0.1.1](scripts_reference_v0.1.1.md) ·
 [Project site](https://nde-for-ts.github.io/)
 
 ---
@@ -24,11 +27,7 @@
 5. [Split Utils API](#5-split-utils-api)
 6. [Model API](#6-model-api)
 7. [Config API](#7-config-api)
-8. [Appendix A: Exported APIs](#appendix-a-exported-apis)
-
-For per-model origin (paper, canonical repository, and implementation
-distinctions), see the companion
-[Model Reference v0.1.0](model_reference_v0.1.0.md).
+8. [Related References](#8-related-references)
 
 ---
 
@@ -56,7 +55,7 @@ Environment contract:
 - `.[tune]` is required for Ray Tune-backed parameter search
 - `.[cde]` installs the packaged NeuralCDE backend requirements (`torchcde`, `torchdiffeq`)
 - `.[sde]` installs the packaged SDE backend requirement (`torchsde`)
-- `.[all]` installs the optional dependencies used by the continuous-time models included in version `0.1.0`
+- `.[all]` installs the optional dependencies used by the continuous-time models included in version `0.1.1`
 - `TORCH_ISTS_RUNTIME_ROOT` is optional when running packaged scripts from outside the package root
 
 ### 1.2 Basic Usage (5-line example)
@@ -76,7 +75,7 @@ seq = torch.randn(16, 3, 64, 8)  # [batch, channels, length, features]
 output = model(seq, coeffs=None)  # → [16, 2]
 ```
 
-Import package as `torch_ists`. This document covers the public `0.1.0` package surface.
+Import package as `torch_ists`. This document covers the public `0.1.1` package surface.
 
 ---
 
@@ -401,29 +400,37 @@ Canonical preprocessing function (interpolation + intensity + delta).
 
 ```python
 def preprocess(
-    X: np.ndarray,
+    X: Any,
     missing_rate: Optional[float] = None,
-    interpolate: str = 'natural',
-    use_intensity: bool = True,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    interpolate: Optional[str] = None,
+    use_intensity: Optional[bool] = None,
+    seed: int = 0,
+    channel_sync: bool = False,
+    mechanism: str = "MCAR",
+    model_name: Optional[str] = None,
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
 ```
 
 #### Parameters
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `X` | `np.ndarray` | (required) | Input data `[N, D, L]` |
+| `X` | `np.ndarray` or `torch.Tensor` | (required) | Input data `[N, D, L]` |
 | `missing_rate` | `Optional[float]` | `None` | Missing rate (0-1, None=skip missingness) |
-| `interpolate` | `str` | `'natural'` | Interpolation mode (natural/linear/cubic/hermite) |
-| `use_intensity` | `bool` | `True` | Compute intensity channel |
+| `interpolate` | `Optional[str]` | `None` | Interpolation mode (`natural`/`linear`/`rectilinear`/`cubic`/`hermite`). If omitted and `model_name` is not set, defaults to `natural`. |
+| `use_intensity` | `Optional[bool]` | `None` | Whether to include intensity channels. If omitted and `model_name` is not set, defaults to `True` for backward compatibility. |
+| `seed` | `int` | `0` | RNG seed used when synthetic missingness is injected. |
+| `channel_sync` | `bool` | `False` | If `True`, synchronize injected missing positions across channels. |
+| `mechanism` | `str` | `"MCAR"` | Missingness mechanism (`MCAR`, `MAR`, `MNAR`). |
+| `model_name` | `Optional[str]` | `None` | Optional model key. When set, `interpolate` and `use_intensity` default to `get_data_config(model_name)`. Explicit kwargs still override. |
 
 #### Returns
 
-`Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]`:
-1. `X_missing`: `[N, D, L]` - Data with NaN for missing values
-2. `X_mask`: `[N, D, L]` - Observation mask (1.0=observed, 0.0=missing)
-3. `X_delta`: `[N, D, L]` - Time-since-last-observation (index-based)
-4. `coeffs`: `[N, C]` - Interpolation coefficients (C varies by mode)
+`Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]`:
+1. `X_missing`: `[N, L, D]` - Data with NaN for missing values
+2. `X_mask`: `[N, L, D]` - Observation mask (1.0=observed, 0.0=missing)
+3. `X_delta`: `[N, L, D]` - Time-since-last-observation (index-based)
+4. `coeffs`: `torch.Tensor` interpolation coefficients. The trailing channel dimension depends on the interpolation mode and whether intensity channels are included.
 
 #### Example
 
@@ -431,22 +438,27 @@ def preprocess(
 from torch_ists import preprocess
 import numpy as np
 
-# Preprocess with 30% missingness
+# Recommended: let the model decide interpolation mode and intensity usage
 X = np.random.randn(100, 8, 64).astype(np.float32)
 X_missing, X_mask, X_delta, coeffs = preprocess(
     X,
     missing_rate=0.3,
-    interpolate='natural',
-    use_intensity=True,
+    model_name="neural_lsde",
 )
 ```
+
+When `model_name` is set, `interpolate` and `use_intensity` default to
+`get_data_config(model_name)`. Explicit values for those kwargs still override
+the model-derived defaults. If `model_name` is omitted, the legacy defaults
+remain `interpolate="natural"` and `use_intensity=True`.
 
 #### Interpolation Modes
 
 | Mode | Method | Use Case |
 |------|--------|----------|
-| `'natural'` | Natural cubic spline | **Default**, CDE/ODE models |
+| `'natural'` | Natural cubic spline | Default when neither `interpolate` nor `model_name` resolves a different mode |
 | `'linear'` | Linear interpolation | Fast, piecewise linear |
+| `'rectilinear'` | Rectilinear linear interpolation | Stepwise observation paths |
 | `'cubic'` | Cubic spline | Smooth curves |
 | `'hermite'` | Hermite cubic spline | SDE models (auto-selected) |
 
@@ -618,16 +630,16 @@ print(path)  # split/BasicMotions/BasicMotions_42
 The package model API is model-centric:
 1. Primary public API: `ists_classifier`
 2. Advanced public API: `ists_model`
-3. Bundled command-line workflow: split creation, parameter search, and evaluation scripts (their script-side helper modules are not part of the public Python API)
+3. Bundled command-line workflow: split creation, parameter search, and evaluation scripts (their internal helpers are not part of the public Python API)
 
 Canonical public entrypoint is `torch_ists.model`.
 
 Task support tiers:
-- `classification`: primary supported path in version `0.1.0`
+- `classification`: primary supported path in version `0.1.1`
 - `regression`, `forecasting`, `imputation`, `outlier_detection`, `change_detection`: experimental
 
 Readiness note:
-- use `ists_classifier` when you want the most stable path in version `0.1.0`.
+- use `ists_classifier` when you want the most stable path in version `0.1.1`.
 - non-classification tasks are available through `ists_model`, but they are experimental and may change in future releases.
 
 `torch_ists.classifier` is not part of the public package surface.
@@ -665,13 +677,13 @@ Forward contract:
 def forward(seq, coeffs) -> torch.Tensor  # [N, num_class]
 ```
 
-The current `0.1.0` package scope exposes logits-only forward returns.
+The current `0.1.1` package scope exposes logits-only forward returns.
 
 Behavior notes:
 - If `use_intensity` is omitted (`None`), runtime resolves it from `get_data_config(model_name)`.
 - `method` is an advanced solver argument for continuous-time families. The
   effective solver behavior after argument normalization remains
-  family-specific; version `0.1.0` does not promise one package-wide default
+  family-specific; version `0.1.1` does not promise one package-wide default
   across ODE/CDE/SDE families.
 - Non-finite backbone outputs, hidden states, or logits raise `RuntimeError`; the package does not silently zero-fill them.
 
@@ -717,7 +729,7 @@ Unsupported task names are fail-fast with `NotImplementedError`.
 
 Experimental boundary:
 - `regression/forecasting/imputation/outlier_detection/change_detection` are available for advanced use.
-- these tasks are not declared as production-ready in version `0.1.0`.
+- these tasks are not declared as production-ready in version `0.1.1`.
 
 Behavior notes:
 - If `use_intensity` is omitted (`None`), runtime resolves it from `get_data_config(model_name)` inside `ists_layer`.
@@ -736,12 +748,12 @@ Behavior notes:
 `head_depth` and `flow_depth` are different knobs.
 
 - `head_depth`: controls the depth of the prediction head after the backbone. `1` applies a direct projection, and `k > 1` adds `k - 1` hidden-to-hidden layers before the final projection.
-- `flow_depth`: reserved for flow-family backbones. It is accepted for API compatibility, but it is not used by the active `0.1.0` model set.
+- `flow_depth`: reserved for flow-family backbones. It is accepted for API compatibility, but it is not used by the active `0.1.1` model set.
 
-Current `0.1.0` defaults:
+Current `0.1.1` defaults:
 - `cnn`, `rnn`, `lstm`, `gru`: `head_depth` is not used
 - `neuralcde*` and the SDE baseline/stable-SDE models: `head_depth` defaults to the script/runtime-provided layer depth
-- `flow_depth` is reserved for model families outside version `0.1.0`
+- `flow_depth` is reserved for model families outside version `0.1.1`
 
 Compatibility mapping:
 - legacy `num_hidden_layers` is interpreted as `head_depth`.
@@ -751,11 +763,11 @@ Compatibility mapping:
 ### 6.4 Command-Line Scripts
 
 The bundled scripts `scripts/set_splits.py`, `scripts/param_search.py`, and
-`scripts/model_run.py` are part of the packaged workflow. They rely on
-script-side helper modules for execution, but those helpers are not part of the
+`scripts/model_run.py` are part of the packaged workflow. They rely on internal
+helper modules for script execution, but those helpers are not part of the
 public Python import API.
 
-Bundled workflow behavior in version `0.1.0`:
+Bundled workflow behavior in version `0.1.1`:
 - `scripts/param_search.py` and `scripts/model_run.py` choose solver methods
   from model-specific package defaults.
 - Most users can rely on those defaults without setting solver arguments
@@ -823,7 +835,7 @@ print(config)  # {'interpolation': 'natural', 'use_intensity': False}
 
 If `ists_classifier()` or `ists_model()` is called with `use_intensity=None`, the runtime resolves the flag from this policy.
 
-This reference documents only the locked `0.1.0` package scope. Names outside
+This reference documents only the locked `0.1.1` package scope. Names outside
 the model list above are not part of the public package contract.
 
 ---
@@ -844,7 +856,7 @@ def has_auxiliary_loss(model_name: str) -> bool:
 
 #### Models with Auxiliary Loss
 
-Current `0.1.0` package models do not expose auxiliary-loss outputs. For the
+Current `0.1.1` package models do not expose auxiliary-loss outputs. For the
 locked package scope, `has_auxiliary_loss()` returns `False` for all supported
 models.
 
@@ -860,46 +872,14 @@ print(has_auxiliary_loss('neural_gsde')) # False
 
 ---
 
-## Exported APIs
+## 8. Related References
 
-### Package `__all__` (16 items)
+This API reference intentionally stays narrow and appendix-free.
 
-```python
-__all__ = [
-    # Data Loading
-    "DataLoader",
-    "DatasetBundle",
-
-    # Preprocessing
-    "MISSINGNESS_EXPERIMENTAL",
-    "apply_missingness",
-    "preprocess",
-
-    # Split Utils
-    "get_split_path",
-    "load_splits",
-    "make_stratified_splits",
-    "save_splits",
-
-    # RNG Management
-    "set_global_seed",
-    "get_rng_state",
-    "set_rng_state",
-    "SeedContext",
-
-    # Model API
-    "ists_classifier",
-    "ists_model",
-    "ists_layer",
-]
-```
-
-The package exports the APIs above for standalone use.
-
-For the supported model list with origin papers, canonical repositories,
-and the internal-vs-canonical distinctions, see the companion
-[Model Reference v0.1.0](model_reference_v0.1.0.md).
+- For the packaged model roster, per-family origin notes, and current package exclusions, use [Model Reference v0.1.1](model_reference_v0.1.1.md).
+- For bundled CLI scripts, flags, output artifacts, and pipeline order, use [Scripts Reference v0.1.1](scripts_reference_v0.1.1.md).
+- For installation and the public package overview, use the [package README](../README.md).
 
 ---
 
-**End of Package API Reference v0.1.0**
+**End of API Reference v0.1.1**
