@@ -1,0 +1,188 @@
+# torch-ists Model Reference v0.1.0
+
+> **Reference Version**: 0.1.0 (matches package version)
+> **Package Version**: 0.1.0
+> **Date**: 2026-05-10
+> **Scope**: Origin paper, canonical repository, and implementation note for
+> every model shipped in `v0.1.0`.
+
+**Related docs**:
+[Package overview](../README.md) ·
+[Docs index](README.md) ·
+[API Reference v0.1.0](api_reference_v0.1.0.md) ·
+[Project site](https://nde-for-ts.github.io/)
+
+This document is a companion to
+[`api_reference_v0.1.0.md`](api_reference_v0.1.0.md). Use the API reference
+for class signatures and call patterns; use this document to look up where
+each model comes from and which upstream implementation our copy is based on.
+
+---
+
+## Table of Contents
+
+1. [Sequence baselines](#1-sequence-baselines)
+2. [ODE runtime family](#2-ode-runtime-family)
+3. [Additional ODE models](#3-additional-ode-models)
+4. [Neural CDE](#4-neural-cde)
+5. [SDE baselines](#5-sde-baselines)
+6. [Stable Neural SDE](#6-stable-neural-sde)
+7. [How to cite](#7-how-to-cite)
+
+---
+
+## 1. Sequence baselines
+
+| Model | Origin | Implementation in this package |
+|---|---|---|
+| `cnn` | Standard 1-D convolutional baseline | Plain `nn.Conv1d` stack (this package) |
+| `rnn` | Standard RNN baseline | Plain `nn.RNN` (this package) |
+| `lstm` | Hochreiter & Schmidhuber, *Long Short-Term Memory* (1997) | Plain `nn.LSTM` (this package) |
+| `gru` | Cho et al., *Learning Phrase Representations using RNN Encoder–Decoder* (2014) | Plain `nn.GRU` (this package) |
+
+These baselines do not invoke any ODE / CDE / SDE solver. They consume the
+`(values, mask, time-deltas)` channel stack as a regular tensor.
+
+---
+
+## 2. ODE runtime family
+
+This section mixes two ODE-family slices that are both shipped in the public
+package.
+
+- `gru-d`, `gru-dt`, `gru-ode`, and `ode-rnn-spline` are package variants
+  built on the
+  [NeuralCDE](https://github.com/patrick-kidger/NeuralCDE) baseline code
+  introduced in
+  [*Neural Controlled Differential Equations for Irregular Time Series* (NeurIPS 2020)](https://arxiv.org/abs/2005.08926).
+  Where continuous-time integration is used, their solver behavior follows
+  that code path rather than the original repo-backed implementations from the
+  broader method families.
+- `ode-lstm` is the canonical ODE-LSTM lineage from its original paper and
+  reference repository. It appears in the same runtime family because it is
+  part of the packaged ODE surface, not because it shares the NeuralCDE
+  implementation path.
+
+| Model | Package row | Origin paper | Canonical reference repo | Implementation note |
+|---|---|---|---|---|
+| `gru-d` | re-implemented | [*Recurrent Neural Networks for Multivariate Time Series with Missing Values* (Scientific Reports 2018)](https://arxiv.org/abs/1606.01865) | [Han-JD/GRU-D](https://github.com/Han-JD/GRU-D) | NeuralCDE-baseline GRU-D variant (missing-data-aware). Discrete-step; no ODE solver runs at inference time. |
+| `gru-dt` | package variant | — (delta-time variant of GRU-D, maintained alongside `gru-d` in the NeuralCDE baseline code) | — | Discrete-step GRU-D with explicit time-gap features. |
+| `gru-ode` | package variant | [*Neural Controlled Differential Equations* (NeurIPS 2020)](https://arxiv.org/abs/2005.08926) (NeuralCDE-style ODE wrapper) | [patrick-kidger/NeuralCDE](https://github.com/patrick-kidger/NeuralCDE) | GRU-ODE family variant. Shares the broader method family with `gru-ode-bayes` (see [§3](#3-additional-ode-models)) but uses the packaged NeuralCDE infrastructure with a GRU-driven ODE field. |
+| `ode-rnn-spline` | package variant | [*Neural Controlled Differential Equations* (NeurIPS 2020)](https://arxiv.org/abs/2005.08926) (NeuralCDE-style ODE-RNN with spline control path) | [patrick-kidger/NeuralCDE](https://github.com/patrick-kidger/NeuralCDE) | ODE-RNN family variant. Shares the broader method family with `ode-rnn` (see [§3](#3-additional-ode-models)) but uses the packaged NeuralCDE infrastructure with a natural-cubic-spline control path. |
+| `ode-lstm` | canonical | [*Learning Long-Term Dependencies in Irregularly-Sampled Time Series* (NeurIPS 2020)](https://arxiv.org/abs/2006.04418) | [mlech26l/ode-lstms](https://github.com/mlech26l/ode-lstms) | LSTM cell with continuous-time hidden state evolved by an ODE between observations. |
+
+### ODE family naming notes
+
+- `gru-ode` / `gru-ode-bayes` and `ode-rnn-spline` / `ode-rnn` should be
+  read as different implementations within the same broader method families.
+- The rows in this section keep the packaged NeuralCDE-style implementations.
+- The repo-backed reference implementations are listed separately in
+  [§3](#3-additional-ode-models).
+
+---
+
+## 3. Additional ODE models
+
+Canonical implementations from the original papers / repositories.
+
+| Model | Origin paper | Canonical reference repo |
+|---|---|---|
+| `gru-ode-bayes` | [*GRU-ODE-Bayes: Continuous Modeling of Sporadically-Observed Time Series* (NeurIPS 2019)](https://arxiv.org/abs/1905.12374) | [edebrouwer/gru_ode_bayes](https://github.com/edebrouwer/gru_ode_bayes) |
+| `ode-rnn` | [*Latent ODEs for Irregularly-Sampled Time Series* (NeurIPS 2019)](https://arxiv.org/abs/1907.03907) | [YuliaRubanova/latent_ode](https://github.com/YuliaRubanova/latent_ode) |
+| `latentode` | [*Latent ODEs for Irregularly-Sampled Time Series* (NeurIPS 2019)](https://arxiv.org/abs/1907.03907) | [YuliaRubanova/latent_ode](https://github.com/YuliaRubanova/latent_ode) |
+
+`ode-rnn` and `latentode` come from the same NeurIPS 2019 paper but are
+**different models**: `ode-rnn` is the RNN cell with ODE between
+observations; `latentode` is the encoder–decoder Latent ODE that uses
+`ode-rnn` as its encoder.
+
+---
+
+## 4. Neural CDE
+
+| Model | Interpolation | Underlying library | Origin |
+|---|---|---|---|
+| `neuralcde` | natural cubic spline | [`controldiffeq`](https://github.com/patrick-kidger/NeuralCDE) (NeuralCDE reference path) | [*Neural Controlled Differential Equations for Irregular Time Series* (NeurIPS 2020)](https://arxiv.org/abs/2005.08926) |
+| `neuralcde-l` | linear | [torchcde](https://github.com/patrick-kidger/torchcde) | Same paper as above; variant uses the maintained follow-up library |
+| `neuralcde-r` | rectilinear | [torchcde](https://github.com/patrick-kidger/torchcde) | Same paper |
+| `neuralcde-c` | cubic | [torchcde](https://github.com/patrick-kidger/torchcde) | Same paper |
+| `neuralcde-h` | hermite | [torchcde](https://github.com/patrick-kidger/torchcde) | Same paper |
+
+`neuralcde` follows the original `controldiffeq` reference path; the
+variants `neuralcde-l/-r/-c/-h` are built on `torchcde`, the maintained
+follow-up library to the original NeuralCDE codebase. The `-l/-r/-c/-h`
+suffix selects the interpolation scheme used to build the control path.
+
+---
+
+## 5. SDE baselines
+
+| Model | Origin | Implementation in this package |
+|---|---|---|
+| `naive_cde` | Baseline lineage (this package) | A simple control-path baseline for SDE-handler comparisons. No external paper. |
+| `neural_ode` | [*Neural Ordinary Differential Equations* (NeurIPS 2018)](https://arxiv.org/abs/1806.07366) | Routed through the SDE handler with a deterministic-drift configuration. Backed by [`torchdiffeq`](https://github.com/rtqichen/torchdiffeq) lineage. |
+| `neural_ode_t` | Baseline lineage (this package) | Time-conditioned variant of `neural_ode`. No external paper. |
+| `neural_sde` | Baseline lineage (this package) | Generic Neural SDE baseline driven by [`torchsde`](https://github.com/google-research/torchsde). No external paper. |
+| `neural_sde_t` | Baseline lineage (this package) | Time-conditioned variant of `neural_sde`. No external paper. |
+
+All five share the SDE handler's forward path (the `Diffusion_model` stack
+with cubic-spline interpolation built via `torchcde`). The four `neural_*`
+entries are baseline-lineage models — they exist in this package as
+reference architectures and are not bound to any single paper claim.
+
+---
+
+## 6. Stable Neural SDE
+
+The Stable Neural SDE family comes from a single paper:
+
+> *Stable Neural Stochastic Differential Equations in Analyzing Irregular
+> Time Series Data* (ICLR 2024) — Oh, Lim, and Kim
+> ([arXiv:2402.14989](https://arxiv.org/abs/2402.14989) ·
+> [OpenReview](https://openreview.net/forum?id=4VIgNuQ1pY) ·
+> repo: [yongkyung-oh/Stable-Neural-SDEs](https://github.com/yongkyung-oh/Stable-Neural-SDEs))
+
+| Model | Drift–diffusion variant |
+|---|---|
+| `neural_lsde` | Additive (Langevin-type) noise |
+| `neural_lnsde` | Multiplicative noise |
+| `neural_gsde` | Geometric multiplicative noise |
+
+`neural_gsde` is a variant within the same paper, not a separate work.
+All three default to the `srk` solver (matching the upstream reference
+implementation).
+
+---
+
+## 7. How to cite
+
+If you use the **Stable Neural SDE** family (`neural_lsde`, `neural_lnsde`,
+`neural_gsde`) in academic work, please cite:
+
+```bibtex
+@inproceedings{oh_stable_2024,
+    title     = {Stable {Neural} {Stochastic} {Differential} {Equations}
+                 in {Analyzing} {Irregular} {Time} {Series} {Data}},
+    author    = {Oh, YongKyung and Lim, Dong-Young and Kim, Sungil},
+    year      = 2024,
+    month     = may,
+    booktitle = {The {Twelfth} {International} {Conference} on
+                 {Learning} {Representations}, {ICLR} 2024,
+                 {Vienna}, {Austria}, {May} 7-11, 2024},
+    publisher = {OpenReview.net},
+    url       = {https://arxiv.org/abs/2402.14989}
+}
+```
+
+For models with an explicit origin paper listed above, cite that paper. For
+package-specific baseline or variant rows without a single external paper,
+cite this package and name the exact packaged model you used. Two additional
+references that contextualize this package's
+overall design are listed in the [main README](../README.md#citation):
+
+- **DualDynamics (AAAI 2025)** — [arXiv:2401.04979](https://arxiv.org/abs/2401.04979)
+- **Neural Differential Equations Survey (IJCAI 2025)** — [arXiv:2502.09885](https://arxiv.org/abs/2502.09885)
+
+---
+
+**End of Model Reference v0.1.0**

@@ -1,11 +1,17 @@
-# torch-ists API Reference v1.0
+# torch-ists API Reference v0.1.0
 
-> **Reference Version**: 1.0
+> **Reference Version**: 0.1.0 (matches package version)
 > **Package Version**: 0.1.0
 > **Date**: 2026-05-10
 > **Status**: Public package reference
 > **Scope**: Exported runtime APIs and packaged scripts shipped in `0.1.0`
 > **Note**: This document describes the public `0.1.0` package release. Features outside the model and task lists below are not part of this package contract.
+
+**Related docs**:
+[Package overview](../README.md) ·
+[Docs index](README.md) ·
+[Model Reference v0.1.0](model_reference_v0.1.0.md) ·
+[Project site](https://nde-for-ts.github.io/)
 
 ---
 
@@ -19,7 +25,10 @@
 6. [Model API](#6-model-api)
 7. [Config API](#7-config-api)
 8. [Appendix A: Exported APIs](#appendix-a-exported-apis)
-9. [Appendix B: Supported Models (0.1.0 Package Scope)](#appendix-b-supported-models-010-package-scope)
+
+For per-model origin (paper, canonical repository, and implementation
+distinctions), see the companion
+[Model Reference v0.1.0](model_reference_v0.1.0.md).
 
 ---
 
@@ -609,7 +618,7 @@ print(path)  # split/BasicMotions/BasicMotions_42
 The package model API is model-centric:
 1. Primary public API: `ists_classifier`
 2. Advanced public API: `ists_model`
-3. Bundled command-line workflow: split creation, parameter search, and evaluation scripts (their internal helpers are not part of the public Python API)
+3. Bundled command-line workflow: split creation, parameter search, and evaluation scripts (their script-side helper modules are not part of the public Python API)
 
 Canonical public entrypoint is `torch_ists.model`.
 
@@ -742,8 +751,8 @@ Compatibility mapping:
 ### 6.4 Command-Line Scripts
 
 The bundled scripts `scripts/set_splits.py`, `scripts/param_search.py`, and
-`scripts/model_run.py` are part of the packaged workflow. They rely on internal
-helper modules for script execution, but those helpers are not part of the
+`scripts/model_run.py` are part of the packaged workflow. They rely on
+script-side helper modules for execution, but those helpers are not part of the
 public Python import API.
 
 Bundled workflow behavior in version `0.1.0`:
@@ -851,7 +860,7 @@ print(has_auxiliary_loss('neural_gsde')) # False
 
 ---
 
-## Appendix A: Exported APIs
+## Exported APIs
 
 ### Package `__all__` (16 items)
 
@@ -887,70 +896,10 @@ __all__ = [
 
 The package exports the APIs above for standalone use.
 
----
-
-## Appendix B: Supported Models (0.1.0 Package Scope)
-
-**Basic sequence models (4)**:
-- `cnn`
-- `rnn`
-- `lstm`
-- `gru`
-
-**NeuralCDE family (5)**:
-- `neuralcde`
-- `neuralcde-l`
-- `neuralcde-r`
-- `neuralcde-c`
-- `neuralcde-h`
-
-**ODE runtime family (5)**:
-- `gru-dt`
-- `gru-d`
-- `gru-ode`
-- `ode-rnn-spline`
-- `ode-lstm`
-
-**Additional ODE models (3)**:
-- `ode-rnn`
-- `latentode`
-- `gru-ode-bayes`
-
-**Continuous-time SDE baselines (5)**:
-- `naive_cde`
-- `neural_ode`
-- `neural_ode_t`
-- `neural_sde`
-- `neural_sde_t`
-
-**Stable-SDE family (3)**:
-- `neural_lsde`
-- `neural_lnsde`
-- `neural_gsde`
-
-**Current exclusions**:
-- Flow-family native backends, LatentSDE, TSDE-family, and other extended runtime families are not included in version `0.1.0`.
-### Model Family Source Notes
-
-- **Stable-SDE family** (`neural_lsde`, `neural_lnsde`, `neural_gsde`) is grounded in a single paper:
-  - Oh et al., *Stable Neural Stochastic Differential Equations in Analyzing Irregular Time Series Data* (ICLR 2024)
-  - arXiv: `https://arxiv.org/abs/2402.14989`
-  - OpenReview: `https://openreview.net/forum?id=4VIgNuQ1pY`
-- `neural_gsde` is a model variant in the same Stable-SDE paper family, not a separate paper.
-- NeuralCDE variants are exposed as direct runtime names in this package.
-- Flow-family, LatentSDE, TSDE-family, and other extended runtime families remain outside the `0.1.0` package scope.
-
-### Input Patterns
-
-**Pattern A (Basic/CDE)**: `forward(seq, coeffs)`
-- `seq`: `[N, 3, L, D]` (value, mask, delta)
-- `coeffs`: `[N, C]` interpolation coefficients (None for basic models)
-
-**Pattern B (ODE)**: `forward(seq, coeffs)` (same signature, coeffs used differently)
-- ODE models use coeffs for integration
-
-**Auxiliary Loss Models**: None in the current `0.1.0` package scope.
+For the supported model list with origin papers, canonical repositories,
+and the internal-vs-canonical distinctions, see the companion
+[Model Reference v0.1.0](model_reference_v0.1.0.md).
 
 ---
 
-**End of Package API Reference v1.0**
+**End of Package API Reference v0.1.0**

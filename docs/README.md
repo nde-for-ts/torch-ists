@@ -2,10 +2,19 @@
 
 Reference docs for the public `0.1.0` package release.
 
+**Related docs**:
+[Package overview](../README.md) ·
+[API Reference v0.1.0](api_reference_v0.1.0.md) ·
+[Model Reference v0.1.0](model_reference_v0.1.0.md) ·
+[Project site](https://nde-for-ts.github.io/)
+
 ## Included Docs
 
-- package overview: `README.md`
-- API reference: `api_reference_v1.0.md`
+- [Package overview](../README.md) — install, quick start, citations
+- [API Reference v0.1.0](api_reference_v0.1.0.md) — module / class / function reference
+- [Model Reference v0.1.0](model_reference_v0.1.0.md) — origin paper, canonical
+  repo, and implementation notes for each model
+- [Project site](https://nde-for-ts.github.io/) — overview, papers, and related work
 
 ## Installation
 

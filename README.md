@@ -6,6 +6,13 @@
 [![PyTorch](https://img.shields.io/badge/pytorch-2.0+-orange.svg)](https://pytorch.org/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](#license)
 [![Status](https://img.shields.io/badge/status-preview-yellow.svg)](#project-status)
+[![Site](https://img.shields.io/badge/site-nde--for--ts-informational.svg)](https://nde-for-ts.github.io/)
+
+**Related docs**:
+[Docs index](docs/README.md) ·
+[API Reference v0.1.0](docs/api_reference_v0.1.0.md) ·
+[Model Reference v0.1.0](docs/model_reference_v0.1.0.md) ·
+[Project site](https://nde-for-ts.github.io/)
 
 ## Overview
 
@@ -89,14 +96,43 @@ Version `0.1.0` includes 25 models across six families:
 | Family | Models |
 |--------|--------|
 | **Sequence baselines** | `cnn`, `rnn`, `lstm`, `gru` |
-| **Neural CDE** | `neuralcde`, `neuralcde-l`, `neuralcde-r`, `neuralcde-c`, `neuralcde-h` |
-| **ODE runtime family** | `gru-dt`, `gru-d`, `gru-ode`, `ode-rnn-spline`, `ode-lstm` |
+| **ODE runtime family** | `gru-dt`¹, `gru-d`¹, `gru-ode`², `ode-rnn-spline`², `ode-lstm` |
 | **Additional ODE models** | `ode-rnn`, `latentode`, `gru-ode-bayes` |
-| **Continuous-time baselines** | `naive_cde`, `neural_ode`, `neural_ode_t`, `neural_sde`, `neural_sde_t` |
+| **Neural CDE**³ | `neuralcde`, `neuralcde-l`, `neuralcde-r`, `neuralcde-c`, `neuralcde-h` |
+| **Continuous-time baselines**⁴ | `naive_cde`, `neural_ode`, `neural_ode_t`, `neural_sde`, `neural_sde_t` |
 | **Stable Neural SDE** ([Oh et al., 2024](https://openreview.net/forum?id=4VIgNuQ1pY)) | `neural_lsde`, `neural_lnsde`, `neural_gsde` |
 
-See [`docs/api_reference_v1.0.md`](docs/api_reference_v1.0.md) for the full
-model and API specification.
+> ¹ `gru-d` / `gru-dt` are missing-data-aware GRU variants re-implemented
+> from the [NeuralCDE](https://github.com/patrick-kidger/NeuralCDE) baseline
+> code ([*Neural Controlled Differential Equations*, NeurIPS 2020](https://arxiv.org/abs/2005.08926)).
+> Canonical GRU-D: [*Recurrent Neural Networks for Multivariate Time Series
+> with Missing Values* (Sci. Rep. 2018)](https://arxiv.org/abs/1606.01865)
+> ([repo](https://github.com/Han-JD/GRU-D)).
+>
+> ² `gru-ode` / `ode-rnn-spline` are **package names** for NeuralCDE-style
+> variants on the same infrastructure as note ¹ (`controldiffeq` + natural
+> cubic spline). They share method families with the canonical
+> implementations in *Additional ODE models*:
+> [*GRU-ODE-Bayes* (NeurIPS 2019)](https://arxiv.org/abs/1905.12374)
+> ([repo](https://github.com/edebrouwer/gru_ode_bayes)) and
+> [*Latent ODEs for Irregularly-Sampled Time Series* (NeurIPS 2019)](https://arxiv.org/abs/1907.03907)
+> ([repo](https://github.com/YuliaRubanova/latent_ode)). `latentode` is the
+> encoder–decoder Latent ODE from the same paper — a distinct model.
+>
+> ³ `neuralcde` uses the original `controldiffeq` reference path; the
+> `-l/-r/-c/-h` variants (linear / rectilinear / cubic / hermite) use
+> [torchcde](https://github.com/patrick-kidger/torchcde), the maintained
+> follow-up library.
+>
+> ⁴ Baseline-lineage models implemented on
+> [torchsde](https://github.com/google-research/torchsde); the `_t`
+> suffix adds explicit time conditioning. `naive_cde` is a control-path
+> baseline for SDE-handler comparisons.
+
+See [`docs/model_reference_v0.1.0.md`](docs/model_reference_v0.1.0.md) for
+the full per-model origin/repo table, and
+[`docs/api_reference_v0.1.0.md`](docs/api_reference_v0.1.0.md) for the API
+specification.
 
 ## Features
 
@@ -120,9 +156,13 @@ solver settings raise `ValueError` instead of being ignored silently.
 
 ## Documentation
 
-- [API Reference](docs/api_reference_v1.0.md) — module/class/function reference
-- [Quick Start tutorial](docs/api_reference_v1.0.md#1-quick-start) — minimal
+- [Docs index](docs/README.md) — table of contents and install notes
+- [API Reference](docs/api_reference_v0.1.0.md) — module / class / function reference
+- [Model Reference](docs/model_reference_v0.1.0.md) — origin paper, canonical
+  repo, and implementation notes for each model
+- [Quick Start tutorial](docs/api_reference_v0.1.0.md#1-quick-start) — minimal
   example walkthrough
+- [Project site](https://nde-for-ts.github.io/) — overview, papers, and related work
 
 ## Project Status
 
@@ -216,3 +256,8 @@ Built on top of [PyTorch](https://pytorch.org/),
 [torchcde](https://github.com/patrick-kidger/torchcde),
 [torchsde](https://github.com/google-research/torchsde), and
 [diffrax](https://github.com/patrick-kidger/diffrax).
+
+Several baseline models reuse code from
+[NeuralCDE](https://github.com/patrick-kidger/NeuralCDE).
+See the [Model Reference](docs/model_reference_v0.1.0.md) for per-model
+upstream sources.
