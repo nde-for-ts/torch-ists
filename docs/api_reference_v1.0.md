@@ -1,0 +1,956 @@
+# torch-ists API Reference v1.0
+
+> **Reference Version**: 1.0
+> **Package Version**: 0.1.0
+> **Date**: 2026-05-10
+> **Status**: Public package reference
+> **Scope**: Exported runtime APIs and packaged scripts shipped in `0.1.0`
+> **Note**: This document describes the public `0.1.0` package release. Features outside the model and task lists below are not part of this package contract.
+
+---
+
+## Table of Contents
+
+1. [Quick Start](#1-quick-start)
+2. [RNG Management API](#2-rng-management-api)
+3. [Data Loading API](#3-data-loading-api)
+4. [Preprocessing API](#4-preprocessing-api)
+5. [Split Utils API](#5-split-utils-api)
+6. [Model API](#6-model-api)
+7. [Config API](#7-config-api)
+8. [Appendix A: Exported APIs](#appendix-a-exported-apis)
+9. [Appendix B: Supported Models (0.1.0 Package Scope)](#appendix-b-supported-models-010-package-scope)
+
+---
+
+## 1. Quick Start
+
+### 1.1 Installation
+
+```bash
+# editable install from the package checkout
+cd torch-ists
+PYTHONNOUSERSITE=1 python -m pip install -e .
+```
+
+For the packaged command-line pipeline, including `scripts/param_search.py`:
+
+```bash
+cd torch-ists
+PYTHONNOUSERSITE=1 python -m pip install -e .[tune]
+```
+
+Environment contract:
+
+- `PYTHONNOUSERSITE=1` is required for commands
+- `Python >= 3.10`
+- `.[tune]` is required for Ray Tune-backed parameter search
+- `.[cde]` installs the packaged NeuralCDE backend requirements (`torchcde`, `torchdiffeq`)
+- `.[sde]` installs the packaged SDE backend requirement (`torchsde`)
+- `.[all]` installs the optional dependencies used by the continuous-time models included in version `0.1.0`
+- `TORCH_ISTS_RUNTIME_ROOT` is optional when running packaged scripts from outside the package root
+
+### 1.2 Basic Usage (5-line example)
+
+```python
+from torch_ists import set_global_seed, ists_classifier
+
+# Set seed for reproducibility
+set_global_seed(seed=0)
+
+# Create classifier (supported package models)
+model = ists_classifier(model_name='cnn', num_class=2, input_dim=8, seq_len=64, device='cpu')
+
+# Forward pass (seq: [N,3,L,D], coeffs: [N,C] or None for basic models)
+import torch
+seq = torch.randn(16, 3, 64, 8)  # [batch, channels, length, features]
+output = model(seq, coeffs=None)  # → [16, 2]
+```
+
+Import package as `torch_ists`. This document covers the public `0.1.0` package surface.
+
+---
+
+## 2. RNG Management API
+
+### Overview
+
+The RNG Management API provides utilities for reproducible runs by controlling random number generators across:
+- Python `random`
+- NumPy `np.random`
+- PyTorch `torch.manual_seed()`
+- PyTorch CUDA `torch.cuda.manual_seed_all()`
+- Deterministic backend flags when temporary seeding is used via `SeedContext`
+
+**Location**: `torch_ists.seed_utils`
+
+**Exported**: ✅ Yes (`__all__` includes `set_global_seed`, `get_rng_state`, `set_rng_state`, `SeedContext`)
+
+---
+
+### 2.1 `set_global_seed()`
+
+Set all random seeds for reproducibility.
+
+#### Signature
+
+```python
+def set_global_seed(
+    seed: int,
+    deterministic_mode: Optional[str] = None,
+    include_cuda: bool = True,
+    deterministic: Optional[str] = None,  # Legacy alias
+    warn_only: bool = True,
+    set_torch: bool = True,
+    set_np: bool = True,
+    set_random: bool = True,
+) -> Dict[str, Any]:
+```
+
+#### Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `seed` | `int` | (required) | Random seed value (0-based integer) |
+| `deterministic_mode` | `Optional[str]` | `None` | Deterministic mode: `"off"`, `"warn"`, `"strict"` |
+| `include_cuda` | `bool` | `True` | Apply seed to CUDA devices (if available) |
+| `deterministic` | `Optional[str]` | `None` | **Legacy alias** for `deterministic_mode` |
+| `warn_only` | `bool` | `True` | If True, only warn on non-deterministic ops |
+| `set_torch` | `bool` | `True` | Set PyTorch seeds |
+| `set_np` | `bool` | `True` | Set NumPy seed |
+| `set_random` | `bool` | `True` | Set Python random seed |
+
+#### Returns
+
+`Dict[str, Any]` - Seed application metadata (`seed`, `mode`, `deterministic_mode`, ...)
+
+#### Example
+
+```python
+from torch_ists import set_global_seed
+
+# Basic usage
+set_global_seed(seed=42)
+
+# Strict determinism
+set_global_seed(seed=42, deterministic_mode='strict', warn_only=False)
+```
+
+#### Notes
+
+- Call once at the start of your run
+- `"strict"` mode may be slower but guarantees bitwise reproducibility
+- CUDA seeding applied when available
+
+---
+
+### 2.2 `get_rng_state()`
+
+Get current RNG states from all sources.
+
+#### Signature
+
+```python
+def get_rng_state() -> Dict[str, Any]:
+```
+
+#### Returns
+
+`Dict[str, Any]` with keys:
+- `'python'`: Python random state (tuple)
+- `'numpy'`: NumPy RNG state (dict with 'MT19937' generator)
+- `'torch'`: PyTorch CPU RNG state (list of uint8)
+- `'torch_cuda'`: PyTorch CUDA RNG states (list of lists, one per device)
+
+#### Example
+
+```python
+from torch_ists import get_rng_state, set_rng_state
+
+# Checkpoint RNG state
+state = get_rng_state()
+
+# ... do some random operations ...
+
+# Restore state
+set_rng_state(state)
+```
+
+---
+
+### 2.3 `set_rng_state()`
+
+Restore RNG states to all sources.
+
+#### Signature
+
+```python
+def set_rng_state(state: Dict[str, Any]) -> None:
+```
+
+#### Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `state` | `Dict[str, Any]` | RNG state dictionary (from `get_rng_state()`) |
+
+#### Returns
+
+`None` - Side-effect API (RNG states are restored globally)
+
+---
+
+### 2.4 `SeedContext`
+
+Context manager for temporary seed changes.
+
+#### Signature
+
+```python
+class SeedContext:
+    def __init__(
+        self,
+        seed: int,
+        deterministic_mode: Optional[str] = None,
+        include_cuda: bool = True,
+        deterministic: Optional[str] = None,
+    ):
+```
+
+#### Example
+
+```python
+from torch_ists import SeedContext
+
+# Temporary seed for augmentation
+with SeedContext(seed=42):
+    augmented_data = augment(batch)  # Always same augmentation
+
+# Original RNG state restored here
+```
+
+On exit, `SeedContext` restores the saved RNG states and deterministic backend flags (`torch.backends.cudnn.deterministic`, `torch.backends.cudnn.benchmark`, deterministic algorithms mode).
+
+---
+
+## 3. Data Loading API
+
+### Overview
+
+The Data Loading API provides:
+1. **Custom Data Loading**: `DataLoader` factory (from_numpy, from_dataframe, from_file)
+2. **UCR/UEA Datasets**: `uea_ucr_loader.download()` / `uea_ucr_loader.get_data()` (not exported in `__all__`)
+
+**Exported**: ✅ `DataLoader`, `DatasetBundle`
+**Not exported**: `download()`, `get_data()` (import directly from `torch_ists.uea_ucr_loader` if needed)
+
+---
+
+### 3.1 `DataLoader.from_numpy()`
+
+Load custom data from NumPy arrays.
+
+#### Signature
+
+```python
+@staticmethod
+def from_numpy(
+    X: np.ndarray,
+    y: np.ndarray,
+    timestamps: Optional[np.ndarray] = None,
+) -> DatasetBundle:
+```
+
+#### Parameters
+
+| Parameter | Type | Shape | Description |
+|-----------|------|-------|-------------|
+| `X` | `np.ndarray` | `[N, D, L]` | Time series data |
+| `y` | `np.ndarray` | `[N]` | Labels (0-indexed integers) |
+| `timestamps` | `Optional[np.ndarray]` | `[N, L]` | Time stamps (optional) |
+
+#### Returns
+
+`DatasetBundle` with fields:
+- `X`: `np.ndarray [N, D, L]`
+- `y`: `np.ndarray [N]`
+- `timestamps`: `Optional[np.ndarray [N, L]]`
+- `metadata`: `Dict[str, Any]`
+
+#### Example
+
+```python
+from torch_ists import DataLoader
+import numpy as np
+
+# Create synthetic data
+N, D, L = 100, 8, 64
+X = np.random.randn(N, D, L).astype(np.float32)
+y = np.random.randint(0, 3, size=(N,))
+
+# Load into DatasetBundle
+bundle = DataLoader.from_numpy(X, y)
+print(bundle.X.shape)  # (100, 8, 64)
+```
+
+---
+
+### 3.2 `DataLoader.from_dataframe()`
+
+Load custom data from pandas DataFrame (long format).
+
+#### Signature
+
+```python
+@staticmethod
+def from_dataframe(
+    df: Any,  # pandas.DataFrame
+    time_col: str,
+    feature_cols: Sequence[str],
+    label_col: str,
+    id_col: Optional[str] = "series_id",
+) -> DatasetBundle:
+```
+
+#### Example
+
+```python
+import pandas as pd
+from torch_ists import DataLoader
+
+df = pd.DataFrame({
+    'series_id': [0, 0, 0, 1, 1, 1],
+    'time': [0, 1, 2, 0, 1, 2],
+    'feature1': [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+    'feature2': [0.5, 1.5, 2.5, 3.5, 4.5, 5.5],
+    'label': [0, 0, 0, 1, 1, 1],
+})
+
+bundle = DataLoader.from_dataframe(
+    df,
+    time_col='time',
+    feature_cols=['feature1', 'feature2'],
+    label_col='label',
+    id_col='series_id',
+)
+print(bundle.X.shape)  # (2, 2, 3)
+```
+
+---
+
+### 3.3 `DataLoader.from_file()`
+
+Load custom data from file (npz, csv, parquet).
+
+#### Signature
+
+```python
+@staticmethod
+def from_file(
+    path: str,
+    format: Optional[str] = None,
+    **kwargs: Any,
+) -> DatasetBundle:
+```
+
+#### Example
+
+```python
+from torch_ists import DataLoader
+
+# From NPZ
+bundle = DataLoader.from_file('data.npz')
+
+# From CSV
+bundle = DataLoader.from_file(
+    'data.csv',
+    time_col='time',
+    feature_cols=['feat1', 'feat2'],
+    label_col='label',
+)
+```
+
+---
+
+## 4. Preprocessing API
+
+### Overview
+
+The Preprocessing API provides:
+1. **Missingness**: `apply_missingness()` - Synthetic missing data (MCAR/MAR/MNAR)
+2. **Preprocessing**: `preprocess()` - Canonical preprocessing path (interpolation + intensity + delta)
+
+**Exported**: ✅ `preprocess`, `apply_missingness`, `MISSINGNESS_EXPERIMENTAL`
+
+---
+
+### 4.1 `preprocess()`
+
+Canonical preprocessing function (interpolation + intensity + delta).
+
+#### Signature
+
+```python
+def preprocess(
+    X: np.ndarray,
+    missing_rate: Optional[float] = None,
+    interpolate: str = 'natural',
+    use_intensity: bool = True,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+```
+
+#### Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `X` | `np.ndarray` | (required) | Input data `[N, D, L]` |
+| `missing_rate` | `Optional[float]` | `None` | Missing rate (0-1, None=skip missingness) |
+| `interpolate` | `str` | `'natural'` | Interpolation mode (natural/linear/cubic/hermite) |
+| `use_intensity` | `bool` | `True` | Compute intensity channel |
+
+#### Returns
+
+`Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]`:
+1. `X_missing`: `[N, D, L]` - Data with NaN for missing values
+2. `X_mask`: `[N, D, L]` - Observation mask (1.0=observed, 0.0=missing)
+3. `X_delta`: `[N, D, L]` - Time-since-last-observation (index-based)
+4. `coeffs`: `[N, C]` - Interpolation coefficients (C varies by mode)
+
+#### Example
+
+```python
+from torch_ists import preprocess
+import numpy as np
+
+# Preprocess with 30% missingness
+X = np.random.randn(100, 8, 64).astype(np.float32)
+X_missing, X_mask, X_delta, coeffs = preprocess(
+    X,
+    missing_rate=0.3,
+    interpolate='natural',
+    use_intensity=True,
+)
+```
+
+#### Interpolation Modes
+
+| Mode | Method | Use Case |
+|------|--------|----------|
+| `'natural'` | Natural cubic spline | **Default**, CDE/ODE models |
+| `'linear'` | Linear interpolation | Fast, piecewise linear |
+| `'cubic'` | Cubic spline | Smooth curves |
+| `'hermite'` | Hermite cubic spline | SDE models (auto-selected) |
+
+---
+
+### 4.2 `apply_missingness()`
+
+Apply synthetic missingness to data (MCAR/MAR/MNAR).
+
+#### Signature
+
+```python
+def apply_missingness(
+    X: np.ndarray,
+    rate: float,
+    mechanism: str = "MCAR",
+    seed: int = 0,
+    channel_sync: bool = False,
+) -> Tuple[np.ndarray, np.ndarray]:
+```
+
+#### Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `X` | `np.ndarray` | (required) | Input data `[N, D, L]` |
+| `rate` | `float` | (required) | Missing rate (0-1) |
+| `mechanism` | `str` | `"MCAR"` | Mechanism: `"MCAR"`, `"MAR"`, `"MNAR"` |
+| `seed` | `int` | `0` | Random seed |
+| `channel_sync` | `bool` | `False` | Synchronize missingness across channels |
+
+#### Returns
+
+`Tuple[np.ndarray, np.ndarray]`:
+1. `X_missing`: `[N, D, L]` - Data with NaN for missing values
+2. `mask_observed`: `[N, D, L]` - Observation mask (1.0=observed, 0.0=missing)
+
+#### Example
+
+```python
+from torch_ists import apply_missingness
+
+X = np.random.randn(100, 8, 64).astype(np.float32)
+
+# Apply MCAR missingness (30%)
+X_missing, mask = apply_missingness(X, rate=0.3, mechanism="MCAR", seed=42)
+print(np.isnan(X_missing).mean())  # ~0.3
+```
+
+#### Mechanisms
+
+| Mechanism | Description | Status |
+|-----------|-------------|--------|
+| **MCAR** | Missing completely at random | ✅ Production |
+| **MAR** | Missing at random (feature-dependent) | ⚠️ Experimental |
+| **MNAR** | Missing not at random (value-dependent) | ⚠️ Experimental |
+
+**Experimental Flag**: `MISSINGNESS_EXPERIMENTAL = True` (MAR/MNAR are pseudo-level implementations)
+
+**Behavior Note**: standalone runtime no longer accepts a legacy `params` payload. The public contract is `rate + mechanism + seed + channel_sync`.
+
+---
+
+## 5. Split Utils API
+
+### Overview
+
+The Split Utils API provides:
+1. **Stratified Splitting**: `make_stratified_splits()` - Generate train/valid/test splits
+2. **I/O**: `save_splits()`, `load_splits()` - Pickle-based persistence
+3. **Path utilities**: `get_split_path()` - Canonical split file paths
+
+**Exported**: ✅ All (`make_stratified_splits`, `save_splits`, `load_splits`, `get_split_path`)
+
+---
+
+### 5.1 `make_stratified_splits()`
+
+Generate reproducible stratified train/valid/test splits.
+
+#### Signature
+
+```python
+def make_stratified_splits(
+    y: np.ndarray,
+    seed: int,
+    train: float = 0.7,
+    valid: float = 0.15,
+    test: float = 0.15,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+```
+
+#### Example
+
+```python
+from torch_ists import make_stratified_splits
+import numpy as np
+
+y = np.random.randint(0, 3, size=(100,))
+
+train_idx, valid_idx, test_idx = make_stratified_splits(y, seed=42)
+print(len(train_idx), len(valid_idx), len(test_idx))  # 70, 15, 15
+```
+
+---
+
+### 5.2 `save_splits()` / `load_splits()`
+
+Save/load split indices to/from pickle file.
+
+#### Signatures
+
+```python
+def save_splits(
+    path: Path,
+    train_idx: np.ndarray,
+    valid_idx: np.ndarray,
+    test_idx: np.ndarray,
+) -> None:
+
+def load_splits(path: Path) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+```
+
+#### Example
+
+```python
+from torch_ists import save_splits, load_splits
+from pathlib import Path
+
+# Save
+save_splits(Path("split/BasicMotions/BasicMotions_42"), train_idx, valid_idx, test_idx)
+
+# Load
+train_idx, valid_idx, test_idx = load_splits(Path("split/BasicMotions/BasicMotions_42"))
+```
+
+---
+
+### 5.3 `get_split_path()`
+
+Return canonical split path: `split_root/{dataset}/{dataset}_{seed}`.
+
+#### Signature
+
+```python
+def get_split_path(
+    split_root: Path,
+    dataset_name: str,
+    seed: int,
+) -> Path:
+```
+
+#### Example
+
+```python
+from torch_ists import get_split_path
+from pathlib import Path
+
+path = get_split_path(Path("split"), "BasicMotions", seed=42)
+print(path)  # split/BasicMotions/BasicMotions_42
+```
+
+---
+
+## 6. Model API
+
+### Overview
+
+The package model API is model-centric:
+1. Primary public API: `ists_classifier`
+2. Advanced public API: `ists_model`
+3. Bundled command-line workflow: split creation, parameter search, and evaluation scripts (their internal helpers are not part of the public Python API)
+
+Canonical public entrypoint is `torch_ists.model`.
+
+Task support tiers:
+- `classification`: primary supported path in version `0.1.0`
+- `regression`, `forecasting`, `imputation`, `outlier_detection`, `change_detection`: experimental
+
+Readiness note:
+- use `ists_classifier` when you want the most stable path in version `0.1.0`.
+- non-classification tasks are available through `ists_model`, but they are experimental and may change in future releases.
+
+`torch_ists.classifier` is not part of the public package surface.
+
+### 6.1 `ists_classifier` (Stable)
+
+Convenience function that constructs `ists_model(task="classification")`.
+
+```python
+def ists_classifier(
+    model_name: str = "cnn",
+    num_class: int = 2,
+    input_dim: int = 3,
+    seq_len: int = 128,
+    hidden_dim: int = 32,
+    hidden_hidden_dim: int = 32,
+    num_layers: int = 1,
+    num_hidden_layers: int = 1,
+    head_depth: Optional[int] = None,
+    flow_depth: Optional[int] = None,
+    flow_num_layers: Optional[int] = None,
+    bidirectional: bool = False,
+    dropout: float = 0.1,
+    use_intensity: Optional[bool] = None,
+    method: Optional[str] = None,
+    file: Optional[str] = None,
+    device: str = "cpu",
+    model_params: Optional[Dict[str, Any]] = None,
+) -> ists_model:
+```
+
+Forward contract:
+
+```python
+def forward(seq, coeffs) -> torch.Tensor  # [N, num_class]
+```
+
+The current `0.1.0` package scope exposes logits-only forward returns.
+
+Behavior notes:
+- If `use_intensity` is omitted (`None`), runtime resolves it from `get_data_config(model_name)`.
+- `method` is an advanced solver argument for continuous-time families. The
+  effective solver behavior after argument normalization remains
+  family-specific; version `0.1.0` does not promise one package-wide default
+  across ODE/CDE/SDE families.
+- Non-finite backbone outputs, hidden states, or logits raise `RuntimeError`; the package does not silently zero-fill them.
+
+### 6.2 `ists_model` (Experimental)
+
+```python
+class ists_model(nn.Module):
+    def __init__(
+        self,
+        model_name: str = "cnn",
+        num_class: int = 2,
+        input_dim: int = 3,
+        seq_len: int = 128,
+        hidden_dim: int = 32,
+        hidden_hidden_dim: int = 32,
+        num_layers: int = 1,
+        num_hidden_layers: int = 1,
+        head_depth: Optional[int] = None,
+        flow_depth: Optional[int] = None,
+        flow_num_layers: Optional[int] = None,
+        bidirectional: bool = False,
+        dropout: float = 0.1,
+        use_intensity: Optional[bool] = None,
+        method: Optional[str] = None,
+        file: Optional[str] = None,
+        device: str = "cpu",
+        model_params: Optional[Dict[str, Any]] = None,
+        task: str = "classification",  # classification|regression|forecasting|imputation|outlier_detection|change_detection
+        output_dim: int = 1,
+        forecast_horizon: Optional[int] = None,
+    ):
+```
+
+Forward contracts by task:
+- `classification` -> `Tensor[N, C]`
+- `regression` -> `Tensor[N, R]`
+- `forecasting` -> `Tensor[N, H, R]`
+- `imputation` -> `Tensor[N, L, D]`
+- `outlier_detection` -> `Tensor[N, 1]`
+- `change_detection` -> `Tensor[N, L, 1]`
+
+Unsupported task names are fail-fast with `NotImplementedError`.
+
+Experimental boundary:
+- `regression/forecasting/imputation/outlier_detection/change_detection` are available for advanced use.
+- these tasks are not declared as production-ready in version `0.1.0`.
+
+Behavior notes:
+- If `use_intensity` is omitted (`None`), runtime resolves it from `get_data_config(model_name)` inside `ists_layer`.
+- `method` is accepted for continuous-time backbones, but effective
+  `dt/step_size/rtol/atol/adjoint` behavior remains family-specific and should
+  not be read as a single global runtime default contract.
+- Some continuous-time rows honor `method` only at model creation.
+- Some compatibility models accept solver-shaped inputs only for backward compatibility and may emit a runtime warning.
+- Unsupported solver knobs raise `ValueError` instead of silently changing family behavior.
+- `output_dim` defaults to `1`; `forecast_horizon` defaults to `seq_len` when omitted.
+- `forward(..., return_aux_loss=True)` returns `(prediction, aux_loss)` for auxiliary-loss backbones.
+- Non-finite predictions raise `RuntimeError`.
+
+### 6.3 Depth Parameters
+
+`head_depth` and `flow_depth` are different knobs.
+
+- `head_depth`: controls the depth of the prediction head after the backbone. `1` applies a direct projection, and `k > 1` adds `k - 1` hidden-to-hidden layers before the final projection.
+- `flow_depth`: reserved for flow-family backbones. It is accepted for API compatibility, but it is not used by the active `0.1.0` model set.
+
+Current `0.1.0` defaults:
+- `cnn`, `rnn`, `lstm`, `gru`: `head_depth` is not used
+- `neuralcde*` and the SDE baseline/stable-SDE models: `head_depth` defaults to the script/runtime-provided layer depth
+- `flow_depth` is reserved for model families outside version `0.1.0`
+
+Compatibility mapping:
+- legacy `num_hidden_layers` is interpreted as `head_depth`.
+- legacy `flow_num_layers` is interpreted as `flow_depth`.
+- packaged pipeline scripts use the same runtime depth resolver.
+
+### 6.4 Command-Line Scripts
+
+The bundled scripts `scripts/set_splits.py`, `scripts/param_search.py`, and
+`scripts/model_run.py` are part of the packaged workflow. They rely on internal
+helper modules for script execution, but those helpers are not part of the
+public Python import API.
+
+Bundled workflow behavior in version `0.1.0`:
+- `scripts/param_search.py` and `scripts/model_run.py` choose solver methods
+  from model-specific package defaults.
+- Most users can rely on those defaults without setting solver arguments
+  manually.
+- Import-level solver kwargs are advanced controls, and supported options vary
+  by model family.
+- Unsupported solver knobs raise `ValueError` instead of silently changing
+  runtime behavior.
+
+## 7. Config API
+
+### Overview
+
+The Config API provides:
+1. **Model metadata**: `MODEL_REGISTRY` plus model metadata constants in `torch_ists.config.models`
+2. **Data config**: `get_data_config()` - Model-specific preprocessing settings
+3. **Auxiliary loss**: `has_auxiliary_loss()` - Check if a supported package model returns auxiliary loss
+
+**Location**: `torch_ists.config`
+
+**Exported**: `MODEL_REGISTRY`, config helpers, and runtime policy helpers are
+available from `torch_ists.config`. Additional model metadata constants are
+available from `torch_ists.config.models`.
+
+---
+
+### 7.1 `get_data_config()`
+
+Get model-specific data preprocessing settings.
+
+#### Signature
+
+```python
+def get_data_config(model_name: str) -> Dict[str, Any]:
+```
+
+#### Returns
+
+`Dict[str, Any]`:
+- `'interpolation'`: `str` - Interpolation mode (`'natural'`, `'linear'`, `'rectilinear'`, `'cubic'`, `'hermite'`)
+- `'use_intensity'`: `bool` - Compute intensity channel
+
+#### Rules
+
+| Package scope | `interpolation` | `use_intensity` |
+|------------|--------------|---------------|
+| `cnn`, `rnn`, `lstm`, `gru` | `'hermite'` | `False` |
+| `neuralcde` | `'natural'` | `False` |
+| `neuralcde-l/r/c/h` | override (`linear/rectilinear/cubic/hermite`) | `False` |
+| `naive_cde`, `neural_ode`, `neural_ode_t`, `neural_sde`, `neural_sde_t`, `neural_lsde`, `neural_lnsde`, `neural_gsde` | `'hermite'` | `False` |
+
+#### Example
+
+```python
+from torch_ists.config import get_data_config
+
+# SDE model
+config = get_data_config('neural_gsde')
+print(config)  # {'interpolation': 'hermite', 'use_intensity': False}
+
+# CDE model
+config = get_data_config('neuralcde')
+print(config)  # {'interpolation': 'natural', 'use_intensity': False}
+```
+
+If `ists_classifier()` or `ists_model()` is called with `use_intensity=None`, the runtime resolves the flag from this policy.
+
+This reference documents only the locked `0.1.0` package scope. Names outside
+the model list above are not part of the public package contract.
+
+---
+
+### 7.2 `has_auxiliary_loss()`
+
+Check if model returns auxiliary loss.
+
+#### Signature
+
+```python
+def has_auxiliary_loss(model_name: str) -> bool:
+```
+
+#### Returns
+
+`True` if model returns `(logits, aux_loss)`, `False` otherwise.
+
+#### Models with Auxiliary Loss
+
+Current `0.1.0` package models do not expose auxiliary-loss outputs. For the
+locked package scope, `has_auxiliary_loss()` returns `False` for all supported
+models.
+
+#### Example
+
+```python
+from torch_ists.config import has_auxiliary_loss
+
+print(has_auxiliary_loss('cnn'))         # False
+print(has_auxiliary_loss('neuralcde'))   # False
+print(has_auxiliary_loss('neural_gsde')) # False
+```
+
+---
+
+## Appendix A: Exported APIs
+
+### Package `__all__` (16 items)
+
+```python
+__all__ = [
+    # Data Loading
+    "DataLoader",
+    "DatasetBundle",
+
+    # Preprocessing
+    "MISSINGNESS_EXPERIMENTAL",
+    "apply_missingness",
+    "preprocess",
+
+    # Split Utils
+    "get_split_path",
+    "load_splits",
+    "make_stratified_splits",
+    "save_splits",
+
+    # RNG Management
+    "set_global_seed",
+    "get_rng_state",
+    "set_rng_state",
+    "SeedContext",
+
+    # Model API
+    "ists_classifier",
+    "ists_model",
+    "ists_layer",
+]
+```
+
+The package exports the APIs above for standalone use.
+
+---
+
+## Appendix B: Supported Models (0.1.0 Package Scope)
+
+**Basic sequence models (4)**:
+- `cnn`
+- `rnn`
+- `lstm`
+- `gru`
+
+**NeuralCDE family (5)**:
+- `neuralcde`
+- `neuralcde-l`
+- `neuralcde-r`
+- `neuralcde-c`
+- `neuralcde-h`
+
+**ODE runtime family (5)**:
+- `gru-dt`
+- `gru-d`
+- `gru-ode`
+- `ode-rnn-spline`
+- `ode-lstm`
+
+**Additional ODE models (3)**:
+- `ode-rnn`
+- `latentode`
+- `gru-ode-bayes`
+
+**Continuous-time SDE baselines (5)**:
+- `naive_cde`
+- `neural_ode`
+- `neural_ode_t`
+- `neural_sde`
+- `neural_sde_t`
+
+**Stable-SDE family (3)**:
+- `neural_lsde`
+- `neural_lnsde`
+- `neural_gsde`
+
+**Current exclusions**:
+- Flow-family native backends, LatentSDE, TSDE-family, and other extended runtime families are not included in version `0.1.0`.
+### Model Family Source Notes
+
+- **Stable-SDE family** (`neural_lsde`, `neural_lnsde`, `neural_gsde`) is grounded in a single paper:
+  - Oh et al., *Stable Neural Stochastic Differential Equations in Analyzing Irregular Time Series Data* (ICLR 2024)
+  - arXiv: `https://arxiv.org/abs/2402.14989`
+  - OpenReview: `https://openreview.net/forum?id=4VIgNuQ1pY`
+- `neural_gsde` is a model variant in the same Stable-SDE paper family, not a separate paper.
+- NeuralCDE variants are exposed as direct runtime names in this package.
+- Flow-family, LatentSDE, TSDE-family, and other extended runtime families remain outside the `0.1.0` package scope.
+
+### Input Patterns
+
+**Pattern A (Basic/CDE)**: `forward(seq, coeffs)`
+- `seq`: `[N, 3, L, D]` (value, mask, delta)
+- `coeffs`: `[N, C]` interpolation coefficients (None for basic models)
+
+**Pattern B (ODE)**: `forward(seq, coeffs)` (same signature, coeffs used differently)
+- ODE models use coeffs for integration
+
+**Auxiliary Loss Models**: None in the current `0.1.0` package scope.
+
+---
+
+**End of Package API Reference v1.0**

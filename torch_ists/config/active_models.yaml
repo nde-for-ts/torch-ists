@@ -1,0 +1,29 @@
+# Canonical active model registry for the packaged runtime.
+version: 1
+updated_at: 2026-05-10
+models:
+  - cnn
+  - rnn
+  - lstm
+  - gru
+  - neuralcde
+  - neuralcde-l
+  - neuralcde-r
+  - neuralcde-c
+  - neuralcde-h
+  - gru-dt
+  - gru-d
+  - gru-ode
+  - ode-rnn-spline
+  - ode-lstm
+  - ode-rnn
+  - latentode
+  - gru-ode-bayes
+  - naive_cde
+  - neural_ode
+  - neural_ode_t
+  - neural_sde
+  - neural_sde_t
+  - neural_lsde
+  - neural_lnsde
+  - neural_gsde

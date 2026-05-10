@@ -1,0 +1,313 @@
+"""Base Handler ABC for torch_ists runtime.
+
+Extended from minimal implementation to support Handler pattern forward delegation.
+
+Implementation scope:
+- Abstract methods: can_handle(), create_model(), forward()
+- Properties: returns_loss, uses_filled
+- Utility methods: preprocess_input(), get_final_index()
+
+Reference:
+    - consensus_v2.0.md (Handler pattern principle)
+"""
+
+from abc import ABC, abstractmethod
+from typing import Any, Dict, Mapping, Optional, Set, Tuple, Union
+import torch
+import torch.nn as nn
+
+
+class BaseHandler(ABC):
+    """Abstract base class for model handlers.
+
+    Each handler is responsible for:
+    1. Identifying which models it can handle (can_handle)
+    2. Creating model instances (create_model)
+    3. Executing forward passes with preprocessing (forward)
+    4. Declaring if models return auxiliary loss (returns_loss)
+    5. Declaring if models need NaN→0 conversion (uses_filled)
+
+    Attributes:
+        name: Handler name for identification
+    """
+
+    name: str = "base"
+
+    @abstractmethod
+    def can_handle(self, model_name: str) -> bool:
+        """Check if this handler can process the given model.
+
+        Args:
+            model_name: Model name (e.g., 'cnn', 'rnn', 'transformer')
+
+        Returns:
+            bool: True if this handler can process the model
+        """
+        pass
+
+    @abstractmethod
+    def create_model(
+        self,
+        model_name: str,
+        config: Dict[str, Any],
+        device: str
+    ) -> nn.Module:
+        """Create a model instance.
+
+        Args:
+            model_name: Model name
+            config: Model configuration dict (input_dim, hidden_dim, etc.)
+            device: Target device ('cpu' or 'cuda')
+
+        Returns:
+            nn.Module: Created model instance
+        """
+        pass
+
+    @abstractmethod
+    def forward(
+        self,
+        model: nn.Module,
+        seq: torch.Tensor,
+        coeffs: Optional[torch.Tensor],
+        times: torch.Tensor,
+        **kwargs
+    ) -> Union[Tuple[torch.Tensor, torch.Tensor],
+               Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
+        """Execute forward pass with preprocessing.
+
+        Args:
+            model: Model instance
+            seq: Input sequence [N, 3, D, L] containing [data, mask, delta]
+            coeffs: Interpolation coefficients (optional)
+            times: Time vector [L]
+            **kwargs: Additional parameters
+
+        Returns:
+            tuple: (out, hn) or (out, hn, loss)
+                - out: [N, L, H] Output sequence
+                - hn: [N, H] Last hidden state
+                - loss: Auxiliary loss (optional, for some models)
+        """
+        pass
+
+    @property
+    @abstractmethod
+    def returns_loss(self) -> bool:
+        """Whether models in this handler return auxiliary loss.
+
+        Returns:
+            bool: True if models return (output, loss), False if just output
+        """
+        pass
+
+    @property
+    def uses_filled(self) -> bool:
+        """Whether models need NaN → 0 conversion (X_filled).
+
+        Default: False (models can handle NaN, use X_missing)
+        Override to True for models requiring filled values.
+
+        Returns:
+            bool: True if models need NaN → 0 conversion
+        """
+        return False
+
+    # ══════════════════════════════════════════════════════════════════
+    # Common Utility Methods
+    # ══════════════════════════════════════════════════════════════════
+
+    @staticmethod
+    def _coerce_mapping(value: Any) -> Dict[str, Any]:
+        if isinstance(value, dict):
+            return value
+        return {}
+
+    @staticmethod
+    def _normalize_solver_method(
+        method: Any,
+        alias_map: Optional[Dict[str, str]] = None,
+    ) -> Optional[str]:
+        if method is None:
+            return None
+        normalized = str(method).strip().lower()
+        if not normalized:
+            return None
+        aliases = alias_map or {}
+        return aliases.get(normalized, normalized)
+
+    def resolve_solver_config(
+        self,
+        *,
+        direct: Optional[Dict[str, Any]],
+        model_params: Optional[Dict[str, Any]],
+        model: Optional[nn.Module],
+        default_method: str,
+        allowed_methods: Set[str],
+        alias_map: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
+        direct_map = self._coerce_mapping(direct)
+        params_map = self._coerce_mapping(model_params)
+        model_solver_kwargs = self._coerce_mapping(getattr(model, "solver_kwargs", {}))
+
+        method = direct_map.get("method")
+        if method is None:
+            method = params_map.get("method")
+        if method is None:
+            method = getattr(model, "solver_method", None)
+        if method is None:
+            method = default_method
+        method = self._normalize_solver_method(method, alias_map=alias_map)
+        if method not in allowed_methods:
+            allowed = ", ".join(sorted(allowed_methods))
+            raise ValueError(
+                f"Unsupported solver method '{method}'. Allowed methods: {allowed}"
+            )
+
+        options = direct_map.get("solver_options")
+        if options is None:
+            options = direct_map.get("options")
+        if options is None:
+            options = params_map.get("solver_options")
+        if options is None:
+            options = params_map.get("options")
+        if options is None:
+            options = getattr(model, "solver_options", None)
+        if options is not None and not isinstance(options, Mapping):
+            raise ValueError(
+                f"solver_options/options must be a mapping, got {type(options).__name__}"
+            )
+        resolved_options: Dict[str, Any] = dict(options or {})
+
+        step_size = direct_map.get("step_size")
+        if step_size is None:
+            step_size = direct_map.get("dt")
+        if step_size is None:
+            step_size = params_map.get("step_size")
+        if step_size is None:
+            step_size = params_map.get("dt")
+        if step_size is None:
+            step_size = resolved_options.get("step_size")
+        if step_size is None:
+            step_size = model_solver_kwargs.get("step_size")
+        if step_size is None:
+            step_size = model_solver_kwargs.get("dt")
+
+        dt = direct_map.get("dt")
+        if dt is None:
+            dt = params_map.get("dt")
+        if dt is None:
+            dt = model_solver_kwargs.get("dt")
+        if dt is None:
+            dt = step_size
+
+        rtol = direct_map.get("rtol")
+        if rtol is None:
+            rtol = params_map.get("rtol")
+        if rtol is None:
+            rtol = model_solver_kwargs.get("rtol")
+
+        atol = direct_map.get("atol")
+        if atol is None:
+            atol = params_map.get("atol")
+        if atol is None:
+            atol = model_solver_kwargs.get("atol")
+
+        adjoint = direct_map.get("adjoint")
+        if adjoint is None:
+            adjoint = params_map.get("adjoint")
+        if adjoint is None:
+            adjoint = model_solver_kwargs.get("adjoint")
+
+        return {
+            "method": method,
+            "options": resolved_options,
+            "step_size": step_size,
+            "dt": dt,
+            "rtol": rtol,
+            "atol": atol,
+            "adjoint": adjoint,
+        }
+
+    def preprocess_input(
+        self,
+        seq: torch.Tensor,
+        times: torch.Tensor
+    ) -> Dict[str, torch.Tensor]:
+        """Preprocess input data for forward pass.
+
+        This method extracts and transforms the input sequence into
+        the format expected by most models.
+
+        Reference: torch_ists/_layer.py L536-547
+
+        Args:
+            seq: [N, 3, D, L] Input sequence containing:
+                 - seq[:, 0, :, :]: Observed data
+                 - seq[:, 1, :, :]: Mask (1=observed, 0=missing)
+                 - seq[:, 2, :, :]: Time delta since last observation
+            times: [L] Time vector
+
+        Returns:
+            dict: Preprocessed data with keys:
+                - x: [N, L, D] Data tensor
+                - seq_mask: [N, L] Observation mask
+                - seq_delta: [N, L] Time deltas
+                - seq_ts: [N, L] Timestamps (repeated times)
+                - final_index: [N] Last valid index for each sample
+        """
+        N = seq.shape[0]
+        L = seq.shape[3]
+
+        # Extract data: [N, D, L] -> [N, L, D]
+        x = seq[:, 0, :, :].permute(0, 2, 1)
+
+        # Extract mask and delta: [N, D, L] -> [N, L] (take first dim)
+        seq_mask = seq[:, 1, 0, :]
+        seq_delta = seq[:, 2, 0, :]
+
+        # Create timestamps: [L] -> [N, L]
+        seq_ts = times.unsqueeze(0).repeat(N, 1)
+
+        # Compute final index based on mask (or use sequence length)
+        final_index = self.get_final_index(seq_mask, L)
+
+        return {
+            'x': x,
+            'seq_mask': seq_mask,
+            'seq_delta': seq_delta,
+            'seq_ts': seq_ts,
+            'final_index': final_index,
+        }
+
+    def get_final_index(
+        self,
+        seq_mask: torch.Tensor,
+        seq_len: Optional[int] = None
+    ) -> torch.Tensor:
+        """Compute the last valid index for each sample.
+
+        Reference: torch_ists/_layer.py L542
+
+        Args:
+            seq_mask: [N, L] Observation mask (1=observed, 0=missing)
+            seq_len: Optional sequence length (used if mask is all zeros)
+
+        Returns:
+            torch.Tensor: [N] Last valid index for each sample
+        """
+        # Count observed points per sample
+        counts = seq_mask.sum(dim=1)
+
+        # Handle edge case: all zeros -> use seq_len
+        if seq_len is not None:
+            counts = torch.where(counts == 0, torch.tensor(seq_len, device=seq_mask.device), counts)
+
+        # Subtract 1 to get index (counts start from 1)
+        final_index = counts - 1
+        final_index = torch.clamp(final_index, min=0)
+
+        return final_index.long()
+
+
+__all__ = ['BaseHandler']

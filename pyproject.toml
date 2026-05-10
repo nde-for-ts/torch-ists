@@ -1,0 +1,91 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "torch-ists"
+version = "0.1.0"
+description = "PyTorch package for irregular time series modeling"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [
+    { name = "YongKyung Oh" }
+]
+keywords = [
+    "irregular time series",
+    "classification",
+    "neural ODE",
+    "neural CDE",
+    "neural SDE",
+    "deep learning",
+    "pytorch",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+requires-python = ">=3.10"
+
+# Core dependencies (always required)
+dependencies = [
+    "torch>=2.0",
+    "numpy>=1.24",
+    "scipy>=1.9",
+    "scikit-learn>=1.0",
+]
+
+[project.optional-dependencies]
+tune = [
+    "ray[tune]>=2.0",
+]
+
+# ODE models: gru-dt, gru-d, gru-ode, ode-rnn, ode-rnn-spline, ode-lstm,
+# latentode, gru-ode-bayes
+ode = [
+    "torchdiffeq>=0.2.2",
+    "torchdyn>=1.0.6",
+]
+
+# CDE models: neuralcde, neuralcde-l/r/c/h
+# (ancde / exit / leap are in the wider release scope but not part of v0.1.0)
+cde = [
+    "torchdiffeq>=0.2.2",
+    "torchcde>=0.2.5",
+    # signatory: install manually from GitHub
+    # pip install git+https://github.com/patrick-kidger/signatory.git
+]
+
+# SDE models: naive_cde, neural_ode(_t), neural_sde(_t),
+# neural_lsde, neural_lnsde, neural_gsde
+# (the diffusion module imports torchcde for cubic-spline interpolation)
+sde = [
+    "torchsde>=0.2.6",
+    "torchcde>=0.2.5",
+]
+
+# All optional deps (except GitHub-only packages)
+all = [
+    "ray[tune]>=2.0",
+    "torchdiffeq>=0.2.2",
+    "torchdyn>=1.0.6",
+    "torchcde>=0.2.5",
+    "torchsde>=0.2.6",
+]
+
+[project.urls]
+Homepage = "https://github.com/nde-for-ts/torch-ists"
+Repository = "https://github.com/nde-for-ts/torch-ists"
+Issues = "https://github.com/nde-for-ts/torch-ists/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["torch_ists*"]
+
+[tool.setuptools.package-data]
+torch_ists = ["py.typed", "config/*.yaml"]

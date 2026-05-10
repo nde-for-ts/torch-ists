@@ -1,0 +1,359 @@
+#!/usr/bin/env python
+"""Utilities for run manifests and related artifacts."""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+import hashlib
+import json
+from pathlib import Path
+from typing import Any, Dict, List, Tuple
+
+
+# Public schema token for packaged run manifests.
+SCHEMA_VERSION = "run_manifest_v1"
+SUPPORTED_TASKS = frozenset(
+    {
+        "classification",
+        "regression",
+        "forecasting",
+        "imputation",
+        "outlier_detection",
+        "change_detection",
+    }
+)
+SUPPORTED_TARGET_SOURCES = frozenset({"dataset", "surrogate", "label"})
+
+
+def utc_now_iso() -> str:
+    return (
+        datetime.now(timezone.utc)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
+
+
+def generate_run_id(prefix: str = "run") -> str:
+    # Include microseconds to avoid same-second collisions in manifest paths.
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    return f"{prefix}_{stamp}"
+
+
+def stable_hash(payload: Any) -> str:
+    encoded = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def write_manifest(
+    *,
+    stage: str,
+    contract_dir: str | Path,
+    run_id: str,
+    payload: Dict[str, Any],
+) -> Tuple[Path, Dict[str, Any]]:
+    body = {
+        "schema_version": SCHEMA_VERSION,
+        "stage": stage,
+        "run_id": run_id,
+        "created_at": utc_now_iso(),
+        **payload,
+    }
+    out_dir = Path(contract_dir) / run_id
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"{stage}.manifest.json"
+    out_path.write_text(json.dumps(body, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return out_path, body
+
+
+def load_manifest(path: str | Path) -> Dict[str, Any]:
+    with Path(path).open("r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _require_fields(doc: Dict[str, Any], required: List[str]) -> List[str]:
+    errors: List[str] = []
+    for key in required:
+        if key not in doc:
+            errors.append(f"missing field: {key}")
+    return errors
+
+
+def _is_finite_number(value: Any) -> bool:
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return False
+    return v == v and v not in (float("inf"), float("-inf"))
+
+
+def _validate_target_source(record: Dict[str, Any], path: str, errors: List[str], task: str) -> None:
+    target_source = str(record.get("target_source", "")).strip().lower()
+    if task == "classification":
+        if target_source and target_source not in SUPPORTED_TARGET_SOURCES:
+            errors.append(f"{path}.target_source unsupported: {target_source!r}")
+        return
+    if not target_source:
+        errors.append(f"{path}.target_source missing for task={task}")
+        return
+    if target_source not in SUPPORTED_TARGET_SOURCES:
+        errors.append(
+            f"{path}.target_source unsupported: {target_source!r}. "
+            f"Supported sources are {sorted(SUPPORTED_TARGET_SOURCES)}"
+        )
+        return
+    if task == "change_detection" and target_source != "dataset":
+        errors.append(f"{path}.target_source must be 'dataset' for task=change_detection")
+
+
+def validate_split_manifest(doc: Dict[str, Any]) -> List[str]:
+    errors = _require_fields(
+        doc,
+        [
+            "schema_version",
+            "stage",
+            "run_id",
+            "created_at",
+            "status",
+            "dataset",
+            "seed",
+            "dataset_source",
+            "split_path",
+            "counts",
+        ],
+    )
+    if doc.get("stage") != "split":
+        errors.append(f"invalid stage for split manifest: {doc.get('stage')!r}")
+    reuse_existing = doc.get("reuse_existing")
+    if reuse_existing is not None and not isinstance(reuse_existing, bool):
+        errors.append("reuse_existing must be bool when provided")
+    counts = doc.get("counts", {})
+    if not isinstance(counts, dict):
+        errors.append("counts must be an object")
+    else:
+        for key in ("train", "valid", "test"):
+            if key not in counts:
+                errors.append(f"counts missing key: {key}")
+            elif not isinstance(counts[key], int):
+                errors.append(f"counts.{key} must be int")
+            elif counts[key] <= 0:
+                errors.append(f"counts.{key} must be > 0")
+    return errors
+
+
+def validate_search_manifest(doc: Dict[str, Any]) -> List[str]:
+    errors = _require_fields(
+        doc,
+        [
+            "schema_version",
+            "stage",
+            "run_id",
+            "created_at",
+            "status",
+            "seed",
+            "missing_rate",
+            "split_root",
+            "param_root",
+            "records",
+        ],
+    )
+    if doc.get("stage") != "search":
+        errors.append(f"invalid stage for search manifest: {doc.get('stage')!r}")
+    if not _is_finite_number(doc.get("missing_rate")):
+        errors.append("missing_rate must be a finite number")
+    records = doc.get("records")
+    if not isinstance(records, list):
+        errors.append("records must be an array")
+        return errors
+    for idx, record in enumerate(records):
+        if not isinstance(record, dict):
+            errors.append(f"records[{idx}] must be an object")
+            continue
+        record_required = [
+            "dataset",
+            "model",
+            "seed",
+            "missing_rate",
+            "split_path",
+            "param_path",
+            "param_hash",
+            "best_loss",
+        ]
+        for key in record_required:
+            if key not in record:
+                errors.append(f"records[{idx}] missing field: {key}")
+        task = str(record.get("task", doc.get("task", "classification"))).strip().lower()
+        if task in SUPPORTED_TASKS:
+            _validate_target_source(record, f"records[{idx}]", errors, task)
+        if "best_loss" in record and not _is_finite_number(record.get("best_loss")):
+            errors.append(f"records[{idx}].best_loss must be finite")
+
+    reused_records = doc.get("reused_records", [])
+    if reused_records is None:
+        reused_records = []
+    if not isinstance(reused_records, list):
+        errors.append("reused_records must be an array")
+        return errors
+    for idx, record in enumerate(reused_records):
+        if not isinstance(record, dict):
+            errors.append(f"reused_records[{idx}] must be an object")
+            continue
+        record_required = [
+            "dataset",
+            "model",
+            "seed",
+            "missing_rate",
+            "split_path",
+            "param_path",
+        ]
+        for key in record_required:
+            if key not in record:
+                errors.append(f"reused_records[{idx}] missing field: {key}")
+        task = str(record.get("task", doc.get("task", "classification"))).strip().lower()
+        if task in SUPPORTED_TASKS:
+            _validate_target_source(record, f"reused_records[{idx}]", errors, task)
+    return errors
+
+
+def validate_run_manifest(doc: Dict[str, Any]) -> List[str]:
+    errors = _require_fields(
+        doc,
+        [
+            "schema_version",
+            "stage",
+            "run_id",
+            "created_at",
+            "status",
+            "seed",
+            "split_root",
+            "param_root",
+            "out_root",
+            "records",
+        ],
+    )
+    if doc.get("stage") != "run":
+        errors.append(f"invalid stage for run manifest: {doc.get('stage')!r}")
+    records = doc.get("records")
+    if not isinstance(records, list):
+        errors.append("records must be an array")
+        return errors
+    for idx, record in enumerate(records):
+        if not isinstance(record, dict):
+            errors.append(f"records[{idx}] must be an object")
+            continue
+        record_required = [
+            "dataset",
+            "model",
+            "seed",
+            "missing_rate",
+            "split_path",
+            "param_path",
+            "output_path",
+            "metrics",
+        ]
+        for key in record_required:
+            if key not in record:
+                errors.append(f"records[{idx}] missing field: {key}")
+        metrics = record.get("metrics", {})
+        if not isinstance(metrics, dict):
+            errors.append(f"records[{idx}].metrics must be an object")
+            continue
+        task = str(record.get("task", "classification")).strip().lower()
+        if task not in SUPPORTED_TASKS:
+            errors.append(
+                f"records[{idx}].task unsupported: {task!r}. "
+                f"Supported tasks are {sorted(SUPPORTED_TASKS)}"
+            )
+            continue
+        _validate_target_source(record, f"records[{idx}]", errors, task)
+        if task == "classification":
+            has_v2 = all(metric in metrics for metric in ("accuracy", "f1", "wf1"))
+            has_v1 = all(metric in metrics for metric in ("accuracy", "f1_weighted"))
+            if not (has_v2 or has_v1):
+                errors.append(
+                    f"records[{idx}].metrics missing required keys: "
+                    "expect (accuracy,f1,wf1) or compatibility tuple (accuracy,f1_weighted)"
+                )
+                continue
+
+            required_metrics = ("accuracy", "f1", "wf1") if has_v2 else ("accuracy", "f1_weighted")
+            for metric in required_metrics:
+                if not _is_finite_number(metrics[metric]):
+                    errors.append(f"records[{idx}].metrics.{metric} must be finite")
+                    continue
+                value = float(metrics[metric])
+                if value < 0.0 or value > 1.0:
+                    errors.append(f"records[{idx}].metrics.{metric} out of range [0, 1]")
+
+            if has_v2 and "f1_weighted" in metrics:
+                if not _is_finite_number(metrics["f1_weighted"]):
+                    errors.append(f"records[{idx}].metrics.f1_weighted must be finite")
+                else:
+                    wf1 = float(metrics["wf1"])
+                    f1w = float(metrics["f1_weighted"])
+                    if abs(wf1 - f1w) > 1e-12:
+                        errors.append(
+                            f"records[{idx}].metrics alias mismatch: wf1={wf1} != f1_weighted={f1w}"
+                        )
+        else:
+            if task == "outlier_detection":
+                required_noncls = ("bce", "outlier_acc")
+            elif task == "change_detection":
+                required_noncls = ("bce", "change_acc")
+            else:
+                required_noncls = ("mse", "mae")
+
+            for metric in required_noncls:
+                if metric not in metrics:
+                    errors.append(f"records[{idx}].metrics missing field for task={task}: {metric}")
+                    continue
+                if not _is_finite_number(metrics[metric]):
+                    errors.append(f"records[{idx}].metrics.{metric} must be finite")
+                    continue
+                value = float(metrics[metric])
+                if metric in {"outlier_acc", "change_acc"}:
+                    if value < 0.0 or value > 1.0:
+                        errors.append(f"records[{idx}].metrics.{metric} out of range [0, 1]")
+                elif value < 0.0:
+                    errors.append(f"records[{idx}].metrics.{metric} must be >= 0")
+
+            task_metrics = record.get("task_metrics")
+            if task_metrics is not None:
+                if not isinstance(task_metrics, dict):
+                    errors.append(f"records[{idx}].task_metrics must be an object when provided")
+                else:
+                    for metric in required_noncls:
+                        if metric in task_metrics and not _is_finite_number(task_metrics[metric]):
+                            errors.append(f"records[{idx}].task_metrics.{metric} must be finite")
+
+    reused_records = doc.get("reused_records", [])
+    if reused_records is None:
+        reused_records = []
+    if not isinstance(reused_records, list):
+        errors.append("reused_records must be an array")
+        return errors
+    for idx, record in enumerate(reused_records):
+        if not isinstance(record, dict):
+            errors.append(f"reused_records[{idx}] must be an object")
+            continue
+        record_required = [
+            "dataset",
+            "model",
+            "seed",
+            "missing_rate",
+            "split_path",
+            "param_path",
+            "output_path",
+        ]
+        for key in record_required:
+            if key not in record:
+                errors.append(f"reused_records[{idx}] missing field: {key}")
+        task = str(record.get("task", doc.get("task", "classification"))).strip().lower()
+        if task in SUPPORTED_TASKS:
+            _validate_target_source(record, f"reused_records[{idx}]", errors, task)
+    return errors
