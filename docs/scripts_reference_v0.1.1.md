@@ -27,7 +27,7 @@ for Python class signatures and the model reference for per-model origin.
 3. [`param_search.py`](#3-param_searchpy)
 4. [`model_run.py`](#4-model_runpy)
 5. [Output Artifacts and Run Manifests](#5-output-artifacts-and-run-manifests)
-6. [Internal Helpers](#6-internal-helpers)
+6. [Bundled Helper Modules](#6-bundled-helper-modules)
 
 ---
 
@@ -74,7 +74,7 @@ python scripts/set_splits.py --dataset-name ECG200 --seed 0
 | Flag | Type | Default | Description |
 |---|---|---|---|
 | `--dataset-name` | `str` | (required) | Dataset id used in the split file path. |
-| `--dataset-source` | `str` | `default` | Dataset source backend (`{default}`). The legacy alias `refactoring` is mapped to `default`. |
+| `--dataset-source` | `str` | `default` | Dataset source backend (`{default}`). |
 | `--seed` | `int` | `0` | Random seed for the stratified split. |
 | `--if-exists` | `{reuse, fail}` | `reuse` | Behavior when the split artifact already exists. `reuse` keeps the existing file; `fail` raises. |
 | `--out-dir` (alias `--output-dir`) | `str` | `split` | Root directory for split artifacts. |
@@ -111,7 +111,7 @@ python scripts/param_search.py \
 | `--seed` | `int` | `0` | Global seed for split selection and reproducibility. |
 | `--datasets` | `str` | (required) | Comma-separated dataset list. |
 | `--dataset-source` | `str` | `default` | Dataset source backend (`{default}`). |
-| `--models` | `str` | (active list) | Comma-separated model list. Defaults to `get_active_model_list()` (29 active models in v0.1.1). |
+| `--models` | `str` | (active list) | Comma-separated model list. Defaults to the packaged active model list (29 models in v0.1.1). |
 | `--missing-rate` | `float` | `0.0` | Single missing rate applied uniformly during tuning. |
 | `--num-samples` | `int` | `20` | Ray Tune `num_samples` — hyperparameter trial budget. |
 | `--max-num-epochs` | `int` | `10` | Per-trial training budget. |
@@ -127,7 +127,7 @@ python scripts/param_search.py \
 | `--contract-dir` | `str` | `evidence` | Directory for run manifests (stage = `search`). |
 | `--run-id` | `str` | (auto) | Run identifier. |
 | `--task` | `{classification}` | `classification` | Task head. Only `classification` is stable in v0.1.1. |
-| `--targets-root` | `str` | `targets` | Root directory for dataset target bundles (used by experimental task modes). |
+| `--targets-root` | `str` | `targets` | Root directory for dataset target bundles when a task uses external targets. |
 | `--model-scope-variant` | `{active}` | `active` | Model scope. Only `active` is supported in v0.1.1. |
 
 ### Search Modes
@@ -180,9 +180,9 @@ python scripts/model_run.py \
 | Flag | Type | Default | Description |
 |---|---|---|---|
 | `--seed` | `int` | `0` | Random seed. |
-| `--datasets` | `str` | (default list) | Comma-separated dataset list. Defaults to `get_default_selected_datasets()`. |
+| `--datasets` | `str` | (default list) | Comma-separated dataset list. Defaults to the packaged dataset list. |
 | `--dataset-source` | `str` | `default` | Dataset source backend. |
-| `--models` | `str` | (active list) | Comma-separated model list. Defaults to `get_active_model_list()`. |
+| `--models` | `str` | (active list) | Comma-separated model list. Defaults to the packaged active model list. |
 | `--missing-rates` | `str` | `0.0,0.3,0.5,0.7` | Comma-separated missing rates for standard mode. Ignored in robustness mode. |
 | `--epochs` | `int` | `100` | Epochs per (dataset, missing-rate, model) run. |
 | `--max-runs` | `int` | `None` | Stop after this many runs across the run grid. |
@@ -273,25 +273,25 @@ records executed/reused/skipped, and a stage-specific summary.
 
 ---
 
-## 6. Internal Helpers
+## 6. Bundled Helper Modules
 
-The following modules under `scripts/` support the three CLI entry points
-but are **not part of the public Python API** and may change between
-releases. Do not import them from your own code:
+The following modules under `scripts/` support the three CLI entry points.
+They ship with the packaged workflow, but they are not intended as standalone
+Python APIs:
 
-- `_common.py` — runtime path setup, model-scope variant resolver,
-  `default_method_for_model()` delegation.
+- `_common.py` — runtime path setup, packaged default resolution, and
+  model-scope normalization.
 - `script_chain_contracts.py` — manifest schema, run-id generation, stable
   hashing.
 - `dataset_source_contracts.py` — dataset loading from the default
   registry or NPZ files.
-- `task_target_contracts.py` — task target loading for experimental task
-  modes.
+- `task_target_contracts.py` — optional target loading for supported
+  task-specific workflows.
 - `_training_runtime.py` — dataset construction, training and evaluation
-  loops, missing-data validation gates.
+  loops, and runtime validation checks.
 
-Some flags are intentionally hidden as internal or experimental
-(`argparse.SUPPRESS`) and may change without notice.
+Some implementation-only flags are omitted from `--help` output and may
+change between package versions.
 
 ---
 

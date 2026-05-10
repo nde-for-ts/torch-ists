@@ -83,8 +83,7 @@ baseline rather than a missingness-aware attention model.
 **Masked variant note.** `transformer-mask` keeps the same backbone and
 zero-fill preprocessing, but it applies `src_key_padding_mask` using the
 packaged observation mask. Treat it as a package-specific mitigation variant,
-not as a separate external paper-backed method. The broader attention family
-(`miam`, `mtan`, `sand`) remains outside the current public package scope.
+not as a separate external paper-backed method.
 
 ---
 
@@ -93,7 +92,8 @@ not as a separate external paper-backed method. The broader attention family
 This section mixes two ODE-family slices that are both shipped in the public
 package.
 
-- `gru-d`, `gru-dt`, `gru-ode`, and `ode-rnn-spline` are package variants
+- `gru-d`, `gru-dt`, `gru-ode`, and `ode-rnn-spline` are packaged
+  implementations
   built on the
   [NeuralCDE](https://github.com/patrick-kidger/NeuralCDE) baseline code
   introduced in
@@ -109,9 +109,9 @@ package.
 | Model | Package row | Origin paper | Canonical reference repo | Implementation note |
 |---|---|---|---|---|
 | `gru-d` | re-implemented | [*Recurrent Neural Networks for Multivariate Time Series with Missing Values* (Scientific Reports 2018)](https://arxiv.org/abs/1606.01865) | [Han-JD/GRU-D](https://github.com/Han-JD/GRU-D) | NeuralCDE-baseline GRU-D variant (missing-data-aware). Discrete-step; no ODE solver runs at inference time. |
-| `gru-dt` | package variant | — (delta-time variant of GRU-D, maintained alongside `gru-d` in the NeuralCDE baseline code) | — | Discrete-step GRU-D with explicit time-gap features. |
-| `gru-ode` | package variant | [*Neural Controlled Differential Equations* (NeurIPS 2020)](https://arxiv.org/abs/2005.08926) (NeuralCDE-style ODE wrapper) | [patrick-kidger/NeuralCDE](https://github.com/patrick-kidger/NeuralCDE) | GRU-ODE family variant. Shares the broader method family with `gru-ode-bayes` (see [§3](#3-additional-ode-models)) but uses the packaged NeuralCDE infrastructure with a GRU-driven ODE field. |
-| `ode-rnn-spline` | package variant | [*Neural Controlled Differential Equations* (NeurIPS 2020)](https://arxiv.org/abs/2005.08926) (NeuralCDE-style ODE-RNN with spline control path) | [patrick-kidger/NeuralCDE](https://github.com/patrick-kidger/NeuralCDE) | ODE-RNN family variant. Shares the broader method family with `ode-rnn` (see [§3](#3-additional-ode-models)) but uses the packaged NeuralCDE infrastructure with a natural-cubic-spline control path. |
+| `gru-dt` | packaged implementation | — (delta-time variant of GRU-D, maintained alongside `gru-d` in the NeuralCDE baseline code) | — | Discrete-step GRU-D with explicit time-gap features. |
+| `gru-ode` | packaged implementation | [*Neural Controlled Differential Equations* (NeurIPS 2020)](https://arxiv.org/abs/2005.08926) (NeuralCDE-style ODE wrapper) | [patrick-kidger/NeuralCDE](https://github.com/patrick-kidger/NeuralCDE) | One packaged GRU-ODE implementation built on the NeuralCDE infrastructure with a GRU-driven ODE field. `gru-ode-bayes` in [§4](#4-additional-ode-models) is a sibling implementation from the same broader method family. |
+| `ode-rnn-spline` | packaged implementation | [*Neural Controlled Differential Equations* (NeurIPS 2020)](https://arxiv.org/abs/2005.08926) (NeuralCDE-style ODE-RNN with spline control path) | [patrick-kidger/NeuralCDE](https://github.com/patrick-kidger/NeuralCDE) | One packaged ODE-RNN implementation built on the NeuralCDE infrastructure with a natural-cubic-spline control path. `ode-rnn` in [§4](#4-additional-ode-models) is a sibling implementation from the same broader method family. |
 | `ode-lstm` | canonical | [*Learning Long-Term Dependencies in Irregularly-Sampled Time Series* (NeurIPS 2020)](https://arxiv.org/abs/2006.04418) | [mlech26l/ode-lstms](https://github.com/mlech26l/ode-lstms) | LSTM cell with continuous-time hidden state evolved by an ODE between observations. |
 
 ### ODE family naming notes

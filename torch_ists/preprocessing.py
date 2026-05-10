@@ -148,9 +148,8 @@ def apply_missingness(
     """Apply synthetic missingness to [N, D, L] input data.
 
     Mechanism guidance:
-    - MCAR: default/recommended production baseline.
-    - MAR/MNAR: pseudo-level experimental implementations for analysis only.
-      Keep `MISSINGNESS_EXPERIMENTAL=True` until theoretical validation is complete.
+    - MCAR: default/recommended packaged baseline.
+    - MAR/MNAR: advanced missingness modes intended mainly for comparative analysis.
 
     Returns:
         X_missing: [N, D, L], with missing values as NaN.
@@ -225,7 +224,7 @@ def preprocess(
         seed: RNG seed for missingness.
         channel_sync: If True, synchronize missing indices across channels.
         mechanism: Missing mechanism {"MCAR", "MAR", "MNAR"}.
-            MCAR is default/recommended. MAR/MNAR are pseudo-level experimental modes.
+            MCAR is default/recommended. MAR/MNAR are advanced analysis-oriented modes.
         model_name: Optional model name. When set, `interpolate` and
             `use_intensity` default to the model's expected configuration via
             `get_data_config(model_name)`. Explicit kwargs still override.

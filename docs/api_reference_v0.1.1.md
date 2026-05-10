@@ -461,7 +461,7 @@ remain `interpolate="cubic"` and `use_intensity=True`.
 | `'linear'` | Linear interpolation | Fast, piecewise linear |
 | `'rectilinear'` | Rectilinear linear interpolation | Stepwise observation paths |
 | `'cubic'` | Cubic spline | Global fallback and coeff scaffolding for basic/attention rows |
-| `'hermite'` | Hermite cubic spline | SDE/TSDE/DSDE families (auto-selected) |
+| `'hermite'` | Hermite cubic spline | Hermite-selected continuous-time rows in the packaged 0.1.1 model set |
 
 ---
 
@@ -517,9 +517,9 @@ print(np.isnan(X_missing).mean())  # ~0.3
 | **MAR** | Missing at random (feature-dependent) | ⚠️ Experimental |
 | **MNAR** | Missing not at random (value-dependent) | ⚠️ Experimental |
 
-**Experimental Flag**: `MISSINGNESS_EXPERIMENTAL = True` (MAR/MNAR are pseudo-level implementations)
+**Feature Flag**: `MISSINGNESS_EXPERIMENTAL = True` keeps MAR/MNAR available in the packaged API.
 
-**Behavior Note**: standalone runtime no longer accepts a legacy `params` payload. The public contract is `rate + mechanism + seed + channel_sync`.
+**Behavior Note**: the public missingness contract is `rate + mechanism + seed + channel_sync`.
 
 ---
 
@@ -631,7 +631,7 @@ print(path)  # split/BasicMotions/BasicMotions_42
 The package model API is model-centric:
 1. Primary public API: `ists_classifier`
 2. Advanced public API: `ists_model`
-3. Bundled command-line workflow: split creation, parameter search, and evaluation scripts (their internal helpers are not part of the public Python API)
+3. Bundled command-line workflow: split creation, parameter search, and evaluation scripts
 
 Canonical public entrypoint is `torch_ists.model`.
 
@@ -641,7 +641,7 @@ Task support tiers:
 
 Readiness note:
 - use `ists_classifier` when you want the most stable path in version `0.1.1`.
-- non-classification tasks are available through `ists_model`, but they are experimental and may change in future releases.
+- non-classification tasks are available through `ists_model` for advanced use in version `0.1.1`.
 
 `torch_ists.classifier` is not part of the public package surface.
 
@@ -696,7 +696,7 @@ Behavior notes:
   outside that workflow it is literal zero-fill.
 - Non-finite backbone outputs, hidden states, or logits raise `RuntimeError`; the package does not silently zero-fill them.
 
-### 6.2 `ists_model` (Experimental)
+### 6.2 `ists_model` (Advanced)
 
 ```python
 class ists_model(nn.Module):
@@ -736,9 +736,9 @@ Forward contracts by task:
 
 Unsupported task names are fail-fast with `NotImplementedError`.
 
-Experimental boundary:
+Broader task surface:
 - `regression/forecasting/imputation/outlier_detection/change_detection` are available for advanced use.
-- these tasks are not declared as production-ready in version `0.1.1`.
+- `classification` remains the primary packaged path in version `0.1.1`.
 
 Behavior notes:
 - If `use_intensity` is omitted (`None`), runtime resolves it from `get_data_config(model_name)` inside `ists_layer`.
@@ -765,12 +765,12 @@ Behavior notes:
 `head_depth` and `flow_depth` are different knobs.
 
 - `head_depth`: controls the depth of the prediction head after the backbone. `1` applies a direct projection, and `k > 1` adds `k - 1` hidden-to-hidden layers before the final projection.
-- `flow_depth`: reserved for flow-family backbones. It is accepted for API compatibility, but it is not used by the active `0.1.1` model set.
+- `flow_depth`: accepted for API compatibility, but it is not used by the active `0.1.1` model set.
 
 Current `0.1.1` defaults:
 - `cnn`, `rnn`, `lstm`, `gru`: `head_depth` is not used
 - `neuralcde*` and the SDE baseline/stable-SDE models: `head_depth` defaults to the script/runtime-provided layer depth
-- `flow_depth` is reserved for model families outside version `0.1.1`
+- `flow_depth` is not used by the packaged `0.1.1` model set
 
 Compatibility mapping:
 - legacy `num_hidden_layers` is interpreted as `head_depth`.
@@ -780,7 +780,7 @@ Compatibility mapping:
 ### 6.4 Command-Line Scripts
 
 The bundled scripts `scripts/set_splits.py`, `scripts/param_search.py`, and
-`scripts/model_run.py` are part of the packaged workflow. They rely on internal
+`scripts/model_run.py` are part of the packaged workflow. They rely on bundled
 helper modules for script execution, but those helpers are not part of the
 public Python import API.
 

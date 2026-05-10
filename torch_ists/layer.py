@@ -213,7 +213,7 @@ class ists_layer(nn.Module):
         handler = HandlerRegistry.get_handler(self.model_name)
         forward_kwargs = dict(kwargs)
         direct_method = forward_kwargs.pop("method", None)
-        # Reserve internal routing keys to avoid duplicate keyword dispatch.
+        # Drop dispatch-only keys before forwarding to the selected handler.
         forward_kwargs.pop("model_name", None)
         forward_kwargs.pop("model_params", None)
         if "solver_options" not in forward_kwargs and "options" not in forward_kwargs:
