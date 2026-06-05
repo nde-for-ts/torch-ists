@@ -1,9 +1,9 @@
 # torch-ists Model Reference
 
-> **Package Version**: 0.1.3
-> **Scope**: Origin paper, canonical repository, and implementation note for every model shipped in `v0.1.3`.
+> **Package Version**: 0.1.4
+> **Scope**: Origin paper, canonical repository, and implementation note for every model shipped in `v0.1.4`.
 
-**Related docs**: [Package overview](../README.md) · [Docs index](README.md) · [API Reference](api_reference.md) · [Scripts Reference](scripts_reference.md) · [Project site](https://nde-for-ts.github.io/)
+**Related docs**: [Package overview](../README.md) · [Docs index](README.md) · [API Reference](api_reference.md) · [Scripts Reference](scripts_reference.md) · [New Model Onboarding](new_model_onboarding.md) · [Project site](https://nde-for-ts.github.io/)
 
 This document is a companion to [`api_reference.md`](api_reference.md). Use the API reference for class signatures and call patterns; use this document to look up where each model comes from and which upstream implementation our copy is based on.
 
@@ -52,13 +52,13 @@ These baselines do not invoke any ODE / CDE / SDE solver and do not consume inte
 | `mtan` | Multi-Time Attention Network lineage | Packaged multi-time attention row routed through `AttentionHandler`; consumes values, original sequence stack, and normalized sequence timestamps |
 | `sand` | SAnD-style self-attention lineage | Packaged encoder-style attention row routed through `AttentionHandler`; consumes zero-filled sequence values directly |
 
-Version `0.1.3` includes five attention-backed rows. They use the direct sequence stack and do not consume interpolation coefficients in the packaged runtime.
+Version `0.1.4` includes five attention-backed rows. They use the direct sequence stack and do not consume interpolation coefficients in the packaged runtime.
 
 **Blind-spot note.** The packaged `transformer` follows the same naive missing-data treatment as the sequence baselines: it zero-fills `NaN`, ignores interpolation coefficients, and does not apply `src_key_padding_mask` in the current runtime. Use it as a direct attention baseline rather than a missingness-aware attention model.
 
 **Masked variant note.** `transformer-mask` keeps the same backbone and zero-fill preprocessing, but it applies `src_key_padding_mask` using the packaged observation mask. Treat it as a package-specific mitigation variant, not as a separate external paper-backed method.
 
-**SAnD mask caveat.** `sand` follows the direct zero-filled attention path and does not apply `src_key_padding_mask` in version `0.1.3`. This is an explicit package caveat, not a parity-verified missingness-aware attention claim.
+**SAnD mask caveat.** `sand` follows the direct zero-filled attention path and does not apply `src_key_padding_mask` in version `0.1.4`. This is an explicit package caveat, not a parity-verified missingness-aware attention claim.
 
 ---
 

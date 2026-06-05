@@ -1,16 +1,16 @@
 # torch-ists
 
-[![Version](https://img.shields.io/badge/version-0.1.3-blue)](pyproject.toml) [![Python](https://img.shields.io/badge/python-%3E%3D3.10-blue)](pyproject.toml) [![PyTorch](https://img.shields.io/badge/PyTorch-%3E%3D2.0-ee4c2c)](pyproject.toml) [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![Package status](https://img.shields.io/badge/status-preview-orange)](PACKAGE_STATUS.json)
+[![Version](https://img.shields.io/badge/version-0.1.4-blue)](pyproject.toml) [![Python](https://img.shields.io/badge/python-%3E%3D3.10-blue)](pyproject.toml) [![PyTorch](https://img.shields.io/badge/PyTorch-%3E%3D2.0-ee4c2c)](pyproject.toml) [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![Package status](https://img.shields.io/badge/status-preview-orange)](PACKAGE_STATUS.json)
 
 **PyTorch toolkit for irregular and multivariate time series modeling with sequence models, attention models, neural ODE, neural CDE, neural SDE, stable SDE, and hybrid continuous-time models.**
 
 `torch-ists` is a research-oriented Python package for irregularly sampled multivariate time series modeling, missing-data benchmarks, and continuous-time sequence modeling. It provides a consistent PyTorch API with task heads for classification, regression, forecasting, imputation, outlier detection, and change detection. The current package pairs those runtime APIs with packaged benchmark scripts for the stable classification workflow, UCR/UEA archive data loading, and documented model lineage for neural differential equation methods including neural ODE, neural CDE, neural SDE, stable SDE, and hybrid continuous-time models.
 
-**Related docs**: [Docs index](docs/README.md) · [API Reference](docs/api_reference.md) · [Model Reference](docs/model_reference.md) · [Scripts Reference](docs/scripts_reference.md) · [Project site](https://nde-for-ts.github.io/)
+**Related docs**: [Docs index](docs/README.md) · [API Reference](docs/api_reference.md) · [Model Reference](docs/model_reference.md) · [Scripts Reference](docs/scripts_reference.md) · [New Model Onboarding](docs/new_model_onboarding.md) · [Project site](https://nde-for-ts.github.io/)
 
 ## Overview
 
-`torch-ists` provides a unified interface for training and evaluating continuous-time and discrete-time PyTorch models on irregularly sampled multivariate time series. Version `0.1.3` ships 35 packaged architectures across sequence, attention, CDE, ODE, SDE, and hybrid method families, with the classification benchmark pipeline as the stable packaged workflow.
+`torch-ists` provides a unified interface for training and evaluating continuous-time and discrete-time PyTorch models on irregularly sampled multivariate time series. Version `0.1.4` ships 35 packaged architectures across sequence, attention, CDE, ODE, SDE, and hybrid method families, with the classification benchmark pipeline as the stable packaged workflow.
 
 The package exposes `ists_classifier` for the stable classification path and the lower-level `ists_model` constructor for advanced experimentation with additional task heads, irregular sampling, missing observations, and continuous-time model variants.
 
@@ -101,7 +101,7 @@ Input preparation:
 
 ## Models Included
 
-Version `0.1.3` includes 35 models across seven families:
+Version `0.1.4` includes 35 models across seven families:
 
 | Family | Models |
 |--------|--------|
@@ -127,18 +127,26 @@ PYTHONPATH=. python scripts/param_search.py --help
 PYTHONPATH=. python scripts/model_run.py --help
 ```
 
+## New Model Onboarding
+
+Version `0.1.4` documents the public extension boundary for external model work. Custom PyTorch modules should live outside the `torch_ists` namespace and compose the packaged data, split, preprocessing, and task wrappers from user-owned code. The package does not expose a public handler-registration API in this release.
+
+See `docs/new_model_onboarding.md` for the wrapper pattern.
+
 ## Documentation
 
 - `docs/README.md` — docs index for the current public package
 - `docs/api_reference.md` — exported runtime API and packaged script contract
 - `docs/model_reference.md` — per-model origin paper, canonical repo, and implementation note
 - `docs/scripts_reference.md` — bundled CLI scripts: flags, outputs, and pipeline order
+- `docs/new_model_onboarding.md` — public extension boundary for external custom models
 
 ## Project Status
 
-This is a **preview** release (`v0.1.3`):
+This is a **preview** release (`v0.1.4`):
 
 - Core classification pipeline is reproducible
 - The package includes the sequence, attention variants, NeuralCDE, ODE, and SDE families listed above
-- UCR/UEA loading and bundled script import paths are part of the `0.1.3` package contract
-- Documentation and bundled scripts cover the packaged `0.1.3` workflow
+- UCR/UEA loading and bundled script import paths are part of the `0.1.4` package contract
+- New-model onboarding guidance documents the supported external-wrapper pattern
+- Documentation and bundled scripts cover the packaged `0.1.4` workflow

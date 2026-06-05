@@ -1,6 +1,6 @@
 {
   "package_stage": "preview",
-  "package_version": "0.1.3",
-  "scope": "basic runtime, attention family, NeuralCDE, ODE family, SDE baseline/stable SDE, core classification pipeline, and custom NPZ data support",
+  "package_version": "0.1.4",
+  "scope": "basic runtime, attention family, NeuralCDE, ODE family, SDE baseline/stable SDE, core classification pipeline, custom NPZ data support, and external new-model onboarding guidance",
   "included_models": ["cnn", "rnn", "lstm", "gru", "bilstm", "gru-simple", "tlstm", "plstm", "tglstm", "transformer", "transformer-mask", "miam", "mtan", "sand", "neuralcde", "neuralcde-l", "neuralcde-r", "neuralcde-c", "neuralcde-h", "gru-dt", "gru-d", "gru-ode", "ode-rnn-spline", "ode-lstm", "ode-rnn", "latentode", "gru-ode-bayes", "naive_cde", "neural_ode", "neural_ode_t", "neural_sde", "neural_sde_t", "neural_lsde", "neural_lnsde", "neural_gsde"]
 }
