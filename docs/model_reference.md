@@ -1,7 +1,7 @@
 # torch-ists Model Reference
 
-> **Package Version**: 0.1.2
-> **Scope**: Origin paper, canonical repository, and implementation note for every model shipped in `v0.1.2`.
+> **Package Version**: 0.1.3
+> **Scope**: Origin paper, canonical repository, and implementation note for every model shipped in `v0.1.3`.
 
 **Related docs**: [Package overview](../README.md) · [Docs index](README.md) · [API Reference](api_reference.md) · [Scripts Reference](scripts_reference.md) · [Project site](https://nde-for-ts.github.io/)
 
@@ -46,19 +46,19 @@ These baselines do not invoke any ODE / CDE / SDE solver and do not consume inte
 
 | Model | Origin | Implementation in this package |
 |---|---|---|
-| `transformer` | Transformer encoder baseline ([*Attention Is All You Need*, 2017](https://arxiv.org/abs/1706.03762)) | Packaged sequence-attention bridge routed through `AttentionHandler`; commonly used through the classification workflow |
+| `transformer` | Transformer encoder baseline ([*Attention Is All You Need*, 2017](https://arxiv.org/abs/1706.03762)) | Packaged sequence-attention bridge routed through `AttentionHandler` with a fixed classifier head for irregular time-series classification |
 | `transformer-mask` | Packaged attention variant built on the same Transformer encoder backbone as `transformer` | Zero-fill sequence-attention variant that additionally applies `src_key_padding_mask` from the packaged observation mask before the classifier head |
 | `miam` | Missing Information Attention Model lineage | Packaged time-aware attention row routed through `AttentionHandler`; consumes values, original sequence stack, and normalized sequence timestamps |
 | `mtan` | Multi-Time Attention Network lineage | Packaged multi-time attention row routed through `AttentionHandler`; consumes values, original sequence stack, and normalized sequence timestamps |
 | `sand` | SAnD-style self-attention lineage | Packaged encoder-style attention row routed through `AttentionHandler`; consumes zero-filled sequence values directly |
 
-Version `0.1.2` includes five attention-backed rows. They use the direct sequence stack and do not consume interpolation coefficients in the packaged runtime.
+Version `0.1.3` includes five attention-backed rows. They use the direct sequence stack and do not consume interpolation coefficients in the packaged runtime.
 
 **Blind-spot note.** The packaged `transformer` follows the same naive missing-data treatment as the sequence baselines: it zero-fills `NaN`, ignores interpolation coefficients, and does not apply `src_key_padding_mask` in the current runtime. Use it as a direct attention baseline rather than a missingness-aware attention model.
 
 **Masked variant note.** `transformer-mask` keeps the same backbone and zero-fill preprocessing, but it applies `src_key_padding_mask` using the packaged observation mask. Treat it as a package-specific mitigation variant, not as a separate external paper-backed method.
 
-**SAnD mask caveat.** `sand` follows the direct zero-filled attention path and does not apply `src_key_padding_mask` in version `0.1.2`. This is an explicit package caveat, not a parity-verified missingness-aware attention claim.
+**SAnD mask caveat.** `sand` follows the direct zero-filled attention path and does not apply `src_key_padding_mask` in version `0.1.3`. This is an explicit package caveat, not a parity-verified missingness-aware attention claim.
 
 ---
 

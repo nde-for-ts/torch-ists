@@ -57,10 +57,10 @@ def _parse_csv_list(raw):
 
 
 def _normalize_dataset_source_arg(raw: str) -> str:
-    normalized = str(raw).strip().lower()
-    if normalized in {"default", "refactoring"}:
-        return "default"
-    raise argparse.ArgumentTypeError("dataset source must be 'default'.")
+    try:
+        return normalize_dataset_source(raw)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
 def _normalize_search_mode(raw: str) -> str:
@@ -111,8 +111,8 @@ def parse_cli_args():
         "--dataset-source",
         type=_normalize_dataset_source_arg,
         default="default",
-        metavar="{default}",
-        help="Dataset source backend for packaged built-in datasets.",
+        metavar="{default,npz}",
+        help="Dataset source backend. default=packaged built-in dataset loader, npz=local file payload.",
     )
     parser.add_argument(
         "--dataset-npz",

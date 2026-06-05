@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 from _common import configure_runtime_paths
-from dataset_source_contracts import load_dataset
+from dataset_source_contracts import load_dataset, normalize_dataset_source
 
 sys.dont_write_bytecode = True
 
@@ -16,10 +16,10 @@ def _ensure_repo_on_path() -> Path:
     return configure_runtime_paths(__file__)
 
 def _normalize_dataset_source_arg(raw: str) -> str:
-    normalized = str(raw).strip().lower()
-    if normalized in {"default", "refactoring"}:
-        return "default"
-    raise argparse.ArgumentTypeError("dataset source must be 'default'.")
+    try:
+        return normalize_dataset_source(raw)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
 def _load_dataset(args):
@@ -37,8 +37,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--dataset-source",
         type=_normalize_dataset_source_arg,
         default="default",
-        metavar="{default}",
-        help="Dataset source backend for packaged built-in datasets.",
+        metavar="{default,npz}",
+        help="Dataset source backend. default=packaged built-in dataset loader, npz=local file payload.",
     )
     parser.add_argument(
         "--dataset-npz",

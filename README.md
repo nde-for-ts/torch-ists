@@ -1,6 +1,6 @@
 # torch-ists
 
-[![Version](https://img.shields.io/badge/version-0.1.2-blue)](pyproject.toml) [![Python](https://img.shields.io/badge/python-%3E%3D3.10-blue)](pyproject.toml) [![PyTorch](https://img.shields.io/badge/PyTorch-%3E%3D2.0-ee4c2c)](pyproject.toml) [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![Package status](https://img.shields.io/badge/status-preview-orange)](PACKAGE_STATUS.json)
+[![Version](https://img.shields.io/badge/version-0.1.3-blue)](pyproject.toml) [![Python](https://img.shields.io/badge/python-%3E%3D3.10-blue)](pyproject.toml) [![PyTorch](https://img.shields.io/badge/PyTorch-%3E%3D2.0-ee4c2c)](pyproject.toml) [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![Package status](https://img.shields.io/badge/status-preview-orange)](PACKAGE_STATUS.json)
 
 **PyTorch toolkit for irregular and multivariate time series modeling with sequence models, attention models, neural ODE, neural CDE, neural SDE, stable SDE, and hybrid continuous-time models.**
 
@@ -10,7 +10,7 @@
 
 ## Overview
 
-`torch-ists` provides a unified interface for training and evaluating continuous-time and discrete-time PyTorch models on irregularly sampled multivariate time series. Version `0.1.2` ships 35 packaged architectures across sequence, attention, CDE, ODE, SDE, and hybrid method families, with the classification benchmark pipeline as the stable packaged workflow.
+`torch-ists` provides a unified interface for training and evaluating continuous-time and discrete-time PyTorch models on irregularly sampled multivariate time series. Version `0.1.3` ships 35 packaged architectures across sequence, attention, CDE, ODE, SDE, and hybrid method families, with the classification benchmark pipeline as the stable packaged workflow.
 
 The package exposes `ists_classifier` for the stable classification path and the lower-level `ists_model` constructor for advanced experimentation with additional task heads, irregular sampling, missing observations, and continuous-time model variants.
 
@@ -101,7 +101,7 @@ Input preparation:
 
 ## Models Included
 
-Version `0.1.2` includes 35 models across seven families:
+Version `0.1.3` includes 35 models across seven families:
 
 | Family | Models |
 |--------|--------|
@@ -136,9 +136,9 @@ PYTHONPATH=. python scripts/model_run.py --help
 
 ## Project Status
 
-This is a **preview** release (`v0.1.2`):
+This is a **preview** release (`v0.1.3`):
 
 - Core classification pipeline is reproducible
 - The package includes the sequence, attention variants, NeuralCDE, ODE, and SDE families listed above
-- UCR/UEA loading and bundled script import paths are part of the `0.1.2` package contract
-- Documentation and bundled scripts cover the packaged `0.1.2` workflow
+- UCR/UEA loading and bundled script import paths are part of the `0.1.3` package contract
+- Documentation and bundled scripts cover the packaged `0.1.3` workflow
