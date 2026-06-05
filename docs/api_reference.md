@@ -1,21 +1,13 @@
-# torch-ists API Reference v0.1.1
+# torch-ists API Reference
 
-> **Reference Version**: 0.1.1 (matches package version)
-> **Package Version**: 0.1.1
-> **Date**: 2026-05-10
+> **Package Version**: 0.1.2
 > **Status**: Public package reference
-> **Scope**: Exported runtime APIs and packaged scripts shipped in `0.1.1`
-> **Note**: This document describes the public `0.1.1` package release. Features outside the model and task lists below are not part of this package contract.
-> **Policy**: This API reference intentionally stays narrow and appendix-free.
+> **Scope**: Exported runtime APIs and packaged scripts shipped in `0.1.2`
+> **Note**: This document describes the public `0.1.2` package release. Features outside the model and task lists below are not part of this package contract.
 
 ---
 
-**Related docs**:
-[Package overview](../README.md) ·
-[Docs index](README.md) ·
-[Model Reference v0.1.1](model_reference_v0.1.1.md) ·
-[Scripts Reference v0.1.1](scripts_reference_v0.1.1.md) ·
-[Project site](https://nde-for-ts.github.io/)
+**Related docs**: [Package overview](../README.md) · [Docs index](README.md) · [Model Reference](model_reference.md) · [Scripts Reference](scripts_reference.md) · [Project site](https://nde-for-ts.github.io/)
 
 ---
 
@@ -57,8 +49,9 @@ Environment contract:
 - `.[data]` installs `pandas` and `sktime` for `torch_ists.uea_ucr_loader`
 - `.[cde]` installs the packaged NeuralCDE backend requirements (`torchcde`, `torchdiffeq`)
 - `.[sde]` installs the packaged SDE backend requirement (`torchsde`)
-- `.[all]` installs the optional data and model backend dependencies for version `0.1.1`
+- `.[all]` installs the optional data and model backend dependencies for version `0.1.2`
 - `TORCH_ISTS_RUNTIME_ROOT` is optional when running packaged scripts from outside the package root
+- Base-install CLI discovery is supported: `scripts/* --help` must not import optional tuning/model dependencies before the selected runtime path needs them.
 
 ### 1.2 Basic Usage (5-line example)
 
@@ -77,7 +70,7 @@ seq = torch.randn(16, 3, 64, 8)  # [batch, channels, length, features]
 output = model(seq, coeffs=None)  # → [16, 2]
 ```
 
-Import package as `torch_ists`. This document covers the public `0.1.1` package surface.
+Import package as `torch_ists`. This document covers the public `0.1.2` package surface.
 
 ---
 
@@ -253,9 +246,7 @@ The Data Loading API provides:
 
 **Exported**: ✅ `DataLoader`, `DatasetBundle`, `uea_ucr_loader`
 
-`DataLoader` is for user-provided arrays, data frames, and files. The
-`uea_ucr_loader` submodule is the built-in archive loader used by the bundled
-benchmark scripts.
+`DataLoader` is for user-provided arrays, data frames, and files. The `uea_ucr_loader` submodule is the built-in archive loader used by the bundled benchmark scripts.
 
 ```python
 from torch_ists import uea_ucr_loader
@@ -263,41 +254,19 @@ from torch_ists import uea_ucr_loader
 X, y = uea_ucr_loader.get_data("ECG200")
 ```
 
-Install `.[data]` for the optional `pandas` and `sktime` dependencies. The
-loader stores and searches UCR/UEA archives under `TORCH_ISTS_DATA_ROOT` when
-set, otherwise under `<package checkout>/data`. Fallback search checks
-`Univariate_ts/<dataset>/<dataset>_{TRAIN,TEST}.ts` and
-`Multivariate_ts/<dataset>/<dataset>_{TRAIN,TEST}.ts`.
+Install `.[data]` for the optional `pandas` and `sktime` dependencies. The loader stores and searches UCR/UEA archives under `TORCH_ISTS_DATA_ROOT` when set, otherwise under `<package checkout>/data`. Fallback search checks `Univariate_ts/<dataset>/<dataset>_{TRAIN,TEST}.ts` and `Multivariate_ts/<dataset>/<dataset>_{TRAIN,TEST}.ts`.
 
-UCR/UEA loader contract: packaged scripts pool the original UCR/UEA train and
-test partitions and then create project split files. Variable-length
-resampling therefore uses the pooled train+test maximum length before the
-pooled data is split again. Labels are encoded from the pooled train+test
-label set by default, and ragged tensor padding uses `NaN` so downstream
-missingness masks can identify padded positions. Use
-`get_data(..., label_policy="train", padding="last")` only to reproduce older
-benchmark preprocessing.
+UCR/UEA loader contract: packaged scripts pool the original UCR/UEA train and test partitions and then create project split files. Variable-length resampling therefore uses the pooled train+test maximum length before the pooled data is split again. Labels are encoded from the pooled train+test label set by default, and ragged tensor padding uses `NaN` so downstream missingness masks can identify padded positions. Use `get_data(..., label_policy="train", padding="last")` only to reproduce older benchmark preprocessing.
 
 #### Legacy-mode caveats
 
-`label_policy="train"` fails loudly when `y_test` contains a class not seen
-in `y_train`: the loader raises `ValueError` listing the offending labels and
-recommending the default `"pooled"` mode. `padding="last"` reproduces the
-legacy forward-fill of the last observed value; in this mode the loader
-returns no companion mask, so downstream models cannot distinguish padded
-positions from real observations. Use both only for legacy reproducibility
-and keep the runtime defaults otherwise.
+`label_policy="train"` fails loudly when `y_test` contains a class not seen in `y_train`: the loader raises `ValueError` listing the offending labels and recommending the default `"pooled"` mode. `padding="last"` reproduces the legacy forward-fill of the last observed value; in this mode the loader returns no companion mask, so downstream models cannot distinguish padded positions from real observations. Use both only for legacy reproducibility and keep the runtime defaults otherwise.
 
 #### Train/test boundary
 
-The loader concatenates the original UCR/UEA train and test partitions and
-discards the boundary. The project split (`set_splits.py`, stratified) is
-applied to the pooled data, so the train/val/test split that downstream
-scripts use does not correspond to the original UCR/UEA partition. There is
-no opt-in to preserve the original partition boundary in `0.1.1`; external
-benchmarks that need the original split should load `X_train` / `y_train` /
-`X_test` / `y_test` directly via `sktime.datasets.load_UCR_UEA_dataset` or
-their own loader and run training/evaluation outside the bundled scripts.
+The loader concatenates the original UCR/UEA train and test partitions and discards the boundary. The project split (`set_splits.py`, stratified) is applied to the pooled data, so the train/val/test split that downstream scripts use does not correspond to the original UCR/UEA partition. There is no opt-in to preserve the original partition boundary in `0.1.2`; external benchmarks that need the original split should load `X_train` / `y_train` / `X_test` / `y_test` directly via `sktime.datasets.load_UCR_UEA_dataset` or their own loader and run training/evaluation outside the bundled scripts.
+
+Package contract for version `0.1.2`: the UCR/UEA loader is a required public submodule in the installed package and package checkout. Packaged split generation through `--dataset-source default` depends on this submodule.
 
 ---
 
@@ -375,9 +344,9 @@ from torch_ists import DataLoader
 
 df = pd.DataFrame({
     'series_id': [0, 0, 0, 1, 1, 1],
-    'time': [0, 1, 2, 0, 1, 2],
-    'feature1': [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
-    'feature2': [0.5, 1.5, 2.5, 3.5, 4.5, 5.5],
+    'time': [0, 1, 2, 3, 4, 5],
+    'feature1': [0.8, 1.4, 1.1, -0.2, 0.3, 0.0],
+    'feature2': [2.0, 1.7, 1.9, 4.1, 4.4, 4.2],
     'label': [0, 0, 0, 1, 1, 1],
 })
 
@@ -494,10 +463,7 @@ X_missing, X_mask, X_delta, coeffs = preprocess(
 )
 ```
 
-When `model_name` is set, `interpolate` and `use_intensity` default to
-`get_data_config(model_name)`. Explicit values for those kwargs still override
-the model-derived defaults. If `model_name` is omitted, the legacy defaults
-remain `interpolate="cubic"` and `use_intensity=True`.
+When `model_name` is set, `interpolate` and `use_intensity` default to `get_data_config(model_name)`. Explicit values for those kwargs still override the model-derived defaults. If `model_name` is omitted, the legacy defaults remain `interpolate="cubic"` and `use_intensity=True`.
 
 #### Interpolation Modes
 
@@ -507,7 +473,7 @@ remain `interpolate="cubic"` and `use_intensity=True`.
 | `'linear'` | Linear interpolation | Fast, piecewise linear |
 | `'rectilinear'` | Rectilinear linear interpolation | Stepwise observation paths |
 | `'cubic'` | Cubic spline | Global fallback and coeff scaffolding for basic/attention rows |
-| `'hermite'` | Hermite cubic spline | Hermite-selected continuous-time rows in the packaged 0.1.1 model set |
+| `'hermite'` | Hermite cubic spline | Hermite-selected continuous-time rows in the packaged 0.1.2 model set |
 
 ---
 
@@ -682,12 +648,12 @@ The package model API is model-centric:
 Canonical public entrypoint is `torch_ists.model`.
 
 Task support tiers:
-- `classification`: primary supported path in version `0.1.1`
+- `classification`: primary supported path in version `0.1.2`
 - `regression`, `forecasting`, `imputation`, `outlier_detection`, `change_detection`: experimental
 
 Readiness note:
-- use `ists_classifier` when you want the most stable path in version `0.1.1`.
-- non-classification tasks are available through `ists_model` for advanced use in version `0.1.1`.
+- use `ists_classifier` when you want the most stable path in version `0.1.2`.
+- non-classification tasks are available through `ists_model` for advanced use in version `0.1.2`.
 
 `torch_ists.classifier` is not part of the public package surface.
 
@@ -724,22 +690,15 @@ Forward contract:
 def forward(seq, coeffs) -> torch.Tensor  # [N, num_class]
 ```
 
-The current `0.1.1` package scope exposes logits-only forward returns.
+The current `0.1.2` package scope exposes logits-only forward returns.
 
 Behavior notes:
 - If `use_intensity` is omitted (`None`), runtime resolves it from `get_data_config(model_name)`.
-- `method` is an advanced solver argument for continuous-time families. The
-  effective solver behavior after argument normalization remains
-  family-specific; version `0.1.1` does not promise one package-wide default
-  across ODE/CDE/SDE families.
-- For sequence baselines and `transformer`, the packaged runtime applies
-  `torch.nan_to_num(..., nan=0.0)` before the backbone call and does not pass
-  a padding mask into the attention backbone.
-- `transformer-mask` uses the same zero-filled values, but it also applies
-  `src_key_padding_mask` derived from the packaged observation mask.
-- In the bundled script pipeline, train-only z-score normalization makes this
-  zero-fill path behave like per-channel mean imputation in raw value space;
-  outside that workflow it is literal zero-fill.
+- `method` is an advanced solver argument for continuous-time families. The effective solver behavior after argument normalization remains family-specific; version `0.1.2` does not promise one package-wide default across ODE/CDE/SDE families.
+- For sequence baselines, `transformer`, and `sand`, the packaged runtime applies `torch.nan_to_num(..., nan=0.0)` before the backbone call and does not pass a padding mask into the attention backbone.
+- `transformer-mask` uses the same zero-filled values, but it also applies `src_key_padding_mask` derived from the packaged observation mask.
+- `miam` and `mtan` consume zero-filled values together with the original sequence stack and normalized timestamps; they do not use interpolation coefficients.
+- In the bundled script pipeline, train-only z-score normalization makes this zero-fill path behave like per-channel mean imputation in raw value space; outside that workflow it is literal zero-fill.
 - Non-finite backbone outputs, hidden states, or logits raise `RuntimeError`; the package does not silently zero-fill them.
 
 ### 6.2 `ists_model` (Advanced)
@@ -784,21 +743,15 @@ Unsupported task names are fail-fast with `NotImplementedError`.
 
 Broader task surface:
 - `regression/forecasting/imputation/outlier_detection/change_detection` are available for advanced use.
-- `classification` remains the primary packaged path in version `0.1.1`.
+- `classification` remains the primary packaged path in version `0.1.2`.
 
 Behavior notes:
 - If `use_intensity` is omitted (`None`), runtime resolves it from `get_data_config(model_name)` inside `ists_layer`.
-- `method` is accepted for continuous-time backbones, but effective
-  `dt/step_size/rtol/atol/adjoint` behavior remains family-specific and should
-  not be read as a single global runtime default contract.
-- For sequence baselines and `transformer`, the packaged runtime applies
-  `torch.nan_to_num(..., nan=0.0)` before the backbone call and does not pass
-  a padding mask into the attention backbone.
-- `transformer-mask` uses the same zero-filled values, but it also applies
-  `src_key_padding_mask` derived from the packaged observation mask.
-- In the bundled script pipeline, train-only z-score normalization makes this
-  zero-fill path behave like per-channel mean imputation in raw value space;
-  outside that workflow it is literal zero-fill.
+- `method` is accepted for continuous-time backbones, but effective `dt/step_size/rtol/atol/adjoint` behavior remains family-specific and should not be read as a single global runtime default contract.
+- For sequence baselines, `transformer`, and `sand`, the packaged runtime applies `torch.nan_to_num(..., nan=0.0)` before the backbone call and does not pass a padding mask into the attention backbone.
+- `transformer-mask` uses the same zero-filled values, but it also applies `src_key_padding_mask` derived from the packaged observation mask.
+- `miam` and `mtan` consume zero-filled values together with the original sequence stack and normalized timestamps; they do not use interpolation coefficients.
+- In the bundled script pipeline, train-only z-score normalization makes this zero-fill path behave like per-channel mean imputation in raw value space; outside that workflow it is literal zero-fill.
 - Some continuous-time rows honor `method` only at model creation.
 - Some compatibility models accept solver-shaped inputs only for backward compatibility and may emit a runtime warning.
 - Unsupported solver knobs raise `ValueError` instead of silently changing family behavior.
@@ -811,12 +764,12 @@ Behavior notes:
 `head_depth` and `flow_depth` are different knobs.
 
 - `head_depth`: controls the depth of the prediction head after the backbone. `1` applies a direct projection, and `k > 1` adds `k - 1` hidden-to-hidden layers before the final projection.
-- `flow_depth`: accepted for API compatibility, but it is not used by the active `0.1.1` model set.
+- `flow_depth`: accepted for API compatibility, but it is not used by the active `0.1.2` model set.
 
-Current `0.1.1` defaults:
+Current `0.1.2` defaults:
 - `cnn`, `rnn`, `lstm`, `gru`: `head_depth` is not used
 - `neuralcde*` and the SDE baseline/stable-SDE models: `head_depth` defaults to the script/runtime-provided layer depth
-- `flow_depth` is not used by the packaged `0.1.1` model set
+- `flow_depth` is not used by the packaged `0.1.2` model set
 
 Compatibility mapping:
 - legacy `num_hidden_layers` is interpreted as `head_depth`.
@@ -825,20 +778,13 @@ Compatibility mapping:
 
 ### 6.4 Command-Line Scripts
 
-The bundled scripts `scripts/set_splits.py`, `scripts/param_search.py`, and
-`scripts/model_run.py` are part of the packaged workflow. They rely on bundled
-helper modules for script execution, but those helpers are not part of the
-public Python import API.
+The bundled scripts `scripts/set_splits.py`, `scripts/param_search.py`, and `scripts/model_run.py` are part of the packaged workflow. They rely on bundled helper modules for script execution, but those helpers are not part of the public Python import API.
 
-Bundled workflow behavior in version `0.1.1`:
-- `scripts/param_search.py` and `scripts/model_run.py` choose solver methods
-  from model-specific package defaults.
-- Most users can rely on those defaults without setting solver arguments
-  manually.
-- Import-level solver kwargs are advanced controls, and supported options vary
-  by model family.
-- Unsupported solver knobs raise `ValueError` instead of silently changing
-  runtime behavior.
+Bundled workflow behavior in version `0.1.2`:
+- `scripts/param_search.py` and `scripts/model_run.py` choose solver methods from model-specific package defaults.
+- Most users can rely on those defaults without setting solver arguments manually.
+- Import-level solver kwargs are advanced controls, and supported options vary by model family.
+- Unsupported solver knobs raise `ValueError` instead of silently changing runtime behavior.
 
 ## 7. Config API
 
@@ -851,16 +797,13 @@ The Config API provides:
 
 **Location**: `torch_ists.config`
 
-**Exported**: `MODEL_REGISTRY`, config helpers, and runtime policy helpers are
-available from `torch_ists.config`. Additional model metadata constants are
-available from `torch_ists.config.models`.
+**Exported**: `MODEL_REGISTRY`, config helpers, and runtime policy helpers are available from `torch_ists.config`. Additional model metadata constants are available from `torch_ists.config.models`.
 
 ---
 
 ### 7.1 `get_data_config()`
 
-Get model-specific preprocessing settings used by
-`preprocess(X, model_name=...)`.
+Get model-specific preprocessing settings used by `preprocess(X, model_name=...)`.
 
 #### Signature
 
@@ -874,16 +817,15 @@ def get_data_config(model_name: str) -> Dict[str, Any]:
 - `'interpolation'`: `str` - Interpolation mode (`'natural'`, `'linear'`, `'rectilinear'`, `'cubic'`, `'hermite'`)
 - `'use_intensity'`: `bool` - Compute intensity channel
 
-`get_data_config()` describes the defaults that `preprocess()` applies when a
-`model_name` is provided. It does not mean every packaged model consumes the
-returned interpolation coefficients at forward time.
+`get_data_config()` describes the defaults that `preprocess()` applies when a `model_name` is provided. It does not mean every packaged model consumes the returned interpolation coefficients at forward time.
 
 #### Rules
 
 | Packaged row(s) | `interpolation` | `use_intensity` | Runtime note |
 |------------|--------------|---------------|--------------|
-| `cnn`, `rnn`, `lstm`, `gru`, `bilstm`, `gru-simple`, `transformer` | `'cubic'` | `False` | `coeffs` ignored; packaged handlers use the sequence stack directly, replace `NaN` with `0.0`, and do not apply an attention padding mask |
+| `cnn`, `rnn`, `lstm`, `gru`, `bilstm`, `gru-simple`, `tlstm`, `plstm`, `tglstm`, `transformer`, `sand` | `'cubic'` | `False` | `coeffs` ignored; packaged handlers use the sequence stack directly, replace `NaN` with `0.0`, and do not apply an attention padding mask |
 | `transformer-mask` | `'cubic'` | `False` | `coeffs` ignored; packaged handler uses the sequence stack directly, replaces `NaN` with `0.0`, and applies `src_key_padding_mask` from the packaged observation mask |
+| `miam`, `mtan` | `'cubic'` | `False` | `coeffs` ignored; packaged handler uses values, the original sequence stack, and normalized sequence timestamps |
 | `neuralcde` | `'natural'` | `False` | consumes `coeffs` |
 | `neuralcde-l/r/c/h` | override (`linear/rectilinear/cubic/hermite`) | `False` | consumes `coeffs` |
 | `gru-d`, `gru-dt`, `ode-rnn-spline` | `'natural'` | `True` | consumes `coeffs` with intensity channels |
@@ -912,17 +854,9 @@ print(config)  # {'interpolation': 'cubic', 'use_intensity': False}
 
 If `ists_classifier()` or `ists_model()` is called with `use_intensity=None`, the runtime resolves the flag from this policy.
 
-For sequence baselines, `transformer`, and `transformer-mask`, this policy
-mainly matters when you call `preprocess(X, model_name=...)`; the packaged
-forward path still uses `coeffs=None`. In those rows, `'cubic'` is a
-preprocessing contract rather than a control-path runtime contract. The
-packaged runtime zero-fills `NaN` before the backbone call, and
-`transformer-mask` additionally applies `src_key_padding_mask`. In the bundled
-scripts, prior train-only z-score normalization makes this behave like
-per-channel mean imputation in raw value space.
+For sequence baselines, `transformer`, `transformer-mask`, `miam`, `mtan`, and `sand`, this policy mainly matters when you call `preprocess(X, model_name=...)`; the packaged forward path still uses `coeffs=None`. In those rows, `'cubic'` is a preprocessing contract rather than a control-path runtime contract. The packaged runtime zero-fills `NaN` before the backbone call. `transformer-mask` additionally applies `src_key_padding_mask`; `sand` does not. In the bundled scripts, prior train-only z-score normalization makes this behave like per-channel mean imputation in raw value space.
 
-This reference documents only the locked `0.1.1` package scope. Names outside
-the model list above are not part of the public package contract.
+This reference documents only the locked public `0.1.2` active model scope. Names outside the model list above are not default public active models.
 
 ---
 
@@ -942,9 +876,7 @@ def has_auxiliary_loss(model_name: str) -> bool:
 
 #### Models with Auxiliary Loss
 
-Current `0.1.1` package models do not expose auxiliary-loss outputs. For the
-locked package scope, `has_auxiliary_loss()` returns `False` for all supported
-models.
+Current `0.1.2` package models do not expose auxiliary-loss outputs. For the locked package scope, `has_auxiliary_loss()` returns `False` for all supported models.
 
 #### Example
 
@@ -960,14 +892,12 @@ print(has_auxiliary_loss('neural_gsde')) # False
 
 ## 8. Related References
 
-This API reference intentionally stays narrow and appendix-free.
+This API reference intentionally stays focused on public entry points.
 
-- For the packaged model roster, per-family origin notes, and current package exclusions, use [Model Reference v0.1.1](model_reference_v0.1.1.md).
-- For bundled CLI scripts, flags, output artifacts, and pipeline order, use [Scripts Reference v0.1.1](scripts_reference_v0.1.1.md).
-- For installation and the public package overview, use the [package README](../README_public.md).
+- For the packaged model roster, per-family origin notes, and package-scope notes, use [Model Reference](model_reference.md).
+- For bundled CLI scripts, flags, output artifacts, and pipeline order, use [Scripts Reference](scripts_reference.md).
+- For installation and the public package overview, use the [package README](../README.md).
 
 ---
 
-**End of API Reference v0.1.1**
-
-**End of Package API Reference v0.1.1**
+**End of API Reference**

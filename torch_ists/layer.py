@@ -84,6 +84,7 @@ def _normalize_model_name_or_raise(model_name: str) -> str:
     if model_name == "latentsde-kl":
         raise ValueError(
             "Model 'latentsde-kl' is not available in this package. "
+            "This preview package does not include LatentSDE. "
             "Use get_active_model_list() to see the list of available models."
         )
     normalized_flow_name = normalize_flow_alias(model_name)

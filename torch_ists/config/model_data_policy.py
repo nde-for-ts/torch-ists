@@ -50,8 +50,14 @@ _CUBIC_INTERPOLATION_MODELS = frozenset(
         "gru",
         "gru-simple",
         "bilstm",
+        "tlstm",
+        "plstm",
+        "tglstm",
         "transformer",
         "transformer-mask",
+        "miam",
+        "mtan",
+        "sand",
         "ode-lstm",
     ]
 )
@@ -79,10 +85,16 @@ _BASIC_SEQUENCE_MODELS = frozenset(
         "gru",
         "gru-simple",
         "bilstm",
+        "tlstm",
+        "plstm",
+        "tglstm",
     ]
 )
 _ATTENTION_MODELS = frozenset(
     [
+        "sand",
+        "mtan",
+        "miam",
         "transformer",
         "transformer-mask",
     ]

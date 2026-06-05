@@ -1,22 +1,11 @@
-# torch-ists Scripts Reference v0.1.1
+# torch-ists Scripts Reference
 
-> **Reference Version**: 0.1.1 (matches package version)
-> **Package Version**: 0.1.1
-> **Date**: 2026-05-10
+> **Package Version**: 0.1.2
 > **Scope**: Command-line entry points to the bundled benchmark pipeline.
 
-**Related docs**:
-[Package overview](../README.md) ·
-[Docs index](README.md) ·
-[API Reference v0.1.1](api_reference_v0.1.1.md) ·
-[Model Reference v0.1.1](model_reference_v0.1.1.md) ·
-[Project site](https://nde-for-ts.github.io/)
+**Related docs**: [Package overview](../README.md) · [Docs index](README.md) · [API Reference](api_reference.md) · [Model Reference](model_reference.md) · [Project site](https://nde-for-ts.github.io/)
 
-This document covers the three bundled scripts:
-[`scripts/set_splits.py`](../scripts/set_splits.py),
-[`scripts/param_search.py`](../scripts/param_search.py), and
-[`scripts/model_run.py`](../scripts/model_run.py). Use the API reference
-for Python class signatures and the model reference for per-model origin.
+This document covers the three bundled scripts: [`scripts/set_splits.py`](../scripts/set_splits.py), [`scripts/param_search.py`](../scripts/param_search.py), and [`scripts/model_run.py`](../scripts/model_run.py). Use the API reference for Python class signatures and the model reference for per-model origin.
 
 ---
 
@@ -41,8 +30,7 @@ set_splits.py  →  param_search.py  →  model_run.py
                                      evidence/  (run manifests, all stages)
 ```
 
-Each step writes to a dedicated root directory and reads from the previous
-step's output:
+Each step writes to a dedicated root directory and reads from the previous step's output:
 
 | Stage | Reads from | Writes to |
 |---|---|---|
@@ -53,17 +41,19 @@ step's output:
 All three scripts also append a JSON manifest to `evidence/` for run tracking.
 
 **Environment variable**:
-- `TORCH_ISTS_RUNTIME_ROOT` (optional) — override the runtime root when
-  running the scripts from outside the package directory.
-- `TORCH_ISTS_DATA_ROOT` (optional) — override the built-in UCR/UEA archive
-  root used by `--dataset-source default`.
+- `TORCH_ISTS_RUNTIME_ROOT` (optional) — override the runtime root when running the scripts from outside the package directory.
+- `TORCH_ISTS_DATA_ROOT` (optional) — override the built-in UCR/UEA archive root used by `--dataset-source default`.
+
+CLI import behavior:
+- `scripts/set_splits.py --help`, `scripts/param_search.py --help`, and `scripts/model_run.py --help` must run from the package checkout with `PYTHONPATH=.`.
+- Optional model/tuning dependencies are imported lazily. Ray Tune is required for Ray-backed multi-sample search, but `--help` and the local `--num-samples 1` path do not import Ray at module load time.
+- `--dataset-source default` uses the packaged `torch_ists.uea_ucr_loader` submodule, which pools original UCR/UEA TRAIN+TEST before project split generation.
 
 ---
 
 ## 2. `set_splits.py`
 
-**Purpose**: Generate stratified train/validation/test splits for a dataset
-with a fixed seed.
+**Purpose**: Generate stratified train/validation/test splits for a dataset with a fixed seed.
 
 **Usage**:
 
@@ -76,7 +66,7 @@ python scripts/set_splits.py --dataset-name ECG200 --seed 0
 | Flag | Type | Default | Description |
 |---|---|---|---|
 | `--dataset-name` | `str` | (required) | Dataset id used in the split file path. |
-| `--dataset-source` | `str` | `default` | Dataset source backend. `default` loads UCR/UEA by dataset name through `torch_ists.uea_ucr_loader.get_data`. |
+| `--dataset-source` | `str` | `default` | Dataset source backend. `default` loads UCR/UEA by dataset name through `torch_ists.uea_ucr_loader.get_data`; see the API reference loader section for pooled TRAIN+TEST length/label/padding rules. |
 | `--seed` | `int` | `0` | Random seed for the stratified split. |
 | `--if-exists` | `{reuse, fail}` | `reuse` | Behavior when the split artifact already exists. `reuse` keeps the existing file; `fail` raises. |
 | `--out-dir` (alias `--output-dir`) | `str` | `split` | Root directory for split artifacts. |
@@ -86,16 +76,14 @@ python scripts/set_splits.py --dataset-name ECG200 --seed 0
 
 ### Output
 
-- **Split file** (pickle): `<out-dir>/<dataset-name>/<dataset-name>_<seed>`
-  containing `(train_idx, valid_idx, test_idx)`.
+- **Split file** (pickle): `<out-dir>/<dataset-name>/<dataset-name>_<seed>` containing `(train_idx, valid_idx, test_idx)`.
 - **Run manifest**: `<contract-dir>/split_<run-id>.json`.
 
 ---
 
 ## 3. `param_search.py`
 
-**Purpose**: Run a Ray Tune hyperparameter search for one or more models on
-one or more datasets, using the splits produced by `set_splits.py`.
+**Purpose**: Run a hyperparameter search for one or more models on one or more datasets, using the splits produced by `set_splits.py`. Multi-sample search uses Ray Tune; the single-sample local path is the base-install bypass.
 
 **Usage**:
 
@@ -112,8 +100,8 @@ python scripts/param_search.py \
 |---|---|---|---|
 | `--seed` | `int` | `0` | Global seed for split selection and reproducibility. |
 | `--datasets` | `str` | (required) | Comma-separated dataset list. |
-| `--dataset-source` | `str` | `default` | Dataset source backend. `default` loads UCR/UEA by dataset name through `torch_ists.uea_ucr_loader.get_data`. |
-| `--models` | `str` | (active list) | Comma-separated model list. Defaults to the packaged active model list (29 models in v0.1.1). |
+| `--dataset-source` | `str` | `default` | Dataset source backend. `default` loads UCR/UEA by dataset name through `torch_ists.uea_ucr_loader.get_data`; see the API reference loader section for pooled TRAIN+TEST length/label/padding rules. |
+| `--models` | `str` | (active list) | Comma-separated model list. Defaults to the packaged active model list (35 models in v0.1.2). |
 | `--missing-rate` | `float` | `0.0` | Single missing rate applied uniformly during tuning. |
 | `--num-samples` | `int` | `20` | Ray Tune `num_samples` — hyperparameter trial budget. |
 | `--max-num-epochs` | `int` | `10` | Per-trial training budget. |
@@ -128,9 +116,9 @@ python scripts/param_search.py \
 | `--param-root` | `str` | `params` | Output parameter artifact root. |
 | `--contract-dir` | `str` | `evidence` | Directory for run manifests (stage = `search`). |
 | `--run-id` | `str` | (auto) | Run identifier. |
-| `--task` | `{classification}` | `classification` | Task head. Only `classification` is stable in v0.1.1. |
+| `--task` | `{classification}` | `classification` | Task head. Only `classification` is stable in v0.1.2. |
 | `--targets-root` | `str` | `targets` | Root directory for dataset target bundles when a task uses external targets. |
-| `--model-scope-variant` | `{active}` | `active` | Model scope. Only `active` is supported in v0.1.1. |
+| `--model-scope-variant` | `{active}` | `active` | Model scope. Only `active` is supported in v0.1.2. |
 
 ### Search Modes
 
@@ -139,23 +127,18 @@ python scripts/param_search.py \
 
 ### Output
 
-- **Param file** (pickle): `<param-root>/<dataset>/<dataset>_<model>[_cv]`
-  containing the best hyperparameter dict.
-- **Run manifest**: `<contract-dir>/search_<run-id>.json` (records, reused
-  records, skipped, summary).
+- **Param file** (pickle): `<param-root>/<dataset>/<dataset>_<model>[_cv]` containing the best hyperparameter dict.
+- **Run manifest**: `<contract-dir>/search_<run-id>.json` (records, reused records, skipped, summary).
 
 ### Workflow Dependencies
 
-Requires split files from `set_splits.py --seed <SEED>` for every dataset
-in `--datasets`.
+Requires split files from `set_splits.py --seed <SEED>` for every dataset in `--datasets`.
 
 ---
 
 ## 4. `model_run.py`
 
-**Purpose**: Train models with the searched hyperparameters and evaluate on
-the test set, in either standard mode (sweep over missing rates) or
-robustness mode (train at `missing=0`, test on multiple rates).
+**Purpose**: Train models with the searched hyperparameters and evaluate on the test set, in either standard mode (sweep over missing rates) or robustness mode (train at `missing=0`, test on multiple rates).
 
 **Usage** (standard mode):
 
@@ -183,7 +166,7 @@ python scripts/model_run.py \
 |---|---|---|---|
 | `--seed` | `int` | `0` | Random seed. |
 | `--datasets` | `str` | (default list) | Comma-separated dataset list. Defaults to the packaged dataset list. |
-| `--dataset-source` | `str` | `default` | Dataset source backend. `default` loads UCR/UEA by dataset name through `torch_ists.uea_ucr_loader.get_data`. |
+| `--dataset-source` | `str` | `default` | Dataset source backend. `default` loads UCR/UEA by dataset name through `torch_ists.uea_ucr_loader.get_data`; see the API reference loader section for pooled TRAIN+TEST length/label/padding rules. |
 | `--models` | `str` | (active list) | Comma-separated model list. Defaults to the packaged active model list. |
 | `--missing-rates` | `str` | `0.0,0.3,0.5,0.7` | Comma-separated missing rates for standard mode. Ignored in robustness mode. |
 | `--epochs` | `int` | `100` | Epochs per (dataset, missing-rate, model) run. |
@@ -200,24 +183,18 @@ python scripts/model_run.py \
 | `--out-root` | `str` | `out` | Output prediction artifact root. |
 | `--contract-dir` | `str` | `evidence` | Directory for run manifests (stage = `run`). |
 | `--run-id` | `str` | (auto) | Run identifier. |
-| `--task` | `{classification}` | `classification` | Task head. Only `classification` is stable in v0.1.1. |
+| `--task` | `{classification}` | `classification` | Task head. Only `classification` is stable in v0.1.2. |
 | `--targets-root` | `str` | `targets` | Root directory for dataset target bundles. |
 | `--model-scope-variant` | `{active}` | `active` | Model scope. |
 
 ### Runtime Modes
 
-- **Standard** (default) — triple loop `(dataset × missing-rate × model)`.
-  Trains once per missing rate and evaluates on the test set at the same
-  rate. Output schema:
+- **Standard** (default) — triple loop `(dataset × missing-rate × model)`. Trains once per missing rate and evaluates on the test set at the same rate. Output schema:
   ```json
   {"mode": "standard", "task": "classification",
    "train_missing_rate": <r>, "evaluations": [...], "meta": {...}}
   ```
-- **Robustness** (`--robustness-mode`) — double loop `(dataset × model)`.
-  Trains once on `missing=0.0`; evaluates on every rate in
-  `--robustness-test-rates` using the **train-time normalization
-  statistics** (test-time rate changes do not re-fit normalization).
-  Output schema:
+- **Robustness** (`--robustness-mode`) — double loop `(dataset × model)`. Trains once on `missing=0.0`; evaluates on every rate in `--robustness-test-rates` using the **train-time normalization statistics** (test-time rate changes do not re-fit normalization). Output schema:
   ```json
   {"mode": "robustness", "task": "classification",
    "train_missing_rate": 0.0,
@@ -228,9 +205,7 @@ python scripts/model_run.py \
 ### Task Support Tiers
 
 - **Stable**: `classification` (default).
-- **Experimental** (available through the underlying `ists_model` but not
-  yet a stable script entry point in v0.1.1): `regression`, `forecasting`,
-  `imputation`, `outlier_detection`, `change_detection`.
+- **Experimental** (available through the underlying `ists_model` but not yet a stable script entry point in v0.1.2): `regression`, `forecasting`, `imputation`, `outlier_detection`, `change_detection`.
 
 ### Metrics
 
@@ -243,16 +218,14 @@ python scripts/model_run.py \
 
 ### Output
 
-- **Prediction file** (pickle):
-  `<out-root>/<dataset>[/robustness]/<missing_rate>/<dataset>_[robustness_]<model>_<seed>`.
+- **Prediction file** (pickle): `<out-root>/<dataset>[/robustness]/<missing_rate>/<dataset>_[robustness_]<model>_<seed>`.
 - **Run manifest**: `<contract-dir>/run_<run-id>.json`.
 
 ### Workflow Dependencies
 
 Requires:
 - Split files from `set_splits.py --seed <SEED>` for every dataset.
-- Param files from `param_search.py --search-mode {default|cv}` matching
-  `--param-mode`.
+- Param files from `param_search.py --search-mode {default|cv}` matching `--param-mode`.
 
 ---
 
@@ -269,32 +242,24 @@ Path patterns produced by the three scripts:
 | Predictions (robustness) | `<out-root>/<dataset>/robustness/<missing_rate>/<dataset>_robustness_<model>_<seed>` |
 | Run manifest | `<contract-dir>/{split,search,run}_<run-id>.json` |
 
-All run manifests share a common envelope (`SCHEMA_VERSION = "run_manifest_v1"`,
-defined in `script_chain_contracts.py`) recording the stage, run id,
-records executed/reused/skipped, and a stage-specific summary.
+All run manifests share a common envelope (`SCHEMA_VERSION = "run_manifest_v1"`, defined in `script_chain_contracts.py`) recording the stage, run id, records executed/reused/skipped, and a stage-specific summary.
 
 ---
 
 ## 6. Bundled Helper Modules
 
-The following modules under `scripts/` support the three CLI entry points.
-They ship with the packaged workflow, but they are not intended as standalone
-Python APIs:
+The following modules under `scripts/` support the three CLI entry points. They ship with the packaged workflow, but they are not intended as standalone Python APIs:
 
-- `_common.py` — runtime path setup, packaged default resolution, and
-  model-scope normalization.
-- `script_chain_contracts.py` — manifest schema, run-id generation, stable
-  hashing.
-- `dataset_source_contracts.py` — dataset loading from the default
-  registry or NPZ files.
-- `task_target_contracts.py` — optional target loading for supported
-  task-specific workflows.
-- `_training_runtime.py` — dataset construction, training and evaluation
-  loops, and runtime validation checks.
+- `_common.py` — runtime path setup, packaged default resolution, and model-scope normalization.
+- `script_chain_contracts.py` — manifest schema, run-id generation, stable hashing.
+- `dataset_source_contracts.py` — dataset loading from the default registry or NPZ files.
+- `task_target_contracts.py` — optional target loading for supported task-specific workflows.
+- `_training_runtime.py` — dataset construction, training and evaluation loops, and runtime validation checks.
 
-Some implementation-only flags are omitted from `--help` output and may
-change between package versions.
+Some implementation-only flags are omitted from `--help` output and may change between package versions.
+
+Package contract for version `0.1.2`: the documented CLI behavior, helper modules, and reference pages are kept in sync for this package version. If CLI help fails in a base install because an optional backend is imported too early, treat it as a packaging issue.
 
 ---
 
-**End of Scripts Reference v0.1.1**
+**End of Scripts Reference**

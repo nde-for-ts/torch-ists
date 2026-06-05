@@ -1,6 +1,5 @@
 # Canonical active model registry for the packaged runtime.
 version: 1
-updated_at: 2026-06-05
 models:
   - cnn
   - rnn
@@ -8,8 +7,14 @@ models:
   - gru
   - bilstm
   - gru-simple
+  - tlstm
+  - plstm
+  - tglstm
   - transformer
   - transformer-mask
+  - miam
+  - mtan
+  - sand
   - neuralcde
   - neuralcde-l
   - neuralcde-r

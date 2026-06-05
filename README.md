@@ -1,24 +1,18 @@
 # torch-ists
 
-**PyTorch toolkit for irregular time series classification with neural ODE, CDE, SDE, and attention models.**
+[![Version](https://img.shields.io/badge/version-0.1.2-blue)](pyproject.toml) [![Python](https://img.shields.io/badge/python-%3E%3D3.10-blue)](pyproject.toml) [![PyTorch](https://img.shields.io/badge/PyTorch-%3E%3D2.0-ee4c2c)](pyproject.toml) [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![Package status](https://img.shields.io/badge/status-preview-orange)](PACKAGE_STATUS.json)
 
-**Related docs**:
-[Docs index](docs/README.md) ·
-[API Reference v0.1.1](docs/api_reference_v0.1.1.md) ·
-[Model Reference v0.1.1](docs/model_reference_v0.1.1.md) ·
-[Scripts Reference v0.1.1](docs/scripts_reference_v0.1.1.md) ·
-[Project site](https://nde-for-ts.github.io/)
+**PyTorch toolkit for irregular and multivariate time series modeling with sequence models, attention models, neural ODE, neural CDE, neural SDE, stable SDE, and hybrid continuous-time models.**
+
+`torch-ists` is a research-oriented Python package for irregularly sampled multivariate time series modeling, missing-data benchmarks, and continuous-time sequence modeling. It provides a consistent PyTorch API with task heads for classification, regression, forecasting, imputation, outlier detection, and change detection. The current package pairs those runtime APIs with packaged benchmark scripts for the stable classification workflow, UCR/UEA archive data loading, and documented model lineage for neural differential equation methods including neural ODE, neural CDE, neural SDE, stable SDE, and hybrid continuous-time models.
+
+**Related docs**: [Docs index](docs/README.md) · [API Reference](docs/api_reference.md) · [Model Reference](docs/model_reference.md) · [Scripts Reference](docs/scripts_reference.md) · [Project site](https://nde-for-ts.github.io/)
 
 ## Overview
 
-`torch-ists` is a unified interface for training and evaluating neural
-differential equation models on irregularly-sampled multivariate time series.
-Version `0.1.1` ships 29 packaged architectures across sequence, attention,
-CDE, ODE, and SDE families. Version `0.1.1` includes 29 models across seven
-families.
+`torch-ists` provides a unified interface for training and evaluating continuous-time and discrete-time PyTorch models on irregularly sampled multivariate time series. Version `0.1.2` ships 35 packaged architectures across sequence, attention, CDE, ODE, SDE, and hybrid method families, with the classification benchmark pipeline as the stable packaged workflow.
 
-`ists_classifier` is the main entry point. `ists_model` is the lower-level
-constructor for advanced use.
+The package exposes `ists_classifier` for the stable classification path and the lower-level `ists_model` constructor for advanced experimentation with additional task heads, irregular sampling, missing observations, and continuous-time model variants.
 
 ## Installation
 
@@ -59,9 +53,7 @@ PYTHONNOUSERSITE=1 python -m pip install -e .[all]
 
 ## Data Loading
 
-Use `DataLoader` for user-provided NumPy arrays, data frames, or files. Use
-`torch_ists.uea_ucr_loader` for built-in UCR/UEA archive datasets and the
-bundled benchmark scripts:
+Use `DataLoader` for user-provided NumPy arrays, data frames, or files. Use `torch_ists.uea_ucr_loader` for built-in UCR/UEA archive datasets and the bundled benchmark scripts:
 
 ```python
 from torch_ists import uea_ucr_loader
@@ -70,6 +62,8 @@ X, y = uea_ucr_loader.get_data("ECG200")
 ```
 
 See the API reference for archive cache-location details.
+
+UCR/UEA package contract: the bundled scripts pool the original UCR/UEA TRAIN+TEST partitions before generating project splits. Variable-length padding/resampling is fitted on the pooled TRAIN+TEST length distribution, labels default to pooled TRAIN+TEST encoding, and ragged padding defaults to `NaN`.
 
 ## Quick Start
 
@@ -102,39 +96,49 @@ python scripts/model_run.py
 
 Input preparation:
 
-- sequence baselines, `transformer`, `transformer-mask`, `ode-lstm`,
-  `ode-rnn`, `latentode`, and `gru-ode-bayes` accept the sequence stack
-  directly with `coeffs=None`.
-- `neuralcde*`, `gru-d*`, `gru-ode`, `ode-rnn-spline`, and the SDE family
-  need `preprocess(X, model_name=...)` to build matching coefficients.
+- sequence baselines, `tlstm`, `plstm`, `tglstm`, `transformer`, `transformer-mask`, `miam`, `mtan`, `sand`, `ode-lstm`, `ode-rnn`, `latentode`, and `gru-ode-bayes` accept the sequence stack directly with `coeffs=None`.
+- `neuralcde*`, `gru-d*`, `gru-ode`, `ode-rnn-spline`, and the SDE family need `preprocess(X, model_name=...)` to build matching coefficients.
 
 ## Models Included
 
-Version `0.1.1` includes 29 models across seven families:
+Version `0.1.2` includes 35 models across seven families:
 
 | Family | Models |
 |--------|--------|
-| **Sequence baselines** | `cnn`, `rnn`, `lstm`, `gru`, `bilstm`, `gru-simple` |
-| **Attention bridge** | `transformer`, `transformer-mask` |
+| **Sequence baselines** | `cnn`, `rnn`, `lstm`, `gru`, `bilstm`, `gru-simple`, `tlstm`, `plstm`, `tglstm` |
+| **Attention family** | `transformer`, `transformer-mask`, `miam`, `mtan`, `sand` |
 | **Neural CDE** | `neuralcde`, `neuralcde-l`, `neuralcde-r`, `neuralcde-c`, `neuralcde-h` |
 | **ODE runtime family** | `gru-dt`, `gru-d`, `gru-ode`, `ode-rnn-spline`, `ode-lstm` |
 | **Additional ODE models** | `ode-rnn`, `latentode`, `gru-ode-bayes` |
 | **Continuous-time baselines** | `naive_cde`, `neural_ode`, `neural_ode_t`, `neural_sde`, `neural_sde_t` |
 | **Stable Neural SDE** | `neural_lsde`, `neural_lnsde`, `neural_gsde` |
 
-## Bundled Scripts
+## Packaged Scripts
 
 - `scripts/set_splits.py` — generate reproducible train/validation/test splits
-- `scripts/param_search.py` — Ray Tune hyperparameter search
-- `scripts/model_run.py` — train and evaluate a model
+- `scripts/param_search.py` — parameter search for packaged models and datasets; Ray Tune is loaded only for the Ray-backed search path
+- `scripts/model_run.py` — train and evaluate a selected packaged model
+
+The public script help paths are base-install compatible:
+
+```bash
+PYTHONPATH=. python scripts/set_splits.py --help
+PYTHONPATH=. python scripts/param_search.py --help
+PYTHONPATH=. python scripts/model_run.py --help
+```
 
 ## Documentation
 
-- `docs/README.md` — docs index
-- `docs/api_reference_v0.1.1.md` — exported Python API
-- `docs/model_reference_v0.1.1.md` — per-model origin paper, canonical repo, and implementation note
-- `docs/scripts_reference_v0.1.1.md` — CLI flags, outputs, and pipeline order
+- `docs/README.md` — docs index for the current public package
+- `docs/api_reference.md` — exported runtime API and packaged script contract
+- `docs/model_reference.md` — per-model origin paper, canonical repo, and implementation note
+- `docs/scripts_reference.md` — bundled CLI scripts: flags, outputs, and pipeline order
 
 ## Project Status
 
-This is a **preview** release (`v0.1.1`). Documentation and bundled scripts cover the packaged `0.1.1` workflow end-to-end.
+This is a **preview** release (`v0.1.2`):
+
+- Core classification pipeline is reproducible
+- The package includes the sequence, attention variants, NeuralCDE, ODE, and SDE families listed above
+- UCR/UEA loading and bundled script import paths are part of the `0.1.2` package contract
+- Documentation and bundled scripts cover the packaged `0.1.2` workflow

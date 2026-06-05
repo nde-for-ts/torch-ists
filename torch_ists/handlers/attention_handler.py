@@ -122,8 +122,8 @@ class AttentionHandler(BaseHandler):
             else:
                 # Known limitation: `transformer` and `sand` consume zero-filled
                 # NaN positions without a padding mask. See public docs
-                # `docs/model_reference_v0.1.1.md` §2 Attention bridge — opt-in
-                # masking is out of scope for v0.1.1 to preserve baseline
+                # `docs/model_reference.md` §2 Attention Family — opt-in
+                # masking is out of scope for v0.1.2 to preserve baseline
                 # numerical reproducibility.
                 result = model(x)
             if isinstance(result, tuple) and len(result) == 2:

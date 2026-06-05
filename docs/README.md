@@ -1,20 +1,15 @@
 # torch-ists Docs
 
-Reference docs for the public `0.1.1` package release.
+Reference docs for the public `0.1.2` package release.
 
-**Related docs**:
-[Package overview](../README.md) ·
-[API Reference v0.1.1](api_reference_v0.1.1.md) ·
-[Model Reference v0.1.1](model_reference_v0.1.1.md) ·
-[Scripts Reference v0.1.1](scripts_reference_v0.1.1.md) ·
-[Project site](https://nde-for-ts.github.io/)
+**Related docs**: [Package overview](../README.md) · [API Reference](api_reference.md) · [Model Reference](model_reference.md) · [Scripts Reference](scripts_reference.md) · [Project site](https://nde-for-ts.github.io/)
 
 ## Included Docs
 
 - [Package overview](../README.md) — install, quick start, and current scope
-- [API Reference v0.1.1](api_reference_v0.1.1.md) — exported runtime API and packaged script contract
-- [Model Reference v0.1.1](model_reference_v0.1.1.md) — per-model origin paper, canonical repo, and implementation note
-- [Scripts Reference v0.1.1](scripts_reference_v0.1.1.md) — bundled CLI scripts: flags, outputs, and pipeline order
+- [API Reference](api_reference.md) — exported runtime API and packaged script contract
+- [Model Reference](model_reference.md) — per-model origin paper, canonical repo, and implementation note
+- [Scripts Reference](scripts_reference.md) — bundled CLI scripts: flags, outputs, and pipeline order
 
 ## Installation
 
@@ -30,4 +25,6 @@ Reference docs for the public `0.1.1` package release.
 
 - classification is the primary supported packaged workflow
 - the bundled scripts cover split creation, parameter search, and evaluation
-- the docs in this directory describe the models and scripts shipped in version `0.1.1`
+- the docs in this directory describe the models and scripts shipped in version `0.1.2`
+- the documented model roster contains 35 public package models
+- UCR/UEA loading, public implementation files, and CLI import behavior are documented in the API, model, and scripts references
