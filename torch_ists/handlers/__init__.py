@@ -8,6 +8,7 @@ Exports:
 - SourceODEHandler
 - ODELSTMHandler
 - CDEHandler
+- FlowHandler
 - SDEHandler
 """
 
@@ -25,6 +26,7 @@ _LAZY_EXPORTS = {
     "SourceODEHandler": (".source_ode_handler", "SourceODEHandler"),
     "ODELSTMHandler": (".odelstm_handler", "ODELSTMHandler"),
     "CDEHandler": (".cde_handler", "CDEHandler"),
+    "FlowHandler": (".flow_handler", "FlowHandler"),
     "SDEHandler": (".sde_handler", "SDEHandler"),
 }
 
@@ -36,6 +38,7 @@ __all__ = [
     "SourceODEHandler",
     "ODELSTMHandler",
     "CDEHandler",
+    "FlowHandler",
     "SDEHandler",
 ]
 

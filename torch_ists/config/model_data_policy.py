@@ -39,6 +39,15 @@ _HERMITE_INTERPOLATION_MODELS = frozenset(
         "neural_ode_t",
         "neural_sde",
         "neural_sde_t",
+        "neuralflow-r",
+        "neuralflow-g",
+        "neuralflow-c",
+        "flowpath-r",
+        "flowpath-g",
+        "flowpath-c",
+        "dualdynamics-r",
+        "dualdynamics-g",
+        "dualdynamics-c",
     ]
 )
 
@@ -118,7 +127,12 @@ def _default_head_depth_for_model(canonical_name: str, *, base_num_layers: int) 
 
 
 def _default_flow_depth_for_model(canonical_name: str) -> int:
-    del canonical_name
+    if canonical_name.startswith("neuralflow-"):
+        return 3
+    if canonical_name.startswith("dualdynamics-"):
+        return 2
+    if canonical_name.startswith("flowpath-"):
+        return 1
     return _FLOW_DEFAULT_DEPTH
 
 

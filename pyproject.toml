@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "torch-ists"
-version = "0.1.4"
+version = "0.1.5"
 description = "PyTorch package for irregular time series modeling"
 readme = "README.md"
 license = { text = "MIT" }
@@ -57,8 +57,8 @@ ode = [
     "torchdyn>=1.0.6",
 ]
 
-# CDE models included in the packaged public scope:
-# neuralcde, neuralcde-l/r/c/h
+# CDE/control-path models included in the packaged public scope:
+# neuralcde, neuralcde-l/r/c/h, flowpath-r/g/c, dualdynamics-r/g/c
 cde = [
     "torchdiffeq>=0.2.2",
     "torchcde>=0.2.5",

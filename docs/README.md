@@ -1,6 +1,6 @@
 # torch-ists Docs
 
-Reference docs for the public `0.1.4` package release.
+Reference docs for the public `0.1.5` package release.
 
 **Related docs**: [Package overview](../README.md) · [API Reference](api_reference.md) · [Model Reference](model_reference.md) · [Scripts Reference](scripts_reference.md) · [New Model Onboarding](new_model_onboarding.md) · [Project site](https://nde-for-ts.github.io/)
 
@@ -26,7 +26,7 @@ Reference docs for the public `0.1.4` package release.
 
 - classification is the primary supported packaged workflow
 - the bundled scripts cover split creation, parameter search, and evaluation
-- the docs in this directory describe the models and scripts shipped in version `0.1.4`
-- the documented model roster contains 35 public package models
+- the docs in this directory describe the models and scripts shipped in version `0.1.5`
+- the documented model roster contains 44 public package models
 - UCR/UEA loading, public implementation files, and CLI import behavior are documented in the API, model, and scripts references
 - new-model onboarding is documented as an external-wrapper workflow, not a public handler-registration API

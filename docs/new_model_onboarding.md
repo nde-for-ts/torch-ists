@@ -1,6 +1,6 @@
 # torch-ists New Model Onboarding
 
-> **Package Version**: 0.1.4
+> **Package Version**: 0.1.5
 > **Scope**: Public extension boundary for external custom models.
 
 **Related docs**: [Package overview](../README.md) · [Docs index](README.md) · [API Reference](api_reference.md) · [Model Reference](model_reference.md) · [Scripts Reference](scripts_reference.md) · [Project site](https://nde-for-ts.github.io/)
@@ -9,19 +9,19 @@ This guide documents how to use `torch-ists` with a custom PyTorch model while k
 
 ## Public Boundary
 
-Supported in version `0.1.4`:
+Supported in version `0.1.5`:
 
 - user-owned `torch.nn.Module` implementations outside the `torch_ists` namespace
 - packaged data loading, split utilities, preprocessing helpers, and seed utilities
 - external training loops that call a custom model directly
 - wrapper code that composes `torch_ists` helpers with user-owned modules
 
-Not public API in version `0.1.4`:
+Not public API in version `0.1.5`:
 
 - handler registration for new model names
 - mutation of `MODEL_REGISTRY`, `active_models.yaml`, or packaged handler bootstrap code
 - bundled script training for external model names
-- package claims that a custom model is part of the 35-model active roster
+- package claims that a custom model is part of the 44-model active roster
 
 ## Wrapper Pattern
 

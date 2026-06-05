@@ -1,7 +1,7 @@
 # torch-ists Model Reference
 
-> **Package Version**: 0.1.4
-> **Scope**: Origin paper, canonical repository, and implementation note for every model shipped in `v0.1.4`.
+> **Package Version**: 0.1.5
+> **Scope**: Origin paper, canonical repository, and implementation note for every model shipped in `v0.1.5`.
 
 **Related docs**: [Package overview](../README.md) · [Docs index](README.md) · [API Reference](api_reference.md) · [Scripts Reference](scripts_reference.md) · [New Model Onboarding](new_model_onboarding.md) · [Project site](https://nde-for-ts.github.io/)
 
@@ -18,7 +18,8 @@ This document is a companion to [`api_reference.md`](api_reference.md). Use the 
 5. [Neural CDE](#5-neural-cde)
 6. [SDE baselines](#6-sde-baselines)
 7. [Stable Neural SDE](#7-stable-neural-sde)
-8. [How to cite](#8-how-to-cite)
+8. [NeuralFlow, FlowPath, and DualDynamics](#8-neuralflow-flowpath-and-dualdynamics)
+9. [How to cite](#9-how-to-cite)
 
 ---
 
@@ -52,13 +53,13 @@ These baselines do not invoke any ODE / CDE / SDE solver and do not consume inte
 | `mtan` | Multi-Time Attention Network lineage | Packaged multi-time attention row routed through `AttentionHandler`; consumes values, original sequence stack, and normalized sequence timestamps |
 | `sand` | SAnD-style self-attention lineage | Packaged encoder-style attention row routed through `AttentionHandler`; consumes zero-filled sequence values directly |
 
-Version `0.1.4` includes five attention-backed rows. They use the direct sequence stack and do not consume interpolation coefficients in the packaged runtime.
+Version `0.1.5` includes five attention-backed rows. They use the direct sequence stack and do not consume interpolation coefficients in the packaged runtime.
 
 **Blind-spot note.** The packaged `transformer` follows the same naive missing-data treatment as the sequence baselines: it zero-fills `NaN`, ignores interpolation coefficients, and does not apply `src_key_padding_mask` in the current runtime. Use it as a direct attention baseline rather than a missingness-aware attention model.
 
 **Masked variant note.** `transformer-mask` keeps the same backbone and zero-fill preprocessing, but it applies `src_key_padding_mask` using the packaged observation mask. Treat it as a package-specific mitigation variant, not as a separate external paper-backed method.
 
-**SAnD mask caveat.** `sand` follows the direct zero-filled attention path and does not apply `src_key_padding_mask` in version `0.1.4`. This is an explicit package caveat, not a parity-verified missingness-aware attention claim.
+**SAnD mask caveat.** `sand` follows the direct zero-filled attention path and does not apply `src_key_padding_mask` in version `0.1.5`. This is an explicit package caveat, not a parity-verified missingness-aware attention claim.
 
 ---
 
@@ -145,7 +146,31 @@ The Stable Neural SDE family comes from a single paper:
 
 ---
 
-## 8. How to cite
+## 8. NeuralFlow, FlowPath, and DualDynamics
+
+Version `0.1.5` adds NeuralFlow, FlowPath, and DualDynamics models on the packaged native backend line:
+
+| Model group | Models | Runtime note |
+|---|---|---|
+| NeuralFlow comparator | `neuralflow-r`, `neuralflow-g`, `neuralflow-c` | Flow-only row using the direct value/time path. No ODE/CDE solver surface is exposed. |
+| FlowPath | `flowpath-r`, `flowpath-g`, `flowpath-c` | Flow plus CDE control path; solver-backed rows default to `rk4` with fixed-grid step size from the input times. |
+| DualDynamics | `dualdynamics-r`, `dualdynamics-g`, `dualdynamics-c` | DualDynamics lineage with coeff-driven control path; solver-backed rows default to `rk4` with fixed-grid step size from the input times. |
+
+The suffix selects the native flow operator: `-r` = residual flow, `-g` = GRU-style flow, and `-c` = coupling-style flow. The default public runtime uses the repo-native backend and does not require `stribor`. Guarded NFE/stribor compatibility is not part of the default `0.1.5` public profile.
+
+Compatibility aliases are accepted as input names and normalized to canonical package names:
+
+| Alias family | Canonical package name |
+|---|---|
+| `neuralflow_x_{r,g,c}` | `neuralflow-{r,g,c}` |
+| `neuralflowcde_x_{r,g,c}`, `flowpath_x_{r,g,c}` | `flowpath-{r,g,c}` |
+| `dualdynamics_x_{r,g,c}`, `neuralcontrolledflow_x_{r,g,c}` | `dualdynamics-{r,g,c}` |
+
+For missing-data handling, `neuralflow-*` and `flowpath-*` keep the raw missing-value contract on the direct value path. `dualdynamics-*` is coeff-centric and should be used with preprocessing coefficients.
+
+---
+
+## 9. How to cite
 
 If you use the **Stable Neural SDE** family (`neural_lsde`, `neural_lnsde`, `neural_gsde`) in academic work, please cite:
 

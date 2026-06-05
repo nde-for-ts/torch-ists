@@ -9,6 +9,7 @@ from .models import (
     ODE_MODELS,
     ODE_SOURCE_MODELS,
     CDE_MODELS,
+    FLOW_MODELS,
     SDE_BASELINE_MODELS,
     VARIATIONAL_SDE_MODELS,
     ATTENTION_MODELS,
@@ -76,6 +77,12 @@ _SOURCE_BASED_DEFAULT_METHODS = {
     "neuralcde-r": "rk4",
     "neuralcde-c": "rk4",
     "neuralcde-h": "rk4",
+    "flowpath-r": "rk4",
+    "flowpath-g": "rk4",
+    "flowpath-c": "rk4",
+    "dualdynamics-r": "rk4",
+    "dualdynamics-g": "rk4",
+    "dualdynamics-c": "rk4",
 }
 
 
@@ -99,4 +106,5 @@ __all__ = [
     "get_default_selected_datasets",
     "default_method_for_model",
     "ODE_SOURCE_MODELS",
+    "FLOW_MODELS",
 ]

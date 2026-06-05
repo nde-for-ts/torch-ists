@@ -1,6 +1,6 @@
 # torch-ists Scripts Reference
 
-> **Package Version**: 0.1.4
+> **Package Version**: 0.1.5
 > **Scope**: Command-line entry points to the bundled benchmark pipeline.
 
 **Related docs**: [Package overview](../README.md) · [Docs index](README.md) · [API Reference](api_reference.md) · [Model Reference](model_reference.md) · [New Model Onboarding](new_model_onboarding.md) · [Project site](https://nde-for-ts.github.io/)
@@ -101,7 +101,7 @@ python scripts/param_search.py \
 | `--seed` | `int` | `0` | Global seed for split selection and reproducibility. |
 | `--datasets` | `str` | (required) | Comma-separated dataset list. |
 | `--dataset-source` | `str` | `default` | Dataset source backend. `default` loads UCR/UEA by dataset name through `torch_ists.uea_ucr_loader.get_data`; see the API reference loader section for pooled TRAIN+TEST length/label/padding rules. |
-| `--models` | `str` | (active list) | Comma-separated model list. Defaults to the packaged active model list (35 models in v0.1.4). |
+| `--models` | `str` | (active list) | Comma-separated model list. Defaults to the packaged active model list (44 models in v0.1.5). |
 | `--missing-rate` | `float` | `0.0` | Single missing rate applied uniformly during tuning. |
 | `--num-samples` | `int` | `20` | Ray Tune `num_samples` — hyperparameter trial budget. |
 | `--max-num-epochs` | `int` | `10` | Per-trial training budget. |
@@ -116,9 +116,9 @@ python scripts/param_search.py \
 | `--param-root` | `str` | `params` | Output parameter artifact root. |
 | `--contract-dir` | `str` | `evidence` | Directory for run manifests (stage = `search`). |
 | `--run-id` | `str` | (auto) | Run identifier. |
-| `--task` | `{classification}` | `classification` | Task head. Only `classification` is stable in v0.1.4. |
+| `--task` | `{classification}` | `classification` | Task head. Only `classification` is stable in v0.1.5. |
 | `--targets-root` | `str` | `targets` | Root directory for dataset target bundles when a task uses external targets. |
-| `--model-scope-variant` | `{active}` | `active` | Model scope. Only `active` is supported in v0.1.4. |
+| `--model-scope-variant` | `{active}` | `active` | Model scope. Only `active` is supported in v0.1.5. |
 
 ### Search Modes
 
@@ -183,7 +183,7 @@ python scripts/model_run.py \
 | `--out-root` | `str` | `out` | Output prediction artifact root. |
 | `--contract-dir` | `str` | `evidence` | Directory for run manifests (stage = `run`). |
 | `--run-id` | `str` | (auto) | Run identifier. |
-| `--task` | `{classification}` | `classification` | Task head. Only `classification` is stable in v0.1.4. |
+| `--task` | `{classification}` | `classification` | Task head. Only `classification` is stable in v0.1.5. |
 | `--targets-root` | `str` | `targets` | Root directory for dataset target bundles. |
 | `--model-scope-variant` | `{active}` | `active` | Model scope. |
 
@@ -205,7 +205,7 @@ python scripts/model_run.py \
 ### Task Support Tiers
 
 - **Stable**: `classification` (default).
-- **Experimental** (available through the underlying `ists_model` but not yet a stable script entry point in v0.1.4): `regression`, `forecasting`, `imputation`, `outlier_detection`, `change_detection`.
+- **Experimental** (available through the underlying `ists_model` but not yet a stable script entry point in v0.1.5): `regression`, `forecasting`, `imputation`, `outlier_detection`, `change_detection`.
 
 ### Metrics
 
@@ -258,7 +258,7 @@ The following modules under `scripts/` support the three CLI entry points. They 
 
 Some implementation-only flags are omitted from `--help` output and may change between package versions.
 
-Package contract for version `0.1.4`: the documented CLI behavior, helper modules, and reference pages are kept in sync for this package version. If CLI help fails in a base install because an optional backend is imported too early, treat it as a packaging issue.
+Package contract for version `0.1.5`: the documented CLI behavior, helper modules, and reference pages are kept in sync for this package version. If CLI help fails in a base install because an optional backend is imported too early, treat it as a packaging issue.
 
 ---
 

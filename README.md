@@ -1,6 +1,6 @@
 # torch-ists
 
-[![Version](https://img.shields.io/badge/version-0.1.4-blue)](pyproject.toml) [![Python](https://img.shields.io/badge/python-%3E%3D3.10-blue)](pyproject.toml) [![PyTorch](https://img.shields.io/badge/PyTorch-%3E%3D2.0-ee4c2c)](pyproject.toml) [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![Package status](https://img.shields.io/badge/status-preview-orange)](PACKAGE_STATUS.json)
+[![Version](https://img.shields.io/badge/version-0.1.5-blue)](pyproject.toml) [![Python](https://img.shields.io/badge/python-%3E%3D3.10-blue)](pyproject.toml) [![PyTorch](https://img.shields.io/badge/PyTorch-%3E%3D2.0-ee4c2c)](pyproject.toml) [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![Package status](https://img.shields.io/badge/status-preview-orange)](PACKAGE_STATUS.json)
 
 **PyTorch toolkit for irregular and multivariate time series modeling with sequence models, attention models, neural ODE, neural CDE, neural SDE, stable SDE, and hybrid continuous-time models.**
 
@@ -10,7 +10,7 @@
 
 ## Overview
 
-`torch-ists` provides a unified interface for training and evaluating continuous-time and discrete-time PyTorch models on irregularly sampled multivariate time series. Version `0.1.4` ships 35 packaged architectures across sequence, attention, CDE, ODE, SDE, and hybrid method families, with the classification benchmark pipeline as the stable packaged workflow.
+`torch-ists` provides a unified interface for training and evaluating continuous-time and discrete-time PyTorch models on irregularly sampled multivariate time series. Version `0.1.5` ships 44 packaged architectures across sequence, attention, flow, CDE, ODE, SDE, and hybrid method families, with the classification benchmark pipeline as the stable packaged workflow.
 
 The package exposes `ists_classifier` for the stable classification path and the lower-level `ists_model` constructor for advanced experimentation with additional task heads, irregular sampling, missing observations, and continuous-time model variants.
 
@@ -96,17 +96,19 @@ python scripts/model_run.py
 
 Input preparation:
 
-- sequence baselines, `tlstm`, `plstm`, `tglstm`, `transformer`, `transformer-mask`, `miam`, `mtan`, `sand`, `ode-lstm`, `ode-rnn`, `latentode`, and `gru-ode-bayes` accept the sequence stack directly with `coeffs=None`.
-- `neuralcde*`, `gru-d*`, `gru-ode`, `ode-rnn-spline`, and the SDE family need `preprocess(X, model_name=...)` to build matching coefficients.
+- sequence baselines, `tlstm`, `plstm`, `tglstm`, `transformer`, `transformer-mask`, `miam`, `mtan`, `sand`, `neuralflow-*`, `ode-lstm`, `ode-rnn`, `latentode`, and `gru-ode-bayes` accept the sequence stack directly with `coeffs=None`.
+- `flowpath-*`, `dualdynamics-*`, `neuralcde*`, `gru-d*`, `gru-ode`, `ode-rnn-spline`, and the SDE family need `preprocess(X, model_name=...)` to build matching coefficients.
+- `flowpath-*` and `dualdynamics-*` use CDE control paths, so install `.[cde]` or `.[all]` before running those models.
 
 ## Models Included
 
-Version `0.1.4` includes 35 models across seven families:
+Version `0.1.5` includes 44 models across eight families:
 
 | Family | Models |
 |--------|--------|
 | **Sequence baselines** | `cnn`, `rnn`, `lstm`, `gru`, `bilstm`, `gru-simple`, `tlstm`, `plstm`, `tglstm` |
 | **Attention family** | `transformer`, `transformer-mask`, `miam`, `mtan`, `sand` |
+| **NeuralFlow, FlowPath, and DualDynamics** | `neuralflow-r`, `neuralflow-g`, `neuralflow-c`, `flowpath-r`, `flowpath-g`, `flowpath-c`, `dualdynamics-r`, `dualdynamics-g`, `dualdynamics-c` |
 | **Neural CDE** | `neuralcde`, `neuralcde-l`, `neuralcde-r`, `neuralcde-c`, `neuralcde-h` |
 | **ODE runtime family** | `gru-dt`, `gru-d`, `gru-ode`, `ode-rnn-spline`, `ode-lstm` |
 | **Additional ODE models** | `ode-rnn`, `latentode`, `gru-ode-bayes` |
@@ -129,7 +131,7 @@ PYTHONPATH=. python scripts/model_run.py --help
 
 ## New Model Onboarding
 
-Version `0.1.4` documents the public extension boundary for external model work. Custom PyTorch modules should live outside the `torch_ists` namespace and compose the packaged data, split, preprocessing, and task wrappers from user-owned code. The package does not expose a public handler-registration API in this release.
+Version `0.1.5` documents the public extension boundary for external model work. Custom PyTorch modules should live outside the `torch_ists` namespace and compose the packaged data, split, preprocessing, and task wrappers from user-owned code. The package does not expose a public handler-registration API in this release.
 
 See `docs/new_model_onboarding.md` for the wrapper pattern.
 
@@ -143,10 +145,10 @@ See `docs/new_model_onboarding.md` for the wrapper pattern.
 
 ## Project Status
 
-This is a **preview** release (`v0.1.4`):
+This is a **preview** release (`v0.1.5`):
 
 - Core classification pipeline is reproducible
-- The package includes the sequence, attention variants, NeuralCDE, ODE, and SDE families listed above
-- UCR/UEA loading and bundled script import paths are part of the `0.1.4` package contract
+- The package includes the sequence, attention variants, NeuralFlow, FlowPath, DualDynamics, NeuralCDE, ODE, and SDE families listed above
+- UCR/UEA loading and bundled script import paths are part of the `0.1.5` package contract
 - New-model onboarding guidance documents the supported external-wrapper pattern
-- Documentation and bundled scripts cover the packaged `0.1.4` workflow
+- Documentation and bundled scripts cover the packaged `0.1.5` workflow

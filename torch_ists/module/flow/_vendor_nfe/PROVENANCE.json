@@ -1,0 +1,43 @@
+{
+  "source_repo": "https://github.com/mbilos/neural-flows-experiments",
+  "source_commit": "bd19f7c92461e83521e268c1a235ef845a3dd963",
+  "files": [
+    {
+      "path": "flow.py",
+      "upstream_path": "nfe/models/flow.py",
+      "upstream_sha256": "3ded8c892a506a31aeeaf3faa32f160d07b31e03f5de56e4863264743e87ee39",
+      "sha256": "3ded8c892a506a31aeeaf3faa32f160d07b31e03f5de56e4863264743e87ee39",
+      "patched": false
+    },
+    {
+      "path": "gru.py",
+      "upstream_path": "nfe/models/gru.py",
+      "upstream_sha256": "9a38bb1e60bf7ec277b5da5e3b42febe645e09b47dda8723d86e86a1f3d7dc19",
+      "sha256": "01b1fb3956603cfd8b0d8a9b685599a189859f1248042c7ba1956bae3ade23fd",
+      "patched": true
+    },
+    {
+      "path": "ode.py",
+      "upstream_path": "nfe/models/ode.py",
+      "upstream_sha256": "284fa15d9cddf92bd01993a295eb1f55fb5d1ba75fcf2e57a27e2deabe20a2c6",
+      "sha256": "284fa15d9cddf92bd01993a295eb1f55fb5d1ba75fcf2e57a27e2deabe20a2c6",
+      "patched": false
+    },
+    {
+      "path": "__init__.py",
+      "upstream_path": "nfe/models/__init__.py",
+      "upstream_sha256": "a1d84b9086ce5115ea4103815ab2a4a52d1f26bce6c5d06c15d54b8dc978b90b",
+      "sha256": "cc6e2e49145700856ffa672a49268340ec3b0044b15353fd52ca0dff7c86340b",
+      "patched": true,
+      "patch_note": "curated exports limited to flow/gru/ode subset"
+    }
+  ],
+  "license": {
+    "approved_for_public_package": true,
+    "note": "Upstream repository snapshot is pinned by commit and file hashes. Vendored files preserve upstream headers for the packaged public runtime."
+  },
+  "sync_policy": {
+    "mode": "pinned-vendor-snapshot",
+    "runtime_scope": "packaged-public-runtime"
+  }
+}

@@ -9,6 +9,7 @@ from ..config.models import (
     ATTENTION_MODELS,
     BASIC_MODELS,
     CDE_MODELS,
+    FLOW_MODELS,
     ODE_MODELS,
     ODE_SOURCE_MODELS,
     SDE_BASELINE_MODELS,
@@ -22,6 +23,7 @@ _OPTIONAL_DEPENDENCY_HINTS = {
     "torchcde": "Install `torchcde` or use `pip install \"torch-ists[all]\"`.",
     "torchsde": "Install `torchsde` or use `pip install \"torch-ists[all]\"`.",
     "torchdyn": "Install `torchdyn` or use `pip install \"torch-ists[ode]\"`.",
+    "stribor": "Install `stribor==0.1.0` only for guarded flow-family NFE backends.",
 }
 
 
@@ -137,6 +139,14 @@ def bootstrap_handler_registry() -> None:
             module_name=".attention_handler",
             class_name="AttentionHandler",
             supported_models=ATTENTION_MODELS.keys(),
+        )
+    )
+    HandlerRegistry.register(
+        _LazyHandlerProxy(
+            name="flow",
+            module_name=".flow_handler",
+            class_name="FlowHandler",
+            supported_models=FLOW_MODELS.keys(),
         )
     )
     HandlerRegistry.register(

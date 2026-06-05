@@ -42,6 +42,11 @@ except Exception:  # pragma: no cover - subset payload
     _ALL_STABLE_SDE_CONFIGS = {}
     _ALL_STABLE_SDE_LEGACY_ALIASES = {}
 
+try:
+    from .flow import FLOW_MODELS as _ALL_FLOW_MODELS
+except Exception:  # pragma: no cover - subset payload
+    _ALL_FLOW_MODELS = {}
+
 
 def _select_active_models(model_group: Dict[str, Dict], active_set: Set[str]) -> Dict[str, Dict]:
     return {name: cfg for name, cfg in model_group.items() if name in active_set}
@@ -73,8 +78,8 @@ SDE_BASELINE_MODELS = _select_active_models(_ALL_SDE_BASELINE_MODELS, active_set
 ODE_MODELS = _select_active_models(_ALL_ODE_MODELS, active_set)
 ODE_SOURCE_MODELS = _select_active_models(_ALL_ODE_SOURCE_MODELS, active_set)
 STABLE_SDE_CONFIGS = _select_active_models(_ALL_STABLE_SDE_CONFIGS, active_set)
+FLOW_MODELS = _select_active_models(_ALL_FLOW_MODELS, active_set)
 
-FLOW_MODELS: Dict[str, Dict] = {}
 VARIATIONAL_SDE_MODELS: Dict[str, Dict] = {}
 TSDE_METHOD_CONFIGS: Dict[str, Dict] = {}
 STABLE_SDE_LEGACY_ALIASES: Dict[str, str] = {
@@ -98,6 +103,7 @@ MODEL_REGISTRY: Dict[str, Dict] = {
     **ATTENTION_MODELS,
     **SDE_BASELINE_MODELS,
     **STABLE_SDE_CONFIGS,
+    **FLOW_MODELS,
 }
 
 MODEL_LIST: List[str] = list(MODEL_REGISTRY.keys())
