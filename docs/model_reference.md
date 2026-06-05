@@ -18,8 +18,9 @@ This document is a companion to [`api_reference.md`](api_reference.md). Use the 
 5. [Neural CDE](#5-neural-cde)
 6. [SDE baselines](#6-sde-baselines)
 7. [Stable Neural SDE](#7-stable-neural-sde)
-8. [NeuralFlow, FlowPath, and DualDynamics](#8-neuralflow-flowpath-and-dualdynamics)
-9. [How to cite](#9-how-to-cite)
+8. [NeuralFlow](#8-neuralflow)
+9. [FlowPath and DualDynamics](#9-flowpath-and-dualdynamics)
+10. [How to cite](#10-how-to-cite)
 
 ---
 
@@ -146,15 +147,13 @@ The Stable Neural SDE family comes from a single paper:
 
 ---
 
-## 8. NeuralFlow, FlowPath, and DualDynamics
+## 8. NeuralFlow
 
-Version `0.1.5` adds NeuralFlow, FlowPath, and DualDynamics models on the packaged native backend line:
+Version `0.1.5` adds NeuralFlow as an independent flow-method row on the packaged native backend line:
 
 | Model group | Models | Runtime note |
 |---|---|---|
 | NeuralFlow comparator | `neuralflow-r`, `neuralflow-g`, `neuralflow-c` | Flow-only row using the direct value/time path. No ODE/CDE solver surface is exposed. |
-| FlowPath | `flowpath-r`, `flowpath-g`, `flowpath-c` | Flow plus CDE control path; solver-backed rows default to `rk4` with fixed-grid step size from the input times. |
-| DualDynamics | `dualdynamics-r`, `dualdynamics-g`, `dualdynamics-c` | DualDynamics lineage with coeff-driven control path; solver-backed rows default to `rk4` with fixed-grid step size from the input times. |
 
 The suffix selects the native flow operator: `-r` = residual flow, `-g` = GRU-style flow, and `-c` = coupling-style flow. The default public runtime uses the repo-native backend and does not require `stribor`. Guarded NFE/stribor compatibility is not part of the default `0.1.5` public profile.
 
@@ -163,14 +162,34 @@ Compatibility aliases are accepted as input names and normalized to canonical pa
 | Alias family | Canonical package name |
 |---|---|
 | `neuralflow_x_{r,g,c}` | `neuralflow-{r,g,c}` |
-| `neuralflowcde_x_{r,g,c}`, `flowpath_x_{r,g,c}` | `flowpath-{r,g,c}` |
-| `dualdynamics_x_{r,g,c}`, `neuralcontrolledflow_x_{r,g,c}` | `dualdynamics-{r,g,c}` |
 
-For missing-data handling, `neuralflow-*` and `flowpath-*` keep the raw missing-value contract on the direct value path. `dualdynamics-*` is coeff-centric and should be used with preprocessing coefficients.
+For missing-data handling, `neuralflow-*` keeps the raw missing-value contract on the direct value path.
 
 ---
 
-## 9. How to cite
+## 9. FlowPath and DualDynamics
+
+FlowPath and DualDynamics are advanced Neural CDE/control-path methodology rows implemented through the packaged `FlowHandler` and `module.flow` surface in version `0.1.5`:
+
+| Model group | Models | Runtime note |
+|---|---|---|
+| FlowPath | `flowpath-r`, `flowpath-g`, `flowpath-c` | Flow plus CDE control path; solver-backed rows default to `rk4` with fixed-grid step size from the input times. |
+| DualDynamics | `dualdynamics-r`, `dualdynamics-g`, `dualdynamics-c` | DualDynamics lineage with coeff-driven control path; solver-backed rows default to `rk4` with fixed-grid step size from the input times. |
+
+The suffix selects the native flow operator: `-r` = residual flow, `-g` = GRU-style flow, and `-c` = coupling-style flow. These rows use the repo-native backend and do not expose `ancde`, `exit`, or `leap` as part of the current public payload.
+
+Compatibility aliases are accepted as input names and normalized to canonical package names:
+
+| Alias family | Canonical package name |
+|---|---|
+| `neuralflowcde_x_{r,g,c}`, `flowpath_x_{r,g,c}` | `flowpath-{r,g,c}` |
+| `dualdynamics_x_{r,g,c}`, `neuralcontrolledflow_x_{r,g,c}` | `dualdynamics-{r,g,c}` |
+
+For missing-data handling, `flowpath-*` keeps the raw missing-value contract on the direct value path. `dualdynamics-*` is coeff-centric and should be used with preprocessing coefficients.
+
+---
+
+## 10. How to cite
 
 If you use the **Stable Neural SDE** family (`neural_lsde`, `neural_lnsde`, `neural_gsde`) in academic work, please cite:
 

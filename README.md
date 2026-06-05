@@ -102,13 +102,14 @@ Input preparation:
 
 ## Models Included
 
-Version `0.1.5` includes 44 models across eight families:
+Version `0.1.5` includes 44 models across the groups below:
 
 | Family | Models |
 |--------|--------|
 | **Sequence baselines** | `cnn`, `rnn`, `lstm`, `gru`, `bilstm`, `gru-simple`, `tlstm`, `plstm`, `tglstm` |
 | **Attention family** | `transformer`, `transformer-mask`, `miam`, `mtan`, `sand` |
-| **NeuralFlow, FlowPath, and DualDynamics** | `neuralflow-r`, `neuralflow-g`, `neuralflow-c`, `flowpath-r`, `flowpath-g`, `flowpath-c`, `dualdynamics-r`, `dualdynamics-g`, `dualdynamics-c` |
+| **NeuralFlow** | `neuralflow-r`, `neuralflow-g`, `neuralflow-c` |
+| **Advanced Neural CDE control-path models** | `flowpath-r`, `flowpath-g`, `flowpath-c`, `dualdynamics-r`, `dualdynamics-g`, `dualdynamics-c` |
 | **Neural CDE** | `neuralcde`, `neuralcde-l`, `neuralcde-r`, `neuralcde-c`, `neuralcde-h` |
 | **ODE runtime family** | `gru-dt`, `gru-d`, `gru-ode`, `ode-rnn-spline`, `ode-lstm` |
 | **Additional ODE models** | `ode-rnn`, `latentode`, `gru-ode-bayes` |
@@ -148,7 +149,7 @@ See `docs/new_model_onboarding.md` for the wrapper pattern.
 This is a **preview** release (`v0.1.5`):
 
 - Core classification pipeline is reproducible
-- The package includes the sequence, attention variants, NeuralFlow, FlowPath, DualDynamics, NeuralCDE, ODE, and SDE families listed above
+- The package includes the sequence, attention variants, NeuralFlow, FlowPath/DualDynamics control-path rows, NeuralCDE, ODE, and SDE groups listed above
 - UCR/UEA loading and bundled script import paths are part of the `0.1.5` package contract
 - New-model onboarding guidance documents the supported external-wrapper pattern
 - Documentation and bundled scripts cover the packaged `0.1.5` workflow

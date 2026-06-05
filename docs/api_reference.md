@@ -790,7 +790,7 @@ Current `0.1.5` defaults:
 - `neuralflow-*`: `flow_depth=3` by default
 - `dualdynamics-*`: `flow_depth=2` by default
 - `flowpath-*`: `flow_depth=1` by default
-- NeuralFlow, FlowPath, and DualDynamics use the packaged native backend by default; guarded NFE/stribor compatibility is not part of the default public profile.
+- `neuralflow-*` uses the packaged native flow backend by default. `flowpath-*` and `dualdynamics-*` are flow-runtime control-path rows that use CDE-style controls in the packaged surface. Guarded NFE/stribor compatibility is not part of the default public profile.
 
 Compatibility mapping:
 - legacy `num_hidden_layers` is interpreted as `head_depth`.
