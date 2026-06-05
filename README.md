@@ -41,6 +41,9 @@ Optional dependencies:
 # Hyperparameter search (Ray Tune)
 PYTHONNOUSERSITE=1 python -m pip install -e .[tune]
 
+# Built-in UCR/UEA dataset loader
+PYTHONNOUSERSITE=1 python -m pip install -e .[data]
+
 # ODE backends
 PYTHONNOUSERSITE=1 python -m pip install -e .[ode]
 
@@ -50,9 +53,23 @@ PYTHONNOUSERSITE=1 python -m pip install -e .[cde]
 # SDE backends
 PYTHONNOUSERSITE=1 python -m pip install -e .[sde]
 
-# Full optional stack for the continuous-time models included in version 0.1.1
+# Full optional stack, including data loading and continuous-time model backends
 PYTHONNOUSERSITE=1 python -m pip install -e .[all]
 ```
+
+## Data Loading
+
+Use `DataLoader` for user-provided NumPy arrays, data frames, or files. Use
+`torch_ists.uea_ucr_loader` for built-in UCR/UEA archive datasets and the
+bundled benchmark scripts:
+
+```python
+from torch_ists import uea_ucr_loader
+
+X, y = uea_ucr_loader.get_data("ECG200")
+```
+
+See the API reference for archive cache-location details.
 
 ## Quick Start
 

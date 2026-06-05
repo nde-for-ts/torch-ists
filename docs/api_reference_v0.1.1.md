@@ -54,9 +54,10 @@ Environment contract:
 - `PYTHONNOUSERSITE=1` is required for commands
 - `Python >= 3.10`
 - `.[tune]` is required for Ray Tune-backed parameter search
+- `.[data]` installs `pandas` and `sktime` for `torch_ists.uea_ucr_loader`
 - `.[cde]` installs the packaged NeuralCDE backend requirements (`torchcde`, `torchdiffeq`)
 - `.[sde]` installs the packaged SDE backend requirement (`torchsde`)
-- `.[all]` installs the optional dependencies used by the continuous-time models included in version `0.1.1`
+- `.[all]` installs the optional data and model backend dependencies for version `0.1.1`
 - `TORCH_ISTS_RUNTIME_ROOT` is optional when running packaged scripts from outside the package root
 
 ### 1.2 Basic Usage (5-line example)
@@ -248,10 +249,55 @@ On exit, `SeedContext` restores the saved RNG states and deterministic backend f
 
 The Data Loading API provides:
 1. **Custom Data Loading**: `DataLoader` factory (from_numpy, from_dataframe, from_file)
-2. **UCR/UEA Datasets**: `uea_ucr_loader.download()` / `uea_ucr_loader.get_data()` (not exported in `__all__`)
+2. **Built-in UCR/UEA Loader**: `uea_ucr_loader.download()` / `uea_ucr_loader.get_data()`
 
-**Exported**: ✅ `DataLoader`, `DatasetBundle`
-**Not exported**: `download()`, `get_data()` (import directly from `torch_ists.uea_ucr_loader` if needed)
+**Exported**: ✅ `DataLoader`, `DatasetBundle`, `uea_ucr_loader`
+
+`DataLoader` is for user-provided arrays, data frames, and files. The
+`uea_ucr_loader` submodule is the built-in archive loader used by the bundled
+benchmark scripts.
+
+```python
+from torch_ists import uea_ucr_loader
+
+X, y = uea_ucr_loader.get_data("ECG200")
+```
+
+Install `.[data]` for the optional `pandas` and `sktime` dependencies. The
+loader stores and searches UCR/UEA archives under `TORCH_ISTS_DATA_ROOT` when
+set, otherwise under `<package checkout>/data`. Fallback search checks
+`Univariate_ts/<dataset>/<dataset>_{TRAIN,TEST}.ts` and
+`Multivariate_ts/<dataset>/<dataset>_{TRAIN,TEST}.ts`.
+
+UCR/UEA loader contract: packaged scripts pool the original UCR/UEA train and
+test partitions and then create project split files. Variable-length
+resampling therefore uses the pooled train+test maximum length before the
+pooled data is split again. Labels are encoded from the pooled train+test
+label set by default, and ragged tensor padding uses `NaN` so downstream
+missingness masks can identify padded positions. Use
+`get_data(..., label_policy="train", padding="last")` only to reproduce older
+benchmark preprocessing.
+
+#### Legacy-mode caveats
+
+`label_policy="train"` fails loudly when `y_test` contains a class not seen
+in `y_train`: the loader raises `ValueError` listing the offending labels and
+recommending the default `"pooled"` mode. `padding="last"` reproduces the
+legacy forward-fill of the last observed value; in this mode the loader
+returns no companion mask, so downstream models cannot distinguish padded
+positions from real observations. Use both only for legacy reproducibility
+and keep the runtime defaults otherwise.
+
+#### Train/test boundary
+
+The loader concatenates the original UCR/UEA train and test partitions and
+discards the boundary. The project split (`set_splits.py`, stratified) is
+applied to the pooled data, so the train/val/test split that downstream
+scripts use does not correspond to the original UCR/UEA partition. There is
+no opt-in to preserve the original partition boundary in `0.1.1`; external
+benchmarks that need the original split should load `X_train` / `y_train` /
+`X_test` / `y_test` directly via `sktime.datasets.load_UCR_UEA_dataset` or
+their own loader and run training/evaluation outside the bundled scripts.
 
 ---
 

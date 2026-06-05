@@ -250,9 +250,6 @@ def seed_everything(seed):
 SEED = 0
 seed_everything(SEED)
 
-import torchcde
-import torchsde
-
 # Import from the packaged torch_ists runtime.
 from torch_ists.preprocessing import preprocess
 from torch_ists import ists_classifier, ists_model
@@ -265,10 +262,6 @@ from _training_runtime import (
 )
 from task_target_contracts import load_task_targets_npz
 
-import ray
-from ray import tune
-from ray.tune.schedulers import ASHAScheduler
-
 from torch_ists.config import (
     get_data_config,
     get_active_model_list,
@@ -276,6 +269,33 @@ from torch_ists.config import (
     get_default_selected_datasets,
 )
 from torch_ists.config.model_data_policy import _resolve_runtime_depth_config
+
+ray = None
+tune = None
+ASHAScheduler = None
+
+
+def _load_ray_tune():
+    global ray, tune, ASHAScheduler
+    if ray is not None and tune is not None and ASHAScheduler is not None:
+        return ray, tune, ASHAScheduler
+    try:
+        import ray as _ray
+        from ray import tune as _tune
+        from ray.tune.schedulers import ASHAScheduler as _ASHAScheduler
+    except ModuleNotFoundError as exc:
+        missing_name = getattr(exc, "name", "") or "ray"
+        raise ImportError(
+            "param_search.py requires Ray Tune for multi-sample search. "
+            f"Missing dependency: {missing_name}. Install `torch-ists[tune]` "
+            "or `torch-ists[all]`, or run with --num-samples 1 to use the "
+            "local Ray-bypass path."
+        ) from exc
+    ray = _ray
+    tune = _tune
+    ASHAScheduler = _ASHAScheduler
+    return ray, tune, ASHAScheduler
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -443,14 +463,15 @@ def _build_task_targets(task, x_missing_norm, y, forecast_horizon=None):
 
 
 def report_tune_loss(loss_value):
+    _ray, _tune, _ = _load_ray_tune()
     metric = float(loss_value)
     try:
-        tune.report(loss=metric)
+        _tune.report(loss=metric)
         return
     except TypeError:
         pass
     try:
-        tune.report({"loss": metric})
+        _tune.report({"loss": metric})
         return
     except TypeError:
         pass
@@ -953,6 +974,7 @@ def optimize(
         raise RuntimeError("Requested --device cuda but CUDA is unavailable.")
     if device_mode == "cuda" and ray_gpu <= 0:
         raise RuntimeError("Requested --device cuda requires --ray-gpu > 0.")
+    _load_ray_tune()
 
     # Propagate runtime import context to Ray workers.
     repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))

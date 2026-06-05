@@ -1,6 +1,6 @@
 # Canonical active model registry for the packaged runtime.
 version: 1
-updated_at: 2026-05-10
+updated_at: 2026-06-05
 models:
   - cnn
   - rnn

@@ -19,6 +19,7 @@ __all__ = [
     "load_splits",
     "make_stratified_splits",
     "save_splits",
+    "uea_ucr_loader",
     "set_global_seed",
     "get_rng_state",
     "set_rng_state",
@@ -34,6 +35,7 @@ _LAZY_EXPORTS = {
     "ists_layer": (".layer", "ists_layer"),
     "ists_classifier": (".model", "ists_classifier"),
     "ists_model": (".model", "ists_model"),
+    "uea_ucr_loader": (".uea_ucr_loader", None),
 }
 
 
@@ -44,6 +46,6 @@ def __getattr__(name: str):
 
     module_name, attr_name = target
     module = import_module(module_name, __name__)
-    value = getattr(module, attr_name)
+    value = module if attr_name is None else getattr(module, attr_name)
     globals()[name] = value
     return value

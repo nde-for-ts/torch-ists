@@ -55,6 +55,8 @@ All three scripts also append a JSON manifest to `evidence/` for run tracking.
 **Environment variable**:
 - `TORCH_ISTS_RUNTIME_ROOT` (optional) — override the runtime root when
   running the scripts from outside the package directory.
+- `TORCH_ISTS_DATA_ROOT` (optional) — override the built-in UCR/UEA archive
+  root used by `--dataset-source default`.
 
 ---
 
@@ -74,7 +76,7 @@ python scripts/set_splits.py --dataset-name ECG200 --seed 0
 | Flag | Type | Default | Description |
 |---|---|---|---|
 | `--dataset-name` | `str` | (required) | Dataset id used in the split file path. |
-| `--dataset-source` | `str` | `default` | Dataset source backend (`{default}`). |
+| `--dataset-source` | `str` | `default` | Dataset source backend. `default` loads UCR/UEA by dataset name through `torch_ists.uea_ucr_loader.get_data`. |
 | `--seed` | `int` | `0` | Random seed for the stratified split. |
 | `--if-exists` | `{reuse, fail}` | `reuse` | Behavior when the split artifact already exists. `reuse` keeps the existing file; `fail` raises. |
 | `--out-dir` (alias `--output-dir`) | `str` | `split` | Root directory for split artifacts. |
@@ -110,7 +112,7 @@ python scripts/param_search.py \
 |---|---|---|---|
 | `--seed` | `int` | `0` | Global seed for split selection and reproducibility. |
 | `--datasets` | `str` | (required) | Comma-separated dataset list. |
-| `--dataset-source` | `str` | `default` | Dataset source backend (`{default}`). |
+| `--dataset-source` | `str` | `default` | Dataset source backend. `default` loads UCR/UEA by dataset name through `torch_ists.uea_ucr_loader.get_data`. |
 | `--models` | `str` | (active list) | Comma-separated model list. Defaults to the packaged active model list (29 models in v0.1.1). |
 | `--missing-rate` | `float` | `0.0` | Single missing rate applied uniformly during tuning. |
 | `--num-samples` | `int` | `20` | Ray Tune `num_samples` — hyperparameter trial budget. |
@@ -181,7 +183,7 @@ python scripts/model_run.py \
 |---|---|---|---|
 | `--seed` | `int` | `0` | Random seed. |
 | `--datasets` | `str` | (default list) | Comma-separated dataset list. Defaults to the packaged dataset list. |
-| `--dataset-source` | `str` | `default` | Dataset source backend. |
+| `--dataset-source` | `str` | `default` | Dataset source backend. `default` loads UCR/UEA by dataset name through `torch_ists.uea_ucr_loader.get_data`. |
 | `--models` | `str` | (active list) | Comma-separated model list. Defaults to the packaged active model list. |
 | `--missing-rates` | `str` | `0.0,0.3,0.5,0.7` | Comma-separated missing rates for standard mode. Ignored in robustness mode. |
 | `--epochs` | `int` | `100` | Epochs per (dataset, missing-rate, model) run. |

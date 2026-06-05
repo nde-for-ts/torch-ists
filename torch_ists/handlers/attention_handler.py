@@ -120,6 +120,11 @@ class AttentionHandler(BaseHandler):
                 attention_mask = data["seq_mask"] <= 0
                 result = model(x, src_key_padding_mask=attention_mask)
             else:
+                # Known limitation: `transformer` and `sand` consume zero-filled
+                # NaN positions without a padding mask. See public docs
+                # `docs/model_reference_v0.1.1.md` §2 Attention bridge — opt-in
+                # masking is out of scope for v0.1.1 to preserve baseline
+                # numerical reproducibility.
                 result = model(x)
             if isinstance(result, tuple) and len(result) == 2:
                 out, hn = result
