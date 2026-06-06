@@ -43,7 +43,7 @@ from .config.runtime_fault_policy import (
 configure_handler_registry_bootstrap()
 
 
-LEGACY_SDE_NAME_PATTERN = re.compile(r"^neuralsde_\d+_\d+$")
+INTERNAL_SDE_CODE_PATTERN = re.compile(r"^neuralsde_\d+_\d+$")
 
 
 def _resolve_device(device: str) -> str:
@@ -80,7 +80,7 @@ def _enforce_active_scope_or_raise(model_name: str, *, allow_flow_extension: boo
 def _normalize_model_name_or_raise(model_name: str) -> str:
     # Alias normalization mapping:
     # - flow aliases: config.alias_policy.normalize_flow_alias
-    # - SDE aliases: config.models.SDE_MODEL_ALIASES
+    # - SDE numeric codes are internal and intentionally not public aliases
     if model_name == "latentsde-kl":
         raise ValueError(
             "Model 'latentsde-kl' is not available in this package. "
@@ -93,10 +93,11 @@ def _normalize_model_name_or_raise(model_name: str) -> str:
     alias = SDE_MODEL_ALIASES.get(model_name)
     if alias is not None:
         return alias
-    if LEGACY_SDE_NAME_PATTERN.fullmatch(model_name):
+    if INTERNAL_SDE_CODE_PATTERN.fullmatch(model_name):
         raise ValueError(
-            f"Legacy SDE name {model_name} is not available in this package. "
-            f"Allowed aliases: {sorted(SDE_MODEL_ALIASES)}"
+            "Numeric SDE codes are internal implementation details and are not accepted "
+            "as public model names. Use public names such as 'neural_lsde', "
+            "'neural_lnsde', or 'neural_gsde'."
         )
     return model_name
 
@@ -206,6 +207,10 @@ class ists_layer(nn.Module):
     def forward(self, seq: torch.Tensor, coeffs: Optional[torch.Tensor] = None, **kwargs):
         if seq.ndim != 4:
             raise ValueError(f"seq must be [N, 3, L, D], got shape {tuple(seq.shape)}")
+
+        seq = seq.to(self.device)
+        if coeffs is not None:
+            coeffs = coeffs.to(self.device)
 
         seq = seq.permute(0, 1, 3, 2)
         L = seq.shape[3]

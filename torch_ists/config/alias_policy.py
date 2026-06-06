@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 FLOW_ALIAS_TO_CANONICAL = {
+    "neuralflow": "neuralflow-r",
     "neuralflow_x_r": "neuralflow-r",
     "neuralflow_x_g": "neuralflow-g",
     "neuralflow_x_c": "neuralflow-c",
+    "flowpath": "flowpath-r",
     "neuralflowcde_x_r": "flowpath-r",
     "neuralflowcde_x_g": "flowpath-g",
     "neuralflowcde_x_c": "flowpath-c",
     "flowpath_x_r": "flowpath-r",
     "flowpath_x_g": "flowpath-g",
     "flowpath_x_c": "flowpath-c",
+    "dualdynamics": "dualdynamics-r",
     "dualdynamics_x_r": "dualdynamics-r",
     "dualdynamics_x_g": "dualdynamics-g",
     "dualdynamics_x_c": "dualdynamics-c",
@@ -49,9 +52,11 @@ FLOW_STRICT_RAW_CANONICAL_MODELS = frozenset(
 
 FLOW_STRICT_RAW_ALIAS_MODELS = frozenset(
     {
+        "neuralflow",
         "neuralflow_x_r",
         "neuralflow_x_g",
         "neuralflow_x_c",
+        "flowpath",
         "neuralflowcde_x_r",
         "neuralflowcde_x_g",
         "neuralflowcde_x_c",

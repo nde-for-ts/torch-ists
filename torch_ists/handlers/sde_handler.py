@@ -14,9 +14,8 @@ from ..config import (
     default_method_for_model as resolve_default_method_for_model,
     get_default_config,
     merge_configs,
-    resolve_diffusion_to_numeric,
-    resolve_drift_to_numeric,
 )
+from ..config.schema import resolve_diffusion_to_numeric, resolve_drift_to_numeric
 from ..module.sde import SDEModel
 
 
@@ -188,6 +187,10 @@ class SDEHandler(BaseHandler):
     ):
         if coeffs is None:
             raise ValueError("SDE models require interpolation coeffs.")
+
+        device = next(model.parameters()).device
+        coeffs = coeffs.to(device)
+        times = times.to(device)
 
         kwargs.pop("model_name", None)
         model_params = self._coerce_mapping(kwargs.pop("model_params", {}))

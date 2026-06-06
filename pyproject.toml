@@ -95,4 +95,4 @@ where = ["."]
 include = ["torch_ists*"]
 
 [tool.setuptools.package-data]
-torch_ists = ["py.typed", "config/*.yaml"]
+torch_ists = ["py.typed", "config/*.yaml", "module/flow/_vendor_nfe/*.json"]

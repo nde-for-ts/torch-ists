@@ -36,10 +36,6 @@ from .schema import (
     validate_data_config,
     validate_extended_config,
     validate_model_config,
-    input_option_to_drift,
-    noise_option_to_diffusion,
-    resolve_drift_to_numeric,
-    resolve_diffusion_to_numeric,
     merge_configs,
     get_default_config,
 )
@@ -95,8 +91,6 @@ def default_method_for_model(model_name: str) -> str:
 __all__ = [
     "MODEL_REGISTRY",
     "MODEL_LIST",
-    "resolve_drift_to_numeric",
-    "resolve_diffusion_to_numeric",
     "merge_configs",
     "get_default_config",
     "get_data_config",

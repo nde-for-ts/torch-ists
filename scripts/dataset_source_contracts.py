@@ -45,7 +45,7 @@ def load_dataset_npz(path: str | Path) -> Tuple[np.ndarray, np.ndarray]:
 def load_default_dataset(dataset_name: str) -> Tuple[np.ndarray, np.ndarray]:
     """Load a packaged built-in dataset."""
 
-    from torch_ists.uea_ucr_loader import get_data
+    from torch_ists.benchmark_loader import get_data
 
     X, y = get_data(dataset_name)
     if hasattr(X, "detach"):

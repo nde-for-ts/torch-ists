@@ -19,7 +19,7 @@ __all__ = [
     "load_splits",
     "make_stratified_splits",
     "save_splits",
-    "uea_ucr_loader",
+    "benchmark_loader",
     "set_global_seed",
     "get_rng_state",
     "set_rng_state",
@@ -35,7 +35,7 @@ _LAZY_EXPORTS = {
     "ists_layer": (".layer", "ists_layer"),
     "ists_classifier": (".model", "ists_classifier"),
     "ists_model": (".model", "ists_model"),
-    "uea_ucr_loader": (".uea_ucr_loader", None),
+    "benchmark_loader": (".benchmark_loader", None),
 }
 
 

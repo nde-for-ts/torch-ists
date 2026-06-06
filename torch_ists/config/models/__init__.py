@@ -34,13 +34,9 @@ except Exception:  # pragma: no cover - subset payload
     _ALL_ODE_SOURCE_MODELS = {}
 
 try:
-    from .stable_sdes import (
-        STABLE_SDE_CONFIGS as _ALL_STABLE_SDE_CONFIGS,
-        STABLE_SDE_LEGACY_ALIASES as _ALL_STABLE_SDE_LEGACY_ALIASES,
-    )
+    from .stable_sdes import STABLE_SDE_CONFIGS as _ALL_STABLE_SDE_CONFIGS
 except Exception:  # pragma: no cover - subset payload
     _ALL_STABLE_SDE_CONFIGS = {}
-    _ALL_STABLE_SDE_LEGACY_ALIASES = {}
 
 try:
     from .flow import FLOW_MODELS as _ALL_FLOW_MODELS
@@ -50,23 +46,6 @@ except Exception:  # pragma: no cover - subset payload
 
 def _select_active_models(model_group: Dict[str, Dict], active_set: Set[str]) -> Dict[str, Dict]:
     return {name: cfg for name, cfg in model_group.items() if name in active_set}
-
-
-def _build_alias_map(*model_groups: Dict[str, Dict]) -> Dict[str, str]:
-    alias_map: Dict[str, str] = {}
-    for group in model_groups:
-        for canonical_name, cfg in group.items():
-            legacy_code = str(cfg.get("legacy_code", "")).strip()
-            if not legacy_code:
-                continue
-            existing = alias_map.get(legacy_code)
-            if existing is not None and existing != canonical_name:
-                raise RuntimeError(
-                    "duplicate legacy_code detected in SDE alias map: "
-                    f"{legacy_code} -> {existing}, {canonical_name}"
-                )
-            alias_map[legacy_code] = canonical_name
-    return alias_map
 
 
 active_set = set(ACTIVE_MODELS)
@@ -82,16 +61,10 @@ FLOW_MODELS = _select_active_models(_ALL_FLOW_MODELS, active_set)
 
 VARIATIONAL_SDE_MODELS: Dict[str, Dict] = {}
 TSDE_METHOD_CONFIGS: Dict[str, Dict] = {}
-STABLE_SDE_LEGACY_ALIASES: Dict[str, str] = {
-    key: value
-    for key, value in _ALL_STABLE_SDE_LEGACY_ALIASES.items()
-    if value in STABLE_SDE_CONFIGS
-}
+# Numeric SDE encodings are internal implementation details in the public package.
+STABLE_SDE_LEGACY_ALIASES: Dict[str, str] = {}
 STABLE_SDE_ALIASES: Dict[str, str] = STABLE_SDE_LEGACY_ALIASES
-SDE_MODEL_ALIASES: Dict[str, str] = _build_alias_map(
-    STABLE_SDE_CONFIGS,
-    SDE_BASELINE_MODELS,
-)
+SDE_MODEL_ALIASES: Dict[str, str] = {}
 SDE_LEGACY_MODEL_ALIASES: Dict[str, str] = SDE_MODEL_ALIASES
 STABLE_SDE_MODELS: List[str] = list(STABLE_SDE_CONFIGS.keys())
 

@@ -1,18 +1,52 @@
-"""UEA/UCR dataset loader utilities for runtime."""
+"""Benchmark dataset loader utilities for runtime."""
 
 from __future__ import annotations
 
 import os
-import urllib
 import zipfile
 from pathlib import Path
+from urllib import request
 
 import numpy as np
-import pandas as pd
 import torch
-from sktime.datasets import load_UCR_UEA_dataset, load_from_tsfile_to_dataframe
 
 DATA_ROOT_ENV = "TORCH_ISTS_DATA_ROOT"
+load_UCR_UEA_dataset = None
+load_from_tsfile_to_dataframe = None
+
+
+def _require_pandas():
+    try:
+        import pandas as pd  # type: ignore
+    except ImportError as exc:
+        raise ImportError("torch_ists.benchmark_loader requires pandas. Install torch-ists[data].") from exc
+    return pd
+
+
+def _load_ucr_uea_dataset_lazy(*args, **kwargs):
+    try:
+        from sktime.datasets import load_UCR_UEA_dataset as loader  # type: ignore
+    except ImportError as exc:
+        raise ImportError("torch_ists.benchmark_loader requires sktime. Install torch-ists[data].") from exc
+    return loader(*args, **kwargs)
+
+
+def _load_from_tsfile_to_dataframe_lazy(*args, **kwargs):
+    try:
+        from sktime.datasets import load_from_tsfile_to_dataframe as loader  # type: ignore
+    except ImportError as exc:
+        raise ImportError("torch_ists.benchmark_loader requires sktime. Install torch-ists[data].") from exc
+    return loader(*args, **kwargs)
+
+
+def _require_sktime_loaders():
+    primary = load_UCR_UEA_dataset if load_UCR_UEA_dataset is not None else _load_ucr_uea_dataset_lazy
+    fallback = (
+        load_from_tsfile_to_dataframe
+        if load_from_tsfile_to_dataframe is not None
+        else _load_from_tsfile_to_dataframe_lazy
+    )
+    return primary, fallback
 
 
 def _resolve_repo_root() -> Path:
@@ -40,17 +74,18 @@ def _build_ts_candidates(dataname: str, data_root: Path):
 
 
 def download():
-    """Download UEA/UCR archives into local data/ directory."""
+    """Download benchmark archives into the local data directory."""
+    pd = _require_pandas()
     data_root = _resolve_data_root()
     data_root.mkdir(parents=True, exist_ok=True)
 
-    urllib.request.urlretrieve(
+    request.urlretrieve(
         "http://www.timeseriesclassification.com/Downloads/Archives/summaryUnivariate.csv",
         str(data_root / "summaryUnivariate.csv"),
     )
     pd.read_csv(data_root / "summaryUnivariate.csv")["problem"].tolist()
 
-    urllib.request.urlretrieve(
+    request.urlretrieve(
         "http://www.timeseriesclassification.com/Downloads/Archives/summaryMultivariate.csv",
         str(data_root / "summaryMultivariate.csv"),
     )
@@ -62,7 +97,7 @@ def download():
 
     if not (data_root / "Univariate_ts").exists():
         univariate_zip = data_root / "Univariate2018_ts.zip"
-        urllib.request.urlretrieve(
+        request.urlretrieve(
             "http://www.timeseriesclassification.com/Downloads/Archives/Univariate2018_ts.zip",
             str(univariate_zip),
         )
@@ -71,7 +106,7 @@ def download():
 
     if not (data_root / "Multivariate_ts").exists():
         multivariate_zip = data_root / "Multivariate2018_ts.zip"
-        urllib.request.urlretrieve(
+        request.urlretrieve(
             "http://www.timeseriesclassification.com/Downloads/Archives/Multivariate2018_ts.zip",
             str(multivariate_zip),
         )
@@ -112,12 +147,14 @@ def _panel_lengths(panel):
 
 
 def get_data(dataname, *, label_policy: str = "pooled", padding: str = "nan"):
-    """Load UEA/UCR dataset and return tensor X and label array y.
+    """Load a benchmark dataset and return tensor X and label array y.
 
     ``label_policy="pooled"`` and ``padding="nan"`` are the runtime defaults.
     Use ``label_policy="train"`` or ``padding="last"`` only to reproduce older
     benchmark preprocessing.
     """
+    pd = _require_pandas()
+    load_UCR_UEA_dataset, load_from_tsfile_to_dataframe = _require_sktime_loaders()
     primary_error = None
     try:
         X_train, y_train = load_UCR_UEA_dataset(dataname, "train", return_X_y=True)
