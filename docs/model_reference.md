@@ -19,7 +19,7 @@ This document is a companion to [`api_reference.md`](api_reference.md). Use the 
 6. [SDE baselines](#6-sde-baselines)
 7. [Stable Neural SDE](#7-stable-neural-sde)
 8. [NeuralFlow](#8-neuralflow)
-9. [FlowPath and DualDynamics](#9-flowpath-and-dualdynamics)
+9. [DualDynamics and FlowPath](#9-dualdynamics-and-flowpath)
 
 ---
 
@@ -33,13 +33,13 @@ This document is a companion to [`api_reference.md`](api_reference.md). Use the 
 | `gru` | Cho et al., *Learning Phrase Representations using RNN Encoder–Decoder* (2014) | Plain `nn.GRU` (this package) |
 | `bilstm` | Bidirectional LSTM baseline | Plain bidirectional `nn.LSTM` (this package) |
 | `gru-simple` | Simplified GRU baseline | Plain `nn.GRU` baseline variant (this package) |
-| `tlstm` | [Baytas et al., *Patient Subtyping via Time-Aware LSTM Networks* (KDD 2017)](https://dl.acm.org/doi/10.1145/3097983.3097997) | Packaged time-aware LSTM row routed through `BasicHandler` |
 | `plstm` | [Neil et al., *Phased LSTM: Accelerating Recurrent Network Training for Long or Event-based Sequences* (NeurIPS 2016)](https://arxiv.org/abs/1610.09513) | Packaged phased LSTM row routed through `BasicHandler` |
+| `tlstm` | [Baytas et al., *Patient Subtyping via Time-Aware LSTM Networks* (KDD 2017)](https://dl.acm.org/doi/10.1145/3097983.3097997) | Packaged time-aware LSTM row routed through `BasicHandler` |
 | `tglstm` | [Sahin and Kozat, *Nonuniformly Sampled Data Processing Using LSTM Networks* (IEEE TNNLS 2019)](https://doi.org/10.1109/TNNLS.2018.2869822) | Packaged time-gated LSTM row routed through `BasicHandler` |
 
 These baselines do not invoke any ODE / CDE / SDE solver and do not consume interpolation coefficients. They consume the `(values, mask, time-deltas)` channel stack as a regular tensor, and the packaged runtime replaces `NaN` values with `0.0` before the backbone forward pass.
 
-**Limitation.** `cnn`, `rnn`, `lstm`, `gru`, and `bilstm` are intentionally naive baselines in this package. The mask channel is available in the input tensor but is not consumed by these backbones at forward time. After `nan_to_num(..., nan=0.0)`, the model cannot distinguish a true zero or normalized-mean value from a missing position. In the bundled scripts, the sequence values are z-scored with training-only statistics before this step, so the fallback is mathematically equivalent to per-channel mean imputation in raw value space. Outside that normalized workflow it is literal zero-fill. When missingness awareness matters, prefer `gru-simple`, `tlstm`, `plstm`, `tglstm`, `gru-d`, `gru-dt`, and the ODE / CDE / SDE families.
+**Limitation.** `cnn`, `rnn`, `lstm`, `gru`, and `bilstm` are intentionally naive baselines in this package. The mask channel is available in the input tensor but is not consumed by these backbones at forward time. After `nan_to_num(..., nan=0.0)`, the model cannot distinguish a true zero or normalized-mean value from a missing position. In the bundled scripts, the sequence values are z-scored with training-only statistics before this step, so the fallback is mathematically equivalent to per-channel mean imputation in raw value space. Outside that normalized workflow it is literal zero-fill. When missingness awareness matters, prefer `gru-simple`, `plstm`, `tlstm`, `tglstm`, `gru-d`, `gru-dt`, and the ODE / CDE / SDE families.
 
 ---
 
@@ -49,9 +49,9 @@ These baselines do not invoke any ODE / CDE / SDE solver and do not consume inte
 |---|---|---|
 | `transformer` | Transformer encoder baseline ([*Attention Is All You Need*, 2017](https://arxiv.org/abs/1706.03762)) | Packaged sequence-attention bridge routed through `AttentionHandler` with a fixed classifier head for irregular time-series classification |
 | `transformer-mask` | Packaged attention variant built on the same Transformer encoder backbone as `transformer` | Zero-fill sequence-attention variant that additionally applies `src_key_padding_mask` from the packaged observation mask before the classifier head |
-| `miam` | [Lee et al., *Multi-View Integrative Attention-Based Deep Representation Learning for Irregular Clinical Time-Series Data* (IEEE J-BHI 2022)](https://arxiv.org/abs/2101.09986) | Packaged time-aware attention row routed through `AttentionHandler`; consumes values, original sequence stack, and normalized sequence timestamps |
-| `mtan` | [Shukla and Marlin, *Multi-Time Attention Networks for Irregularly Sampled Time Series* (ICLR 2021)](https://arxiv.org/abs/2101.10318) | Packaged multi-time attention row routed through `AttentionHandler`; consumes values, original sequence stack, and normalized sequence timestamps |
 | `sand` | [Song et al., *Attend and Diagnose: Clinical Time Series Analysis using Attention Models* (AAAI 2018)](https://arxiv.org/abs/1711.03905) | Packaged encoder-style attention row routed through `AttentionHandler`; consumes zero-filled sequence values directly |
+| `mtan` | [Shukla and Marlin, *Multi-Time Attention Networks for Irregularly Sampled Time Series* (ICLR 2021)](https://arxiv.org/abs/2101.10318) | Packaged multi-time attention row routed through `AttentionHandler`; consumes values, original sequence stack, and normalized sequence timestamps |
+| `miam` | [Lee et al., *Multi-View Integrative Attention-Based Deep Representation Learning for Irregular Clinical Time-Series Data* (IEEE J-BHI 2022)](https://arxiv.org/abs/2101.09986) | Packaged time-aware attention row routed through `AttentionHandler`; consumes values, original sequence stack, and normalized sequence timestamps |
 
 Version `0.1.5` includes five attention-backed rows. They use the direct sequence stack and do not consume interpolation coefficients in the packaged runtime.
 
@@ -170,33 +170,33 @@ For missing-data handling, `neuralflow` and its explicit variants keep raw missi
 
 ---
 
-## 9. FlowPath and DualDynamics
+## 9. DualDynamics and FlowPath
 
-FlowPath and DualDynamics are advanced Neural CDE/control-path methodology rows implemented through the packaged `FlowHandler` in version `0.1.5`. They share the packaged native flow-operator runtime with NeuralFlow, but they are not flow-only comparators: they consume interpolation coefficients and use CDE-style control paths.
+DualDynamics and FlowPath are advanced Neural CDE/control-path methodology rows implemented through the packaged `FlowHandler` in version `0.1.5`, listed by publication year (DualDynamics: AAAI 2025; FlowPath: AAAI 2026). They share the packaged native flow-operator runtime with NeuralFlow, but they are not flow-only comparators: they consume interpolation coefficients and use CDE-style control paths.
 
 | Model group | Models | Runtime note |
 |---|---|---|
-| FlowPath | official name `flowpath`; explicit variants `flowpath-r`, `flowpath-g`, `flowpath-c` | Flow plus CDE control path; solver-backed rows default to `rk4` with fixed-grid step size from the input times. |
 | DualDynamics | official name `dualdynamics`; explicit variants `dualdynamics-r`, `dualdynamics-g`, `dualdynamics-c` | DualDynamics lineage with coeff-driven control path; solver-backed rows default to `rk4` with fixed-grid step size from the input times. |
+| FlowPath | official name `flowpath`; explicit variants `flowpath-r`, `flowpath-g`, `flowpath-c` | Flow plus CDE control path; solver-backed rows default to `rk4` with fixed-grid step size from the input times. |
 
 Origin papers:
-- FlowPath: [*FlowPath: Learning Data-Driven Manifolds with Invertible Flows for Robust Irregularly-sampled Time Series Classification* (AAAI 2026)](https://ojs.aaai.org/index.php/AAAI/article/view/39643) · [arXiv:2511.10841](https://arxiv.org/abs/2511.10841)
 - DualDynamics: [*DualDynamics: Synergizing Implicit and Explicit Methods for Robust Irregular Time Series Analysis* (AAAI 2025)](https://ojs.aaai.org/index.php/AAAI/article/view/34173) · [arXiv:2401.04979](https://arxiv.org/abs/2401.04979)
+- FlowPath: [*FlowPath: Learning Data-Driven Manifolds with Invertible Flows for Robust Irregularly-sampled Time Series Classification* (AAAI 2026)](https://ojs.aaai.org/index.php/AAAI/article/view/39643) · [arXiv:2511.10841](https://arxiv.org/abs/2511.10841)
 
-The official model names `flowpath` and `dualdynamics` use residual-flow variants by default. The suffix selects the native flow operator when an explicit variant is needed: `-r` = residual flow, `-g` = GRU-style flow, and `-c` = coupling-style flow. Their method taxonomy remains CDE/control-path; the flow suffix only selects the packaged native flow operator. These rows use the repo-native backend; `ancde`, `exit`, and `leap` are not included in version `0.1.5`.
+The official model names `dualdynamics` and `flowpath` use residual-flow variants by default. The suffix selects the native flow operator when an explicit variant is needed: `-r` = residual flow, `-g` = GRU-style flow, and `-c` = coupling-style flow. Their method taxonomy remains CDE/control-path; the flow suffix only selects the packaged native flow operator. These rows use the repo-native backend; `ancde`, `exit`, and `leap` are not included in version `0.1.5`.
 
 Accepted model names for these families:
 
 | Public name | Runtime selection |
 |---|---|
-| `flowpath`, `flowpath-r` | residual-flow control-path variant |
-| `flowpath-g` | GRU-style flow control-path variant |
-| `flowpath-c` | coupling-style flow control-path variant |
 | `dualdynamics`, `dualdynamics-r` | residual-flow dual-dynamics variant |
 | `dualdynamics-g` | GRU-style flow dual-dynamics variant |
 | `dualdynamics-c` | coupling-style flow dual-dynamics variant |
+| `flowpath`, `flowpath-r` | residual-flow control-path variant |
+| `flowpath-g` | GRU-style flow control-path variant |
+| `flowpath-c` | coupling-style flow control-path variant |
 
-For missing-data handling, `flowpath`, `dualdynamics`, and their explicit variants are coeff-centric CDE/control-path models and should be used with `preprocess(X, model_name=...)` to build matching interpolation coefficients.
+For missing-data handling, `dualdynamics`, `flowpath`, and their explicit variants are coeff-centric CDE/control-path models and should be used with `preprocess(X, model_name=...)` to build matching interpolation coefficients.
 
 ---
 

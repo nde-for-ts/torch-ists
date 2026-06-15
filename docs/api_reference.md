@@ -848,7 +848,7 @@ def get_data_config(model_name: str) -> Dict[str, Any]:
 
 | Packaged row(s) | `interpolation` | `use_intensity` | Runtime note |
 |------------|--------------|---------------|--------------|
-| `cnn`, `rnn`, `lstm`, `gru`, `bilstm`, `gru-simple`, `tlstm`, `plstm`, `tglstm`, `transformer`, `sand` | `'cubic'` | `False` | `coeffs` ignored; packaged handlers use the sequence stack directly, replace `NaN` with `0.0`, and do not apply an attention padding mask |
+| `cnn`, `rnn`, `lstm`, `gru`, `bilstm`, `gru-simple`, `plstm`, `tlstm`, `tglstm`, `transformer`, `sand` | `'cubic'` | `False` | `coeffs` ignored; packaged handlers use the sequence stack directly, replace `NaN` with `0.0`, and do not apply an attention padding mask |
 | `transformer-mask` | `'cubic'` | `False` | `coeffs` ignored; packaged handler uses the sequence stack directly, replaces `NaN` with `0.0`, and applies `src_key_padding_mask` from the packaged observation mask |
 | `miam`, `mtan` | `'cubic'` | `False` | `coeffs` ignored; packaged handler uses values, the original sequence stack, and normalized sequence timestamps |
 | `neuralcde` | `'natural'` | `False` | consumes `coeffs` |

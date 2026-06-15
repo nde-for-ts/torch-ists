@@ -96,7 +96,7 @@ python scripts/model_run.py
 
 Input preparation:
 
-- sequence baselines, `tlstm`, `plstm`, `tglstm`, `transformer`, `transformer-mask`, `miam`, `mtan`, `sand`, `neuralflow`, `neuralflow-r/g/c`, `ode-lstm`, `ode-rnn`, `latentode`, and `gru-ode-bayes` accept the sequence stack directly with `coeffs=None`.
+- sequence baselines, `plstm`, `tlstm`, `tglstm`, `transformer`, `transformer-mask`, `miam`, `mtan`, `sand`, `neuralflow`, `neuralflow-r/g/c`, `ode-lstm`, `ode-rnn`, `latentode`, and `gru-ode-bayes` accept the sequence stack directly with `coeffs=None`.
 - `flowpath`, `dualdynamics`, `neuralcde*`, `gru-d*`, `gru-ode`, `ode-rnn-spline`, and the SDE family need `preprocess(X, model_name=...)` to build matching coefficients.
 - `flowpath` and `dualdynamics` use CDE control paths, so install `.[cde]` or `.[all]` before running those models.
 
@@ -106,7 +106,7 @@ Version `0.1.5` includes 44 models across the groups below:
 
 | Family | Models |
 |--------|--------|
-| **Sequence baselines** | `cnn`, `rnn`, `lstm`, `gru`, `bilstm`, `gru-simple`, `tlstm`, `plstm`, `tglstm` |
+| **Sequence baselines** | `cnn`, `rnn`, `lstm`, `gru`, `bilstm`, `gru-simple`, `plstm`, `tlstm`, `tglstm` |
 | **Attention family** | `transformer`, `transformer-mask`, `miam`, `mtan`, `sand` |
 | **ODE family** | `gru-dt`, `gru-d`, `gru-ode`, `ode-rnn-spline`, `ode-lstm` |
 | **Advanced ODE family** | `ode-rnn`, `latentode`, `gru-ode-bayes` |

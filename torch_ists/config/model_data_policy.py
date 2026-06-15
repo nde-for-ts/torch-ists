@@ -59,8 +59,8 @@ _CUBIC_INTERPOLATION_MODELS = frozenset(
         "gru",
         "gru-simple",
         "bilstm",
-        "tlstm",
         "plstm",
+        "tlstm",
         "tglstm",
         "transformer",
         "transformer-mask",
@@ -94,8 +94,8 @@ _BASIC_SEQUENCE_MODELS = frozenset(
         "gru",
         "gru-simple",
         "bilstm",
-        "tlstm",
         "plstm",
+        "tlstm",
         "tglstm",
     ]
 )

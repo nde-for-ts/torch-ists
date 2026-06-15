@@ -7,8 +7,8 @@ This handler supports 9 models:
 - gru: RNNBackbone (cell='gru')
 - gru-simple: RNNBackbone (cell='gru', concat_input=True)
 - bilstm: RNNBackbone (cell='lstm', bidirectional=True)
-- tlstm: TLSTM (time-aware)
 - plstm: PLSTM (time-aware)
+- tlstm: TLSTM (time-aware)
 - tglstm: TGLSTM (time-aware, sequence-first input contract)
 
 Transformer-family models are handled by ``AttentionHandler``.
@@ -29,7 +29,7 @@ class BasicHandler(BaseHandler):
     Supported models:
     - cnn: CNNBackbone
     - rnn, lstm, gru, gru-simple, bilstm: RNNBackbone with different configs
-    - tlstm, plstm, tglstm: time-aware RNN backbones
+    - plstm, tlstm, tglstm: time-aware RNN backbones
 
     All basic models return (out, hn) tuple.
     """
@@ -47,8 +47,8 @@ class BasicHandler(BaseHandler):
         'gru': {'type': 'rnn', 'cell': 'gru', 'bidirectional': False, 'concat_input': False},
         'gru-simple': {'type': 'rnn', 'cell': 'gru', 'bidirectional': False, 'concat_input': True},
         'bilstm': {'type': 'rnn', 'cell': 'lstm', 'bidirectional': True, 'concat_input': False},
-        'tlstm': {'type': 'time_aware', 'cell': 'tlstm', 'bidirectional': False},
         'plstm': {'type': 'time_aware', 'cell': 'plstm', 'bidirectional': False},
+        'tlstm': {'type': 'time_aware', 'cell': 'tlstm', 'bidirectional': False},
         'tglstm': {'type': 'time_aware', 'cell': 'tglstm', 'bidirectional': False},
     }
 
@@ -183,7 +183,7 @@ class BasicHandler(BaseHandler):
     def uses_filled(self) -> bool:
         """Basic models require NaN → 0 conversion (X_filled).
 
-        BasicHandler models (including time-aware tlstm/plstm/tglstm)
+        BasicHandler models (including time-aware plstm/tlstm/tglstm)
         cannot handle NaN values. Handler forward pass converts X_missing
         to X_filled before model input.
 
@@ -229,7 +229,7 @@ class BasicHandler(BaseHandler):
             return self._forward_cnn(model, x)
         elif model_name == 'gru-simple':
             return self._forward_gru_simple(model, seq)
-        elif model_name in ('tlstm', 'plstm'):
+        elif model_name in ('plstm', 'tlstm'):
             return self._forward_time_aware(model, x, data['seq_delta'])
         elif model_name == 'tglstm':
             return self._forward_tglstm(model, x, data['seq_delta'])

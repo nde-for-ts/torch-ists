@@ -10,8 +10,8 @@ BASIC_MODELS: Dict[str, Dict] = {
     "gru": {"description": "Gated Recurrent Unit", "handler": "BasicHandler"},
     "gru-simple": {"description": "Simplified GRU", "handler": "BasicHandler"},
     "bilstm": {"description": "Bidirectional LSTM", "handler": "BasicHandler"},
-    "tlstm": {"description": "Time-Aware LSTM", "handler": "BasicHandler"},
     "plstm": {"description": "Phased LSTM", "handler": "BasicHandler"},
+    "tlstm": {"description": "Time-Aware LSTM", "handler": "BasicHandler"},
     "tglstm": {"description": "Time-Gated LSTM", "handler": "BasicHandler"},
 }
 
