@@ -39,6 +39,7 @@ from .config.runtime_fault_policy import (
     handle_auxiliary_loss_nan,
     raise_for_nonfinite_tensor,
 )
+from .preprocessing import SUPPORTED_IMPUTATION_STRATEGIES
 
 configure_handler_registry_bootstrap()
 
@@ -137,13 +138,21 @@ class ists_layer(nn.Module):
         file: Optional[str] = None,
         device: str = "cpu",
         model_params: Optional[Dict[str, Any]] = None,
+        imputation_strategy: str = "zero",
     ):
         super().__init__()
+
+        if imputation_strategy not in SUPPORTED_IMPUTATION_STRATEGIES:
+            raise ValueError(
+                f"Unknown imputation strategy: {imputation_strategy!r}. "
+                f"Supported: {SUPPORTED_IMPUTATION_STRATEGIES}."
+            )
 
         normalized_model_name = _normalize_model_name_or_raise(model_name)
         _enforce_active_scope_or_raise(normalized_model_name, allow_flow_extension=True)
 
         self.model_name = normalized_model_name
+        self.imputation_strategy = imputation_strategy
         self.input_dim = int(input_dim)
         self.seq_len = int(seq_len)
         self.hidden_dim = int(hidden_dim)
@@ -230,6 +239,8 @@ class ists_layer(nn.Module):
         for solver_key in ("step_size", "dt", "rtol", "atol", "adjoint", "adjoint_params"):
             if solver_key not in forward_kwargs and solver_key in self.model_params:
                 forward_kwargs[solver_key] = self.model_params[solver_key]
+        # Handler-level imputation strategy for the value channel (default "zero").
+        forward_kwargs.setdefault("imputation_strategy", self.imputation_strategy)
 
         method = (
             direct_method

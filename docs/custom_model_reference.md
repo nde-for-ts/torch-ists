@@ -1,17 +1,16 @@
-# torch-ists New Model Onboarding
+# torch-ists Custom Model Reference
 
-> **Package Version**: 0.1.7
 > **Scope**: Custom model wrapper guide for user-owned PyTorch models.
 
-**Related docs**: [Package overview](../README.md) · [Docs index](README.md) · [API Reference](api_reference.md) · [Model Reference](model_reference.md) · [Scripts Reference](scripts_reference.md) · [New Data Onboarding](new_data_onboarding.md) · [CIKM 2025 Tutorial site](https://nde-for-ts.github.io/)
+**Related docs**: [Package overview](../README.md) · [Docs index](README.md) · [API Reference](api_reference.md) · [Model Reference](model_reference.md) · [Scripts Reference](scripts_reference.md) · [Data Reference](data_reference.md) · [CIKM 2025 Tutorial site](https://nde-for-ts.github.io/)
 
-This guide shows how to use `torch-ists` data utilities with your own PyTorch model. Custom models run in your project code, while the source-checkout CLI scripts run the packaged models listed in the [Model Reference](model_reference.md).
+This reference shows how to use `torch-ists` data utilities with your own PyTorch model. Custom models run in your project code; the source-checkout CLI runs packaged models only.
 
 ---
 
 ## Table of Contents
 
-1. [What This Guide Covers](#1-what-this-guide-covers)
+1. [What This Reference Covers](#1-what-this-reference-covers)
 2. [Sequence Wrapper Pattern](#2-sequence-wrapper-pattern)
 3. [Missing-Value Policy](#3-missing-value-policy)
 4. [NDE Wrapper Pattern with Coeffs](#4-nde-wrapper-pattern-with-coeffs)
@@ -21,21 +20,21 @@ This guide shows how to use `torch-ists` data utilities with your own PyTorch mo
 
 ---
 
-## 1. What This Guide Covers
+## 1. What This Reference Covers
 
-Version `0.1.7` supports custom-model workflows where you:
+The package supports custom-model workflows where you:
 
 - define user-owned `torch.nn.Module` implementations outside the `torch_ists` namespace
 - use packaged data loading, split utilities, preprocessing helpers, and seed utilities
 - run your own training loop and call your custom model directly
 - compose `torch_ists` helpers with modules owned by your project
 
-For custom models, keep these responsibilities in your project code:
+Keep these responsibilities in your project code:
 
 - model construction and training logic
 - command-line entry points for your own experiments
 - model metadata and reporting labels for your custom method
-- result reporting that distinguishes your custom model from the 47 packaged models shipped in version `0.1.7`
+- result reporting that distinguishes your custom model from the 47 packaged models
 
 ## 2. Sequence Wrapper Pattern
 
@@ -65,24 +64,22 @@ seq = torch.randn(16, 3, 64, 8)
 logits = model(seq)
 ```
 
-The expected sequence stack is `[batch, channels, length, features]`. The first channel is the value channel used by the simple wrapper above. Missing values remain the responsibility of the external model or the external training loop unless a packaged preprocessing helper is used explicitly.
+The sequence stack is `[batch, channels, length, features]`; channel 0 contains values. Missing-value handling belongs to your model or training loop unless you call `preprocess(...)`.
 
 ## 3. Missing-Value Policy
 
-`torch.nan_to_num(seq[:, 0], nan=0.0)` is a naive direct-sequence baseline policy, not the recommended missing-data policy for new methods. In the source-checkout script pipeline, values are normalized with training-only statistics before the model forward pass, so replacing `NaN` with `0.0` is equivalent to per-channel mean imputation in raw value space. Outside that normalized workflow it is literal zero-fill.
-
-Do not treat blind `nan_to_num` as a robust imputation method. It discards the distinction between a true zero, a normalized mean value, and a missing observation unless the model separately consumes mask or delta channels.
+`torch.nan_to_num(seq[:, 0], nan=0.0)` is a naive baseline policy. It cannot distinguish a true zero from a missing value unless your model also consumes mask or delta channels.
 
 Recommended custom-model paths:
 
-- Direct naive wrapper: use `coeffs=None` plus an explicit imputation policy in your own data/training code, and keep mask/time-delta channels if your architecture can consume them.
+- Direct wrapper: use `coeffs=None` plus your own imputation policy, and keep mask/time-delta channels if your architecture can consume them.
 - Missingness-aware discrete wrapper: consume the packaged `(values, mask, delta)` stack directly instead of reading only `seq[:, 0]`.
 - NDE-style wrapper: use `preprocess(...)` to build interpolation `coeffs` and pass those coefficients into the custom model.
 - Hybrid wrapper: combine explicit imputed values for discrete features with interpolation `coeffs` for the continuous-time path.
 
 ## 4. NDE Wrapper Pattern with Coeffs
 
-NDE-style custom models should consume interpolation coefficients rather than relying on blind value imputation. Install the CDE extra when using this pattern:
+NDE-style custom models should consume interpolation coefficients. Install the CDE extra when using this pattern:
 
 ```bash
 PYTHONNOUSERSITE=1 python -m pip install -e .[cde]
@@ -138,11 +135,11 @@ model = ExternalCoeffNDEClassifier(coeff_dim=coeffs.shape[-1], num_class=2)
 logits = model(coeffs, times)
 ```
 
-This pattern keeps the continuous-time path explicit: the external model owns the NDE architecture, while `torch-ists` only supplies the preprocessing helper and interpolation coefficients.
+The custom model owns the NDE architecture; `torch-ists` supplies preprocessing and interpolation coefficients.
 
 ## 5. Using Packaged Splits
 
-The packaged split utilities can still be used with external training code. See [New Data Onboarding](new_data_onboarding.md) for the full dataset shape, NPZ input, and split file format.
+The packaged split utilities can still be used with custom training code. See [Data Reference](data_reference.md) for the full dataset shape, NPZ input, and split file format.
 
 ```python
 from pathlib import Path
@@ -153,7 +150,7 @@ from torch_ists import load_splits
 train_idx, valid_idx, test_idx = load_splits(Path("split/ECG200/ECG200_0"))
 ```
 
-For custom NPZ datasets, generate the split artifact with the source-checkout script, then train the custom model from a user-owned script:
+For user-provided NPZ datasets, generate the split artifact with the source-checkout script, then train the custom model from a user-owned script:
 
 ```bash
 PYTHONPATH=. python scripts/set_splits.py \
@@ -163,11 +160,11 @@ PYTHONPATH=. python scripts/set_splits.py \
   --seed 0
 ```
 
-`scripts/param_search.py` and `scripts/model_run.py` only accept the model names shipped with the package and are source-checkout scripts, not installed wheel console commands. Use them for those models from a checkout, and use external training code for custom models.
+`scripts/param_search.py` and `scripts/model_run.py` only accept the packaged model names and are source-checkout scripts, not installed wheel console commands. Use them for those models from a checkout, and use custom training code for custom models.
 
 ## 6. Project Layout
 
-Keep custom code under a project namespace such as `my_project.models` or `experiments.custom_models`. Avoid placing project-specific modules inside an installed `torch_ists` package checkout; that makes upgrades and reproducibility harder.
+Keep custom model code under a project namespace such as `my_project.models` or `experiments.custom_models`. Avoid placing project-specific modules inside `torch_ists`.
 
 ## 7. Related References
 
@@ -178,4 +175,4 @@ Keep custom code under a project namespace such as `my_project.models` or `exper
 
 ---
 
-**End of New Model Onboarding**
+**End of Custom Model Reference**

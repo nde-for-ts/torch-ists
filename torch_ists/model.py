@@ -48,6 +48,7 @@ class ists_model(nn.Module):
         file: Optional[str] = None,
         device: str = "cpu",
         model_params: Optional[dict] = None,
+        imputation_strategy: str = "zero",
         task: Literal[
             "classification",
             "regression",
@@ -85,6 +86,7 @@ class ists_model(nn.Module):
             file=file,
             device=device,
             model_params=model_params,
+            imputation_strategy=imputation_strategy,
         )
 
         if self.task == "classification":
@@ -224,6 +226,7 @@ def ists_classifier(
     file: Optional[str] = None,
     device: str = "cpu",
     model_params: Optional[dict] = None,
+    imputation_strategy: str = "zero",
 ) -> ists_model:
     """Classification convenience constructor.
 
@@ -249,5 +252,6 @@ def ists_classifier(
         file=file,
         device=device,
         model_params=model_params,
+        imputation_strategy=imputation_strategy,
         task="classification",
     )

@@ -6,6 +6,72 @@ import numpy as np
 
 MISSINGNESS_EXPERIMENTAL = True
 SUPPORTED_MISSINGNESS_MECHANISMS = {"MCAR", "MAR", "MNAR", "BLOCK", "BURST"}
+SUPPORTED_IMPUTATION_STRATEGIES = ("zero", "last_observed", "channel_mean")
+
+
+def _impute_last_observed(x, time_dim: int = -2):
+    """Last-observation-carried-forward along ``time_dim``.
+
+    Gaps before the first observation in a channel become ``0.0``. Fully vectorized
+    (no Python loop over time): a cumulative max of the observed time indices gives,
+    for each step, the index of the most recent observation, which is then gathered.
+    """
+    import torch
+
+    length = x.shape[time_dim]
+    index_shape = [1] * x.dim()
+    index_shape[time_dim] = length
+    time_index = torch.arange(length, device=x.device).reshape(index_shape).expand_as(x)
+    observed = ~torch.isnan(x)
+    last_index = torch.where(observed, time_index, torch.zeros_like(time_index))
+    last_index = torch.cummax(last_index, dim=time_dim).values
+    filled = torch.nan_to_num(x, nan=0.0)
+    return torch.gather(filled, time_dim, last_index)
+
+
+def _impute_channel_mean(x, time_dim: int = -2):
+    """Per-channel, mask-aware mean over ``time_dim``.
+
+    Each missing position is filled with the mean of the observed values in the
+    same channel; channels with no observation become ``0.0``.
+    """
+    import torch
+
+    isnan = torch.isnan(x)
+    observed = (~isnan).to(x.dtype)
+    filled = torch.nan_to_num(x, nan=0.0)
+    count = observed.sum(dim=time_dim, keepdim=True).clamp_min(1.0)
+    mean = (filled * observed).sum(dim=time_dim, keepdim=True) / count
+    return torch.where(isnan, mean.expand_as(x), x)
+
+
+def apply_imputation(x, strategy: str = "zero", *, time_dim: int = -2):
+    """Impute missing (NaN) values before a naive backbone forward pass.
+
+    Assumes the packaged value layout with the time axis at ``time_dim`` (default
+    ``-2``) and channels at the last axis (the ``[N, L, D]`` value stack).
+
+    Strategies:
+    - ``"zero"`` (default): replace NaN with 0.0. With training-only z-scoring
+      applied upstream, this matches per-channel mean imputation in raw value
+      space; without it, it is literal zero-fill. Numerically identical to the
+      prior ``torch.nan_to_num(x, nan=0.0)`` call.
+    - ``"last_observed"``: last-observation-carried-forward along time; gaps
+      before the first observation become 0.
+    - ``"channel_mean"``: per-channel mask-aware mean over time; all-missing
+      channels become 0.
+    """
+    import torch
+
+    if strategy == "zero":
+        return torch.nan_to_num(x, nan=0.0)
+    if strategy == "last_observed":
+        return _impute_last_observed(x, time_dim=time_dim)
+    if strategy == "channel_mean":
+        return _impute_channel_mean(x, time_dim=time_dim)
+    raise ValueError(
+        f"Unknown imputation strategy: {strategy!r}. Supported: {SUPPORTED_IMPUTATION_STRATEGIES}."
+    )
 
 
 def _validate_inputs(X: np.ndarray, rate: float) -> None:

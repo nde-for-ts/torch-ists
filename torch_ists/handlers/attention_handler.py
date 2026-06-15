@@ -8,6 +8,7 @@ import torch
 import torch.nn as nn
 
 from .base import BaseHandler
+from ..preprocessing import apply_imputation
 
 
 class AttentionHandler(BaseHandler):
@@ -110,9 +111,10 @@ class AttentionHandler(BaseHandler):
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         del coeffs
         model_name = kwargs.pop("model_name", getattr(model, "model_name", ""))
+        strategy = kwargs.get("imputation_strategy", "zero")
 
         data = self.preprocess_input(seq, times)
-        x = torch.nan_to_num(data["x"], nan=0.0)
+        x = apply_imputation(data["x"], strategy)
         seq_ts = data["seq_ts"]
 
         if model_name in {"transformer", "transformer-mask", "sand"}:

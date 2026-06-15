@@ -21,6 +21,7 @@ from typing import Any, Dict
 import torch.nn as nn
 
 from .base import BaseHandler
+from ..preprocessing import apply_imputation
 
 
 class BasicHandler(BaseHandler):
@@ -216,19 +217,21 @@ class BasicHandler(BaseHandler):
 
         # Get model name from model attribute or kwargs
         model_name = getattr(model, 'model_name', kwargs.get('model_name', ''))
+        # Value-channel imputation strategy (default "zero"; uses_filled = True).
+        strategy = kwargs.get('imputation_strategy', 'zero')
 
         # Preprocess input
         data = self.preprocess_input(seq, times)
         x = data['x']  # [N, L, D]
 
-        # Convert NaN → 0 (uses_filled = True)
-        x = torch.nan_to_num(x, nan=0.0)
+        # Impute missing values before the naive backbone (value channel).
+        x = apply_imputation(x, strategy)
 
         # Route to appropriate forward helper based on model_name
         if model_name == 'cnn':
             return self._forward_cnn(model, x)
         elif model_name == 'gru-simple':
-            return self._forward_gru_simple(model, seq)
+            return self._forward_gru_simple(model, seq, strategy)
         elif model_name in ('plstm', 'tlstm'):
             return self._forward_time_aware(model, x, data['seq_delta'])
         elif model_name == 'tglstm':
@@ -301,7 +304,7 @@ class BasicHandler(BaseHandler):
         hn = self._normalize_hidden(hn, bidirectional)
         return out, hn
 
-    def _forward_gru_simple(self, model, seq):
+    def _forward_gru_simple(self, model, seq, strategy="zero"):
         """Forward pass for gru-simple (concatenated input).
 
         gru-simple concatenates all 3 channels [N, 3, D, L] → [N, L, 3*D]
@@ -309,6 +312,7 @@ class BasicHandler(BaseHandler):
         Args:
             model: RNNBackbone instance with concat_input=True
             seq: [N, 3, D, L] Raw input sequence
+            strategy: Imputation strategy for the value channel (default "zero").
 
         Returns:
             tuple: (out, hn) where out is [N, L, H] and hn is [N, H]
@@ -319,8 +323,9 @@ class BasicHandler(BaseHandler):
         # Permute to [N, L, D, 3], then reshape to [N, L, 3*D]
         x_concat = seq.permute(0, 3, 2, 1).reshape(seq.shape[0], seq.shape[3], -1)
 
-        # Convert NaN → 0
-        x_concat = torch.nan_to_num(x_concat, nan=0.0)
+        # Impute missing values (only the value channel carries NaN; mask/delta
+        # have none, so the strategy is a no-op on those columns).
+        x_concat = apply_imputation(x_concat, strategy)
 
         # Forward pass
         out, hn = model(x_concat)
@@ -340,7 +345,7 @@ class BasicHandler(BaseHandler):
         """
         import torch
 
-        seq_delta = torch.nan_to_num(seq_delta, nan=0.0)
+        seq_delta = apply_imputation(seq_delta, "zero")
         out, (hn, _cn) = model(x, seq_delta)
         hn = self._normalize_hidden(hn)
         return out, hn
@@ -352,7 +357,7 @@ class BasicHandler(BaseHandler):
         """
         import torch
 
-        seq_delta = torch.nan_to_num(seq_delta, nan=0.0)
+        seq_delta = apply_imputation(seq_delta, "zero")
         out, (hn, _cn) = model(
             x.permute(1, 0, 2),
             seq_delta.unsqueeze(-1).permute(1, 0, 2),

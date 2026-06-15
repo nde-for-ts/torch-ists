@@ -1,18 +1,18 @@
 # torch-ists
 
-[![Version](https://img.shields.io/badge/version-0.1.7-blue)](pyproject.toml) [![Python](https://img.shields.io/badge/python-%3E%3D3.10-blue)](pyproject.toml) [![PyTorch](https://img.shields.io/badge/PyTorch-%3E%3D2.0-ee4c2c)](pyproject.toml) [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![Package status](https://img.shields.io/badge/status-preview-orange)](#project-status)
+[![Version](https://img.shields.io/badge/version-0.1.8-blue)](pyproject.toml) [![Python](https://img.shields.io/badge/python-%3E%3D3.10-blue)](pyproject.toml) [![PyTorch](https://img.shields.io/badge/PyTorch-%3E%3D2.0-ee4c2c)](pyproject.toml) [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![Package status](https://img.shields.io/badge/status-preview-orange)](#project-status)
 
-**PyTorch toolkit for irregular and multivariate time series modeling with sequence models, attention models, neural ODE, neural CDE, neural SDE, stable SDE, and hybrid continuous-time models.**
+**PyTorch toolkit for irregular and multivariate time series modeling with sequence, attention, neural ODE, neural CDE, neural SDE, Stable Neural SDEs, and hybrid continuous-time methods.**
 
-`torch-ists` is a research-oriented Python package for irregularly sampled multivariate time series modeling, missing-data benchmarks, and continuous-time sequence modeling. It provides a consistent PyTorch API with task heads for classification, regression, forecasting, imputation, outlier detection, and change detection. The current package pairs those runtime APIs with source-checkout benchmark scripts for the stable classification workflow, benchmark archive data loading, and documented model lineage for neural differential equation methods including neural ODE, neural CDE, neural SDE, stable SDE, and hybrid continuous-time models.
+`torch-ists` is a research-oriented PyTorch package for irregularly sampled multivariate time series. It provides runtime APIs, source-checkout benchmark scripts, benchmark archive loading, and model lineage notes for continuous-time methods.
 
-**Related source docs**: [Docs index](docs/README.md) · [API Reference](docs/api_reference.md) · [Model Reference](docs/model_reference.md) · [Scripts Reference](docs/scripts_reference.md) · [New Data Onboarding](docs/new_data_onboarding.md) · [New Model Onboarding](docs/new_model_onboarding.md) · [CIKM 2025 Tutorial site](https://nde-for-ts.github.io/)
+**Related source docs**: [Docs index](docs/README.md) · [API Reference](docs/api_reference.md) · [Model Reference](docs/model_reference.md) · [Scripts Reference](docs/scripts_reference.md) · [Data Reference](docs/data_reference.md) · [Custom Model Reference](docs/custom_model_reference.md) · [CIKM 2025 Tutorial site](https://nde-for-ts.github.io/)
 
 ## Overview
 
-`torch-ists` provides a unified interface for training and evaluating continuous-time and discrete-time PyTorch models on irregularly sampled multivariate time series. Version `0.1.7` ships 47 models across sequence, attention, CDE/control-path, flow, ODE, SDE, and hybrid method families, with the classification benchmark pipeline as the stable, reproducible workflow. In this package line, `neuralflow` is the flow-only row, while `dualdynamics` and `flowpath` are CDE/control-path methodology rows with flow-operator variants, and `ancde`, `exit`, and `leap` are advanced CDE control-path rows.
+`torch-ists` provides training and evaluation utilities for continuous-time and discrete-time models. The package includes 47 models; the stable benchmark workflow is classification. `neuralflow` is flow-only, `dualdynamics` and `flowpath` are flow-based CDE/control-path methods, and `ancde`, `exit`, and `leap` are Neural CDE methods.
 
-The package exposes `ists_classifier` for the stable classification path and the lower-level `ists_model` constructor for advanced experimentation with additional task heads, irregular sampling, missing observations, and continuous-time model variants.
+The package exposes `ists_classifier` for classification and the lower-level `ists_model` constructor for additional task heads and continuous-time model variants.
 
 ## Installation
 
@@ -29,12 +29,12 @@ PYTHONNOUSERSITE=1 python -m pip install -e .
 PYTHONNOUSERSITE=1 python -c "import torch_ists; print(torch_ists.__version__)"
 ```
 
-Artifact boundary for version `0.1.7`:
+Artifact boundary:
 
 - built wheels install the `torch_ists` runtime package and package data only
 - top-level `docs/`, `scripts/`, and `PACKAGE_STATUS.json` are source-checkout assets
 - the benchmark script chain is run from a source checkout with `PYTHONPATH=.`
-- no console entry points are exposed in this preview release
+- no console entry points are exposed
 
 Optional dependencies:
 
@@ -68,7 +68,7 @@ from torch_ists import benchmark_loader
 X, y = benchmark_loader.get_data("ECG200")
 ```
 
-See the API reference for archive cache-location details and `docs/new_data_onboarding.md` for custom dataset onboarding.
+See the API reference for archive cache-location details and `docs/data_reference.md` for user-provided dataset handling.
 
 Benchmark loader behavior: the source-checkout scripts pool the original UCR/UEA TRAIN+TEST partitions before generating project splits. Variable-length padding/resampling is fitted on the pooled TRAIN+TEST length distribution, labels default to pooled TRAIN+TEST encoding, and ragged padding defaults to `NaN`.
 
@@ -104,27 +104,32 @@ PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/model_run.py
 Input preparation:
 
 - sequence baselines, `plstm`, `tlstm`, `tglstm`, `transformer`, `transformer-mask`, `sand`, `mtan`, `miam`, `neuralflow`, `neuralflow-r/g/c`, `ode-lstm`, `ode-rnn`, `latentode`, and `gru-ode-bayes` accept the sequence stack directly with `coeffs=None`.
-- `dualdynamics`, `flowpath`, `neuralcde*`, `gru-d*`, `gru-ode`, `ode-rnn-spline`, and the SDE family need `preprocess(X, model_name=...)` to build matching coefficients.
-- `dualdynamics`, `flowpath`, `ancde`, `exit`, and `leap` use CDE control paths, so install `.[cde]` or `.[all]` before running those models.
+- `neuralcde*`, `ancde`, `exit`, `leap`, `dualdynamics`, `flowpath`, `gru-d*`, `gru-ode`, `ode-rnn-spline`, and the SDE methods need `preprocess(X, model_name=...)` to build matching coefficients.
+- `neuralcde*`, `ancde`, `exit`, `leap`, `dualdynamics`, and `flowpath` use CDE control paths, so install `.[cde]` or `.[all]` before running those models.
+
+Imputation strategy:
+
+- Missing entries on the value channel are imputed before the backbone consumes them. `ists_classifier(..., imputation_strategy="zero")` is the default and matches the established zero-fill baseline (mean-equivalent under training-set standardization).
+- `last_observed` (last-observation-carried-forward) and `channel_mean` (per-series observed mean) are experimental opt-in alternatives selected through the same argument.
 
 ## Models Included
 
-Version `0.1.7` includes 47 models across the groups below:
+The package includes 47 models across the groups below:
 
-| Family | Models |
+| Method group | Models |
 |--------|--------|
 | **Sequence baselines** | `cnn`, `rnn`, `lstm`, `gru`, `bilstm`, `gru-simple`, `plstm`, `tlstm`, `tglstm` |
-| **Attention family** | `transformer`, `transformer-mask`, `sand`, `mtan`, `miam` |
-| **ODE family** | `gru-dt`, `gru-d`, `gru-ode`, `ode-rnn-spline`, `ode-lstm` |
-| **Advanced ODE family** | `ode-rnn`, `latentode`, `gru-ode-bayes` |
-| **NeuralFlow** | flow-only official name `neuralflow`; explicit variants `neuralflow-r`, `neuralflow-g`, `neuralflow-c` |
+| **Attention-based methods** | `transformer`, `transformer-mask`, `sand`, `mtan`, `miam` |
+| **Neural ODE methods** | `gru-dt`, `gru-d`, `gru-ode`, `ode-rnn-spline`, `ode-lstm` |
+| **ODE-RNN, Latent ODE, and GRU-ODE-Bayes** | `ode-rnn`, `latentode`, `gru-ode-bayes` |
 | **Neural CDE** | `neuralcde`, `neuralcde-l`, `neuralcde-r`, `neuralcde-c`, `neuralcde-h` |
-| **Advanced Neural CDE control-path models** | official names `dualdynamics`, `flowpath`; explicit flow-operator variants `dualdynamics-r/g/c`, `flowpath-r/g/c` |
-| **Advanced CDE control-path (new in 0.1.6)** | `ancde`, `exit`, `leap` |
+| **ANCDE, EXIT, and LEAP** | `ancde`, `exit`, `leap` |
+| **NeuralFlow** | default name `neuralflow`; explicit variants `neuralflow-r`, `neuralflow-g`, `neuralflow-c` |
+| **DualDynamics and FlowPath** | default names `dualdynamics`, `flowpath`; explicit variants `dualdynamics-r/g/c`, `flowpath-r/g/c` |
 | **Continuous-time baseline adapters** | `naive_cde`, `neural_ode`, `neural_ode_t`, `neural_sde`, `neural_sde_t` |
-| **Stable Neural SDE** | `neural_lsde`, `neural_lnsde`, `neural_gsde` |
+| **Stable Neural SDEs** | `neural_lsde`, `neural_lnsde`, `neural_gsde` |
 
-In version `0.1.7`, model-family names use the residual-flow default: `neuralflow`, `dualdynamics`, and `flowpath`. The `-r`, `-g`, and `-c` suffixes remain accepted explicit native flow-operator variants. Methodologically, do not read all three as one pure flow family: `neuralflow` is flow-only, while `dualdynamics` and `flowpath` are CDE/control-path rows that use native flow operators. `ancde`, `exit`, and `leap` are additional CDE/control-path rows added in version `0.1.6`.
+`neuralflow`, `dualdynamics`, and `flowpath` use residual-flow defaults. The `-r`, `-g`, and `-c` suffixes select explicit flow variants. `neuralflow` is flow-only; `dualdynamics` and `flowpath` are CDE/control-path methods. `ancde`, `exit`, and `leap` are Neural CDE methods.
 
 ## Source Checkout Scripts
 
@@ -140,11 +145,11 @@ PYTHONPATH=. python scripts/param_search.py --help
 PYTHONPATH=. python scripts/model_run.py --help
 ```
 
-## New Model Onboarding
+## Custom Model Reference
 
-Version `0.1.7` documents how external models can compose with the package. Custom PyTorch modules should live outside the `torch_ists` namespace and reuse the packaged data, split, preprocessing, and task wrappers from user-owned code. Registering new model names is not provided in this release.
+Custom models can compose with the package from user-owned code. User-owned PyTorch modules should live outside the `torch_ists` namespace and reuse the packaged data, split, preprocessing, and task wrappers.
 
-See `docs/new_model_onboarding.md` for the wrapper pattern.
+See `docs/custom_model_reference.md` for the wrapper pattern.
 
 ## Documentation
 
@@ -154,29 +159,26 @@ The `docs/` directory is part of the source checkout. Built wheels embed this RE
 - `docs/api_reference.md` — exported runtime API and source-checkout script behavior
 - `docs/model_reference.md` — per-model origin paper, canonical repo, and implementation note
 - `docs/scripts_reference.md` — source-checkout CLI scripts: flags, outputs, and pipeline order
-- `docs/new_data_onboarding.md` — guidance for adding user-provided datasets and NPZ script inputs
-- `docs/new_model_onboarding.md` — guidance for using external custom models alongside the package
+- `docs/data_reference.md` — guidance for adding user-provided datasets and NPZ script inputs
+- `docs/custom_model_reference.md` — guidance for using custom models alongside the package
 
 ### Tutorial
 
-A companion tutorial on Neural Differential Equations for irregular time series — covering the methodological foundations behind `torch-ists` — is hosted at the **CIKM 2025 Tutorial site**: <https://nde-for-ts.github.io/>. The site bundles slides, references, and runnable notebooks aligned with the packaged model families.
+A companion Neural Differential Equations tutorial is hosted at the **CIKM 2025 Tutorial site**: <https://nde-for-ts.github.io/>.
 
 ## Project Status
 
-This is a **preview** release (`v0.1.7`):
+This is a **preview** release:
 
-- Core classification pipeline is reproducible
-- The package includes the sequence, attention, ODE, NeuralFlow, NeuralCDE, DualDynamics/FlowPath CDE/control-path, advanced CDE control-path (`ancde`, `exit`, `leap`), continuous-time baseline adapter, and SDE groups listed above
-- Version `0.1.7` ships 47 models and includes the canonical `torch_ists.benchmark_loader` submodule
-- benchmark loading and source-checkout script import paths are documented for the `0.1.7` workflow
-- New-model onboarding guidance documents the supported external-wrapper pattern
-- Source documentation and source-checkout scripts cover the packaged `0.1.7` workflow
-- Built wheels install the runtime package only; source docs, scripts, and `PACKAGE_STATUS.json` remain source-checkout assets
-- **Experimental**: Synthetic missingness now supports five mechanisms — `MCAR`, `MAR`, `MNAR`, `BLOCK`, and `BURST` — via `apply_missingness()`. The `BLOCK` and `BURST` mechanisms and the robustness result schema are experimental and flagged by `MISSINGNESS_EXPERIMENTAL = True`. They are not under the stable API contract and may change without semver guarantee.
+- Classification is the primary supported workflow.
+- The package includes 47 models and `torch_ists.benchmark_loader`.
+- Built wheels install the runtime package only; docs, scripts, and `PACKAGE_STATUS.json` are source-checkout assets.
+- Synthetic missingness supports `MCAR`, `MAR`, `MNAR`, `BLOCK`, and `BURST`; non-MCAR mechanisms and robustness result schemas are experimental.
+- Input imputation defaults to `imputation_strategy="zero"`; `last_observed` and `channel_mean` are experimental opt-in alternatives.
 
 ## How to Cite
 
-If you use `torch-ists` in your research, please cite the following three papers that motivated and shaped this package — the ICLR 2024 Stable Neural SDE paper, the AAAI 2025 DualDynamics paper, and the IJCAI 2025 survey on Neural Differential Equations for time series analysis:
+If you use `torch-ists`, please cite the core papers behind the package:
 
 ```bibtex
 @inproceedings{oh_stable_2024,
@@ -213,4 +215,4 @@ If you use `torch-ists` in your research, please cite the following three papers
 }
 ```
 
-If your work additionally relies on a specific external model included in this package, please also cite the original paper for that model — see [`docs/model_reference.md`](docs/model_reference.md) for per-model origin papers and canonical repositories.
+If your work relies on a specific packaged model, also cite the original paper for that model; see [`docs/model_reference.md`](docs/model_reference.md).

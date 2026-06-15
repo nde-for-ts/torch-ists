@@ -1,11 +1,10 @@
-# torch-ists New Data Onboarding
+# torch-ists Data Reference
 
-> **Package Version**: 0.1.7
-> **Scope**: Data onboarding guide for benchmark datasets and user-provided datasets.
+> **Scope**: Data reference for benchmark datasets and user-provided datasets.
 
-**Related docs**: [Package overview](../README.md) · [Docs index](README.md) · [API Reference](api_reference.md) · [Model Reference](model_reference.md) · [Scripts Reference](scripts_reference.md) · [New Model Onboarding](new_model_onboarding.md) · [CIKM 2025 Tutorial site](https://nde-for-ts.github.io/)
+**Related docs**: [Package overview](../README.md) · [Docs index](README.md) · [API Reference](api_reference.md) · [Model Reference](model_reference.md) · [Scripts Reference](scripts_reference.md) · [Custom Model Reference](custom_model_reference.md) · [CIKM 2025 Tutorial site](https://nde-for-ts.github.io/)
 
-This guide describes how data enters `torch-ists` in version `0.1.7`. It is based on the current implementation of `torch_ists.DataLoader`, `torch_ists.benchmark_loader`, `torch_ists.preprocessing.preprocess`, `torch_ists.split_utils`, and the source-checkout scripts.
+This reference describes how data enters `torch-ists`. It is based on the current implementation of `torch_ists.DataLoader`, `torch_ists.benchmark_loader`, `torch_ists.preprocessing.preprocess`, `torch_ists.split_utils`, and the source-checkout scripts.
 
 ---
 
@@ -14,9 +13,9 @@ This guide describes how data enters `torch-ists` in version `0.1.7`. It is base
 1. [Supported Data Paths](#1-supported-data-paths)
 2. [Input Data Format](#2-input-data-format)
 3. [Choose a Data Source](#3-choose-a-data-source)
-4. [Build a Custom NPZ Dataset](#4-build-a-custom-npz-dataset)
+4. [Build a User-Provided NPZ Dataset](#4-build-a-user-provided-npz-dataset)
 5. [Generate or Reuse Splits](#5-generate-or-reuse-splits)
-6. [Run the Source Checkout Pipeline on Custom Data](#6-run-the-source-checkout-pipeline-on-custom-data)
+6. [Run the Source Checkout Pipeline on User-Provided Data](#6-run-the-source-checkout-pipeline-on-user-provided-data)
 7. [Preprocessing](#7-preprocessing)
 8. [Validation Checklist](#8-validation-checklist)
 
@@ -24,7 +23,7 @@ This guide describes how data enters `torch-ists` in version `0.1.7`. It is base
 
 ## 1. Supported Data Paths
 
-Version `0.1.7` supports these data paths:
+The package supports these data paths:
 
 - built-in benchmark archive loading through `torch_ists.benchmark_loader.get_data(dataset_name)`
 - user-provided arrays through `DataLoader.from_numpy`
@@ -34,7 +33,7 @@ Version `0.1.7` supports these data paths:
 - source-checkout script execution on one local NPZ dataset with `--dataset-source npz --dataset-npz <path>`
 - externally prepared split files through `save_splits` / `load_splits`
 
-Current limitations in version `0.1.7`:
+Current limitations:
 
 - registering a new dataset catalog entry inside the package
 - preserving the original UCR/UEA train/test split in the source-checkout scripts
@@ -50,7 +49,7 @@ All supported data paths use this array format:
 |---|---|---|---|
 | `X` | `[N, D, L]` | yes | `N` samples, `D` feature channels, `L` time steps. Use `float32` where possible. |
 | `y` | `[N]` | yes | One label per sample for the stable classification workflow. Integer labels are recommended. |
-| `timestamps` | `[N, L]` | optional | Stored by `DataLoader`, but not consumed by the source-checkout script pipeline in `0.1.7`. |
+| `timestamps` | `[N, L]` | optional | Stored by `DataLoader`, but not consumed by the source-checkout script pipeline. |
 
 Missing values should be represented as `NaN`. For variable-length series, pad shorter series to a fixed `L` with `NaN`; `preprocess` builds the observed-value mask from those `NaN` positions.
 
@@ -68,9 +67,9 @@ The source-checkout scripts normalize values with statistics computed only from 
 
 Benchmark loader behavior: `get_data` pools original UCR/UEA TRAIN+TEST partitions before the package creates project splits. Variable-length resampling is fitted on the pooled TRAIN+TEST length distribution, labels default to pooled TRAIN+TEST encoding, and ragged padding defaults to `NaN`.
 
-## 4. Build a Custom NPZ Dataset
+## 4. Build a User-Provided NPZ Dataset
 
-The source-checkout script path for custom data expects an NPZ file with `X` and `y` keys:
+The source-checkout script path for user-provided data expects an NPZ file with `X` and `y` keys:
 
 ```python
 import numpy as np
@@ -98,7 +97,7 @@ bundle = DataLoader.from_file(
 )
 ```
 
-`DataLoader.from_dataframe` and CSV/parquet `from_file` produce a `DatasetBundle`; they do not write an NPZ file automatically. The source-checkout scripts consume NPZ for custom datasets, so persist `bundle.X` and `bundle.y` when you want to use the script chain.
+`DataLoader.from_dataframe` and CSV/parquet `from_file` produce a `DatasetBundle`; they do not write an NPZ file automatically. The source-checkout scripts consume NPZ for user-provided datasets, so persist `bundle.X` and `bundle.y` when you want to use the script chain.
 
 ## 5. Generate or Reuse Splits
 
@@ -133,7 +132,7 @@ save_splits(path, train_idx, valid_idx, test_idx)
 
 `set_splits.py --if-exists reuse` keeps an existing split artifact. Use the same `--dataset-name` and `--seed` in `param_search.py` and `model_run.py`.
 
-## 6. Run the Source Checkout Pipeline on Custom Data
+## 6. Run the Source Checkout Pipeline on User-Provided Data
 
 For a local NPZ dataset, use the same `--dataset-source npz --dataset-npz ...` pair in all three stages:
 
@@ -167,7 +166,7 @@ PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/model_run.py \
 |---|---|---|
 | `X_missing` | `[N,L,D]` | Values after existing and synthetic missingness are represented with `NaN`. |
 | `X_mask` | `[N,L,D]` | Observed-value mask, `1.0` observed and `0.0` missing. |
-| `X_delta` | `[N,L,D]` | Index-based steps since previous observation; this is not timestamp-aware in `0.1.7`. |
+| `X_delta` | `[N,L,D]` | Index-based steps since previous observation; this is not timestamp-aware. |
 | `coeffs` | model-dependent | Interpolation coefficients for CDE/SDE/continuous-time rows. |
 
 When `model_name` is supplied, interpolation mode and intensity-channel policy come from `torch_ists.config.model_data_policy.get_data_config(model_name)`. Explicit `interpolate=` and `use_intensity=` arguments override that default.
@@ -181,7 +180,7 @@ Missingness controls:
 | `seed` | `0` | Controls synthetic missingness sampling. |
 | `channel_sync` | `False` | If true, synthetic missing time indices are shared across feature channels. |
 
-For direct sequence models, the packaged runtime can consume the sequence stack with `coeffs=None`. For CDE/control-path, ODE-with-coeffs, and SDE-family rows, use `preprocess(X, model_name=...)` so the coefficients match the model's data policy.
+For direct sequence models, the packaged runtime can consume the sequence stack with `coeffs=None`. For CDE/control-path, ODE-with-coeffs, and SDE methods, use `preprocess(X, model_name=...)` so the coefficients match the model's data policy.
 
 ## 8. Validation Checklist
 
@@ -198,4 +197,4 @@ Before running the source-checkout script chain on a new dataset:
 
 ---
 
-**End of New Data Onboarding**
+**End of Data Reference**
