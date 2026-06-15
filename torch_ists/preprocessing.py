@@ -5,6 +5,7 @@ from typing import Any, Optional, Tuple
 import numpy as np
 
 MISSINGNESS_EXPERIMENTAL = True
+SUPPORTED_MISSINGNESS_MECHANISMS = {"MCAR", "MAR", "MNAR", "BLOCK", "BURST"}
 
 
 def _validate_inputs(X: np.ndarray, rate: float) -> None:
@@ -34,6 +35,43 @@ def _build_mnar_probability(X: np.ndarray, rate: float) -> np.ndarray:
     probs = _sigmoid(norm)
     probs = probs / (np.nanmean(probs) + 1e-8) * rate
     return np.clip(probs, 0.0, 0.99)
+
+
+def _sample_block_indices(rng: np.random.Generator, length: int, count: int) -> np.ndarray:
+    if count <= 0:
+        return np.empty((0,), dtype=np.int64)
+    if count >= length:
+        return np.arange(length, dtype=np.int64)
+    start = int(rng.integers(0, length - count + 1))
+    return np.arange(start, start + count, dtype=np.int64)
+
+
+def _sample_burst_indices(rng: np.random.Generator, length: int, count: int) -> np.ndarray:
+    if count <= 0:
+        return np.empty((0,), dtype=np.int64)
+    if count >= length:
+        return np.arange(length, dtype=np.int64)
+
+    selected = np.zeros(length, dtype=bool)
+    max_burst = max(1, min(count, int(round(length * 0.05)) or 1))
+    attempts = 0
+    while int(selected.sum()) < count and attempts < max(32, length * 8):
+        attempts += 1
+        remaining = count - int(selected.sum())
+        burst_len = int(rng.integers(1, min(max_burst, remaining) + 1))
+        start = int(rng.integers(0, length - burst_len + 1))
+        candidates = np.arange(start, start + burst_len, dtype=np.int64)
+        new_candidates = candidates[~selected[candidates]]
+        if new_candidates.size == 0:
+            continue
+        selected[new_candidates[:remaining]] = True
+
+    remaining = count - int(selected.sum())
+    if remaining > 0:
+        fill = rng.choice(np.flatnonzero(~selected), size=remaining, replace=False)
+        selected[fill] = True
+
+    return np.flatnonzero(selected).astype(np.int64)
 
 
 def _compute_delta(mask_observed_ndl: np.ndarray) -> np.ndarray:
@@ -150,6 +188,8 @@ def apply_missingness(
     Mechanism guidance:
     - MCAR: default/recommended packaged baseline.
     - MAR/MNAR: advanced missingness modes intended mainly for comparative analysis.
+    - BLOCK: one contiguous temporal gap per sample/channel (or per sample if channel_sync=True).
+    - BURST: several short contiguous temporal gaps per sample/channel (or per sample if channel_sync=True).
 
     Returns:
         X_missing: [N, D, L], with missing values as NaN.
@@ -158,7 +198,7 @@ def apply_missingness(
     _validate_inputs(X, rate)
 
     mechanism = mechanism.upper()
-    if mechanism not in {"MCAR", "MAR", "MNAR"}:
+    if mechanism not in SUPPORTED_MISSINGNESS_MECHANISMS:
         raise ValueError(f"Unsupported mechanism: {mechanism}")
 
     X = np.asarray(X, dtype=np.float32)
@@ -179,6 +219,19 @@ def apply_missingness(
                 for i in range(n):
                     for j in range(d):
                         removed = rng.choice(l, size=num_remove, replace=False)
+                        sampled_missing[i, j, removed] = True
+    elif rate > 0.0 and mechanism in {"BLOCK", "BURST"}:
+        num_remove = int(l * rate)
+        sampler = _sample_block_indices if mechanism == "BLOCK" else _sample_burst_indices
+        if num_remove > 0:
+            if channel_sync:
+                for i in range(n):
+                    removed = sampler(rng, l, num_remove)
+                    sampled_missing[i, :, removed] = True
+            else:
+                for i in range(n):
+                    for j in range(d):
+                        removed = sampler(rng, l, num_remove)
                         sampled_missing[i, j, removed] = True
     elif rate > 0.0:
         if mechanism == "MAR":
@@ -223,8 +276,9 @@ def preprocess(
             from `model_name` (or defaults to True for backward compatibility).
         seed: RNG seed for missingness.
         channel_sync: If True, synchronize missing indices across channels.
-        mechanism: Missing mechanism {"MCAR", "MAR", "MNAR"}.
-            MCAR is default/recommended. MAR/MNAR are advanced analysis-oriented modes.
+        mechanism: Missing mechanism {"MCAR", "MAR", "MNAR", "BLOCK", "BURST"}.
+            MCAR is default/recommended. MAR/MNAR are value/probability-oriented modes;
+            BLOCK/BURST are temporal-gap robustness modes.
         model_name: Optional model name. When set, `interpolate` and
             `use_intensity` default to the model's expected configuration via
             `get_data_config(model_name)`. Explicit kwargs still override.

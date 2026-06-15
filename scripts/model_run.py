@@ -113,6 +113,11 @@ def _build_depth_model_kwargs(model_name: str, model_config: dict) -> dict:
 def _parse_missing_rates(raw):
     if raw is None:
         return [0.0, 0.3, 0.5, 0.7]
+    if not isinstance(raw, str):
+        values = [float(value) for value in raw]
+        if not values:
+            raise ValueError("At least one missing rate must be provided.")
+        return values
     values = []
     for token in raw.split(","):
         token = token.strip()
@@ -122,6 +127,105 @@ def _parse_missing_rates(raw):
     if not values:
         raise ValueError("At least one missing rate must be provided.")
     return values
+
+
+def _parse_robustness_mechanisms(raw):
+    if raw is None:
+        raw = "MCAR"
+    if isinstance(raw, str):
+        tokens = [token.strip().upper() for token in raw.split(",") if token.strip()]
+    else:
+        tokens = [str(token).strip().upper() for token in raw if str(token).strip()]
+    supported = {"MCAR", "MAR", "MNAR", "BLOCK", "BURST"}
+    if not tokens:
+        raise ValueError("At least one robustness missingness mechanism must be provided.")
+    invalid = sorted(set(tokens) - supported)
+    if invalid:
+        raise ValueError(f"Unsupported robustness missingness mechanism(s): {', '.join(invalid)}")
+    return list(dict.fromkeys(tokens))
+
+
+def _parse_robustness_channel_sync_options(raw):
+    if raw is None:
+        raw = "auto"
+    if isinstance(raw, str):
+        tokens = [token.strip().lower() for token in raw.split(",") if token.strip()]
+    else:
+        tokens = [str(token).strip().lower() for token in raw if str(token).strip()]
+    aliases = {
+        "auto": "auto",
+        "true": "true",
+        "t": "true",
+        "1": "true",
+        "yes": "true",
+        "false": "false",
+        "f": "false",
+        "0": "false",
+        "no": "false",
+    }
+    resolved = []
+    for token in tokens:
+        if token not in aliases:
+            raise ValueError("robustness channel sync options must be drawn from {auto,false,true}")
+        resolved.append(aliases[token])
+    if not resolved:
+        raise ValueError("At least one robustness channel_sync option must be provided.")
+    return list(dict.fromkeys(resolved))
+
+
+def _parse_robustness_test_seeds(raw):
+    if raw is None:
+        raw = "0"
+    if isinstance(raw, str):
+        tokens = [token.strip() for token in raw.split(",") if token.strip()]
+    else:
+        tokens = [str(token).strip() for token in raw if str(token).strip()]
+    if not tokens:
+        raise ValueError("At least one robustness missingness seed must be provided.")
+    return list(dict.fromkeys(int(token) for token in tokens))
+
+
+def _resolve_channel_sync_options(options, use_raw_flow_input):
+    resolved = []
+    for option in _parse_robustness_channel_sync_options(options):
+        if option == "auto":
+            value = bool(use_raw_flow_input)
+        elif option == "true":
+            value = True
+        else:
+            value = False
+        if value not in resolved:
+            resolved.append(value)
+    return resolved
+
+
+def _axis_token(values):
+    return "-".join(
+        str(value).strip().lower().replace("_", "-").replace(".", "p").replace("-", "m")
+        for value in values
+    )
+
+
+def _build_robustness_axis_suffix(
+    robustness_test_rates=None,
+    robustness_test_mechanisms=None,
+    robustness_channel_sync_options=None,
+    robustness_test_seeds=None,
+):
+    rates = _parse_missing_rates(robustness_test_rates)
+    mechanisms = _parse_robustness_mechanisms(robustness_test_mechanisms)
+    sync_options = _parse_robustness_channel_sync_options(robustness_channel_sync_options)
+    seeds = _parse_robustness_test_seeds(robustness_test_seeds)
+    if rates == [0.0, 0.3, 0.5, 0.7] and mechanisms == ["MCAR"] and sync_options == ["auto"] and seeds == [0]:
+        return ""
+    return "__" + "__".join(
+        [
+            "rates_" + _axis_token(rates),
+            "types_" + _axis_token(mechanisms),
+            "sync_" + _axis_token(sync_options),
+            "mseeds_" + _axis_token(seeds),
+        ]
+    )
 
 
 def parse_cli_args():
@@ -214,6 +318,24 @@ def parse_cli_args():
         help="Comma-separated test missing rates for robustness mode",
     )
     parser.add_argument(
+        "--robustness-test-mechanisms",
+        type=str,
+        default="MCAR",
+        help="Comma-separated test missingness mechanisms for robustness mode: MCAR,MAR,MNAR,BLOCK,BURST",
+    )
+    parser.add_argument(
+        "--robustness-channel-sync-options",
+        type=str,
+        default="auto",
+        help="Comma-separated channel_sync options for robustness mode: auto,false,true",
+    )
+    parser.add_argument(
+        "--robustness-test-seeds",
+        type=str,
+        default="0",
+        help="Comma-separated missingness RNG seeds for robustness test injections",
+    )
+    parser.add_argument(
         "--split-root",
         type=str,
         default="split",
@@ -290,6 +412,9 @@ def parse_cli_args():
     args.models = _parse_csv_list(args.models)
     args.missing_rates = _parse_missing_rates(args.missing_rates)
     args.robustness_test_rates = _parse_missing_rates(args.robustness_test_rates)
+    args.robustness_test_mechanisms = _parse_robustness_mechanisms(args.robustness_test_mechanisms)
+    args.robustness_channel_sync_options = _parse_robustness_channel_sync_options(args.robustness_channel_sync_options)
+    args.robustness_test_seeds = _parse_robustness_test_seeds(args.robustness_test_seeds)
     args.dataset_source = normalize_dataset_source(args.dataset_source)
     if args.dataset_source == "npz":
         if args.dataset_npz is None:
@@ -364,9 +489,26 @@ def _validate_bounded_metric(name, value):
     return value
 
 
-def _build_output_path(data_name, missing_rate, model_name, seed, out_root, robustness_mode=False):
+def _build_output_path(
+    data_name,
+    missing_rate,
+    model_name,
+    seed,
+    out_root,
+    robustness_mode=False,
+    robustness_test_rates=None,
+    robustness_test_mechanisms=None,
+    robustness_channel_sync_options=None,
+    robustness_test_seeds=None,
+):
     if robustness_mode:
-        out_name = "_".join([data_name, "robustness", model_name, str(seed)])
+        suffix = _build_robustness_axis_suffix(
+            robustness_test_rates=robustness_test_rates,
+            robustness_test_mechanisms=robustness_test_mechanisms,
+            robustness_channel_sync_options=robustness_channel_sync_options,
+            robustness_test_seeds=robustness_test_seeds,
+        )
+        out_name = "_".join([data_name, "robustness", model_name, str(seed)]) + suffix
         return os.path.join(out_root, data_name, "robustness", out_name)
     out_name = "_".join([data_name, str(missing_rate), model_name, str(seed)])
     return os.path.join(out_root, data_name, str(missing_rate), out_name)
@@ -461,14 +603,17 @@ def _build_predictions_payload(y_true, y_pred, logit_list, save_predictions="ful
 
 
 def _build_evaluation_result(
-    *,
-    task,
     test_missing_rate,
     y_true=None,
     y_pred=None,
     logit_list=None,
     task_pred=None,
     task_target=None,
+    *,
+    task="classification",
+    test_missing_type="MCAR",
+    test_channel_sync=None,
+    test_missing_seed=0,
     save_predictions="full",
 ):
     task = str(task).strip().lower()
@@ -601,6 +746,9 @@ def _build_evaluation_result(
             raise ValueError(f"save_predictions must be 'full' or 'summary', got {save_predictions!r}")
     return {
         "test_missing_rate": float(test_missing_rate),
+        "test_missing_type": str(test_missing_type).upper(),
+        "test_channel_sync": None if test_channel_sync is None else bool(test_channel_sync),
+        "test_missing_seed": int(test_missing_seed),
         "metrics": metrics,
         "predictions": predictions,
     }
@@ -609,7 +757,7 @@ def _build_evaluation_result(
 def _build_result_payload(
     *,
     mode,
-    task,
+    task="classification",
     dataset,
     model_name,
     seed,
@@ -621,6 +769,9 @@ def _build_result_payload(
     device,
     run_id,
     save_predictions,
+    train_missing_type="MCAR",
+    train_channel_sync=None,
+    robustness_axes=None,
 ):
     return {
         "mode": str(mode),
@@ -629,6 +780,8 @@ def _build_result_payload(
         "model": str(model_name),
         "seed": int(seed),
         "train_missing_rate": float(train_missing_rate),
+        "train_missing_type": str(train_missing_type).upper(),
+        "train_channel_sync": None if train_channel_sync is None else bool(train_channel_sync),
         "evaluations": evaluations,
         "meta": {
             "task": str(task),
@@ -640,6 +793,7 @@ def _build_result_payload(
             "created_at": datetime.datetime.utcnow().isoformat() + "Z",
             "run_id": run_id,
             "save_predictions": str(save_predictions),
+            "robustness_axes": robustness_axes,
         },
     }
 
@@ -654,6 +808,9 @@ def run_model(
     CHECK=False,
     robustness_mode=False,
     robustness_test_rates=None,
+    robustness_test_mechanisms=None,
+    robustness_channel_sync_options=None,
+    robustness_test_seeds=None,
     split_root="split",
     out_root="out",
     run_id=None,
@@ -667,7 +824,20 @@ def run_model(
 ):
     task = str(task).strip().lower()
     if robustness_mode:
-        LOGGER.info("Robustness run start dataset=%s model=%s (train missing=0.0, test rates=%s)", data_name, model_name, robustness_test_rates)
+        robustness_test_rates = _parse_missing_rates(robustness_test_rates)
+        robustness_test_mechanisms = _parse_robustness_mechanisms(robustness_test_mechanisms)
+        robustness_channel_sync_options = _parse_robustness_channel_sync_options(robustness_channel_sync_options)
+        robustness_test_seeds = _parse_robustness_test_seeds(robustness_test_seeds)
+    if robustness_mode:
+        LOGGER.info(
+            "Robustness run start dataset=%s model=%s (train missing=0.0, test rates=%s, types=%s, sync=%s, missing_seeds=%s)",
+            data_name,
+            model_name,
+            robustness_test_rates,
+            robustness_test_mechanisms,
+            robustness_channel_sync_options,
+            robustness_test_seeds,
+        )
     else:
         LOGGER.info("Run start dataset=%s missing=%.1f model=%s", data_name, missing_rate, model_name)
 
@@ -679,6 +849,10 @@ def run_model(
         SEED,
         out_root,
         robustness_mode=robustness_mode,
+        robustness_test_rates=robustness_test_rates,
+        robustness_test_mechanisms=robustness_test_mechanisms,
+        robustness_channel_sync_options=robustness_channel_sync_options,
+        robustness_test_seeds=robustness_test_seeds,
     )
 
     if CHECK and os.path.exists(out_path):
@@ -956,6 +1130,9 @@ def run_model(
             model_name=model_name,
             SEED=SEED,
             test_missing_rates=robustness_test_rates,
+            test_missing_mechanisms=robustness_test_mechanisms,
+            channel_sync_options=robustness_channel_sync_options,
+            test_missing_seeds=robustness_test_seeds,
             X=X,
             Y=Y,
             train_idx=train_idx,
@@ -985,11 +1162,32 @@ def run_model(
             device=device,
             run_id=run_id,
             save_predictions=save_predictions,
+            train_missing_type="REGULAR",
+            train_channel_sync=use_raw_flow_input,
+            robustness_axes={
+                "test_missing_rates": [float(rate) for rate in robustness_test_rates],
+                "test_missing_types": list(robustness_test_mechanisms),
+                "test_channel_sync_options": _resolve_channel_sync_options(
+                    robustness_channel_sync_options,
+                    use_raw_flow_input,
+                ),
+                "test_missing_seeds": [int(seed) for seed in robustness_test_seeds],
+            },
         )
 
         # Save robustness results
-        out_name = '_'.join([data_name, 'robustness', model_name, str(SEED)])
-        output_path = os.path.join(out_root, data_name, "robustness", out_name)
+        output_path = _build_output_path(
+            data_name,
+            0.0,
+            model_name,
+            SEED,
+            out_root,
+            robustness_mode=True,
+            robustness_test_rates=robustness_test_rates,
+            robustness_test_mechanisms=robustness_test_mechanisms,
+            robustness_channel_sync_options=robustness_channel_sync_options,
+            robustness_test_seeds=robustness_test_seeds,
+        )
         with open(output_path, 'wb') as f:
             pickle.dump(payload, f)
 
@@ -998,10 +1196,12 @@ def run_model(
 
         if task == "classification":
             LOGGER.info(
-                "Robustness run done dataset=%s model=%s test_rates=%s acc=%.6f f1=%.6f wf1=%.6f save_predictions=%s",
+                "Robustness run done dataset=%s model=%s evaluations=%d test_rates=%s test_types=%s acc=%.6f f1=%.6f wf1=%.6f save_predictions=%s",
                 data_name,
                 model_name,
+                len(evaluations),
                 [r["test_missing_rate"] for r in evaluations],
+                sorted({r["test_missing_type"] for r in evaluations}),
                 metrics["accuracy"],
                 metrics["f1"],
                 metrics["wf1"],
@@ -1009,11 +1209,13 @@ def run_model(
             )
         else:
             LOGGER.info(
-                "Robustness run done dataset=%s model=%s task=%s test_rates=%s mse=%.6f mae=%.6f save_predictions=%s",
+                "Robustness run done dataset=%s model=%s task=%s evaluations=%d test_rates=%s test_types=%s mse=%.6f mae=%.6f save_predictions=%s",
                 data_name,
                 model_name,
                 task,
+                len(evaluations),
                 [r["test_missing_rate"] for r in evaluations],
+                sorted({r["test_missing_type"] for r in evaluations}),
                 metrics["mse"],
                 metrics["mae"],
                 save_predictions,
@@ -1026,6 +1228,11 @@ def run_model(
             "model": model_name,
             "seed": int(SEED),
             "missing_rate": 0.0,
+            "robustness_test_rates": [float(rate) for rate in robustness_test_rates],
+            "robustness_test_mechanisms": list(robustness_test_mechanisms),
+            "robustness_channel_sync_options": list(robustness_channel_sync_options),
+            "robustness_test_seeds": [int(seed) for seed in robustness_test_seeds],
+            "robustness_evaluations": int(len(evaluations)),
             "split_path": str(split_path),
             "output_path": str(output_path),
             "metrics": metrics,
@@ -1198,6 +1405,9 @@ def _evaluate_robustness(
     model_name,
     SEED,
     test_missing_rates,
+    test_missing_mechanisms,
+    channel_sync_options,
+    test_missing_seeds,
     X,
     Y,
     train_idx,
@@ -1221,6 +1431,9 @@ def _evaluate_robustness(
         model_name: Model name
         SEED: Random seed
         test_missing_rates: List of test missing rates
+        test_missing_mechanisms: List of test missingness mechanisms
+        channel_sync_options: List of channel_sync tokens ({auto,false,true})
+        test_missing_seeds: List of missingness RNG seeds
         X: Full dataset features
         Y: Full dataset labels
         train_idx: Training indices (for normalization stats)
@@ -1237,6 +1450,13 @@ def _evaluate_robustness(
     model.eval()
     evaluations = []
     use_raw_flow_input = _requires_flow_raw_input(model_name)
+    test_missing_rates = _parse_missing_rates(test_missing_rates)
+    test_missing_mechanisms = _parse_robustness_mechanisms(test_missing_mechanisms)
+    test_missing_seeds = _parse_robustness_test_seeds(test_missing_seeds)
+    resolved_channel_sync_options = _resolve_channel_sync_options(
+        channel_sync_options,
+        use_raw_flow_input,
+    )
     train_missing_ref, _, _, _ = preprocess(
         X,
         missing_rate=0.0,
@@ -1253,127 +1473,149 @@ def _evaluate_robustness(
         train_stats.append((mean, std))
 
     for test_rate in test_missing_rates:
-        LOGGER.info(
-            "Robustness eval dataset=%s model=%s test_missing=%.1f",
-            data_name, model_name, test_rate
-        )
+        for test_mechanism in test_missing_mechanisms:
+            for test_channel_sync in resolved_channel_sync_options:
+                for test_missing_seed in test_missing_seeds:
+                    LOGGER.info(
+                        "Robustness eval dataset=%s model=%s test_missing=%.1f type=%s channel_sync=%s missing_seed=%d",
+                        data_name,
+                        model_name,
+                        test_rate,
+                        test_mechanism,
+                        test_channel_sync,
+                        test_missing_seed,
+                    )
 
-        # Generate missing data for this test rate
-        X_missing, X_mask, X_delta, coeffs = preprocess(
-            X,
-            missing_rate=test_rate,
-            interpolate=interpolate,
-            use_intensity=use_intensity,
-            channel_sync=use_raw_flow_input,
-        )
+                    # Generate missing data for this test axis point.
+                    X_missing, X_mask, X_delta, coeffs = preprocess(
+                        X,
+                        missing_rate=test_rate,
+                        interpolate=interpolate,
+                        use_intensity=use_intensity,
+                        mechanism=test_mechanism,
+                        seed=test_missing_seed,
+                        channel_sync=test_channel_sync,
+                    )
 
-        # Reuse the training missing=0.0 statistics for all robustness test rates.
-        out = []
-        for Xi, (mean, std) in zip(X_missing.unbind(dim=-1), train_stats):
-            out.append((Xi - mean) / (std + 1e-5))
-        X_missing_norm = torch.stack(out, dim=-1)
+                    # Reuse the training missing=0.0 statistics for all robustness test axes.
+                    out = []
+                    for Xi, (mean, std) in zip(X_missing.unbind(dim=-1), train_stats):
+                        out.append((Xi - mean) / (std + 1e-5))
+                    X_missing_norm = torch.stack(out, dim=-1)
 
-        # Create test dataset with this missing rate
-        test_dataset = ists_dataset(
-            Y,
-            X_missing_norm,
-            X_mask,
-            X_delta,
-            coeffs,
-            test_idx,
-            task=task,
-            targets=task_targets,
-            target_masks=target_masks,
-        )
-        test_batch = DataLoader(test_dataset, batch_size=64, shuffle=False, drop_last=False)
+                    # Create test dataset with this missing axis point.
+                    test_dataset = ists_dataset(
+                        Y,
+                        X_missing_norm,
+                        X_mask,
+                        X_delta,
+                        coeffs,
+                        test_idx,
+                        task=task,
+                        targets=task_targets,
+                        target_masks=target_masks,
+                    )
+                    test_batch = DataLoader(test_dataset, batch_size=64, shuffle=False, drop_last=False)
 
-        if task == "classification":
-            y_true, y_pred, logit_list = [], [], []
-            with torch.no_grad():
-                for batch in test_batch:
-                    y = batch['label'].long().to(device)
-                    mask = _expand_mask_or_delta(batch['x_mask'], batch['x_missing'])
-                    delta = _expand_mask_or_delta(batch['x_delta'], batch['x_missing'])
-                    x_values = batch['x_missing'] if use_raw_flow_input else torch.nan_to_num(batch['x_missing'], 0)
-                    seq = torch.stack([
-                        x_values,
-                        mask,
-                        delta,
-                    ], dim=1).to(device)
+                    if task == "classification":
+                        y_true, y_pred, logit_list = [], [], []
+                        with torch.no_grad():
+                            for batch in test_batch:
+                                y = batch['label'].long().to(device)
+                                mask = _expand_mask_or_delta(batch['x_mask'], batch['x_missing'])
+                                delta = _expand_mask_or_delta(batch['x_delta'], batch['x_missing'])
+                                x_values = batch['x_missing'] if use_raw_flow_input else torch.nan_to_num(batch['x_missing'], 0)
+                                seq = torch.stack([
+                                    x_values,
+                                    mask,
+                                    delta,
+                                ], dim=1).to(device)
 
-                    output = model(seq, batch['coeffs'].to(device))
-                    logit = output[0] if isinstance(output, tuple) else output
+                                output = model(seq, batch['coeffs'].to(device))
+                                logit = output[0] if isinstance(output, tuple) else output
 
-                    y_true.append(y.cpu().numpy())
-                    y_pred.append(logit.max(1)[1].cpu().numpy())
-                    logit_list.append(logit.cpu().numpy())
+                                y_true.append(y.cpu().numpy())
+                                y_pred.append(logit.max(1)[1].cpu().numpy())
+                                logit_list.append(logit.cpu().numpy())
 
-            y_true = np.array([x for y in y_true for x in y]).flatten()
-            y_pred = np.array([x for y in y_pred for x in y]).flatten()
-            logit_list = np.array([x for y in logit_list for x in y])
+                        y_true = np.array([x for y in y_true for x in y]).flatten()
+                        y_pred = np.array([x for y in y_pred for x in y]).flatten()
+                        logit_list = np.array([x for y in logit_list for x in y])
 
-            eval_result = _build_evaluation_result(
-                task="classification",
-                test_missing_rate=test_rate,
-                y_true=y_true,
-                y_pred=y_pred,
-                logit_list=logit_list,
-                save_predictions=save_predictions,
-            )
-        else:
-            pred_list, target_list = [], []
-            with torch.no_grad():
-                for batch in test_batch:
-                    mask = _expand_mask_or_delta(batch['x_mask'], batch['x_missing'])
-                    delta = _expand_mask_or_delta(batch['x_delta'], batch['x_missing'])
-                    x_values = batch['x_missing'] if use_raw_flow_input else torch.nan_to_num(batch['x_missing'], 0)
-                    seq = torch.stack([
-                        x_values,
-                        mask,
-                        delta,
-                    ], dim=1).to(device)
+                        eval_result = _build_evaluation_result(
+                            test_missing_rate=test_rate,
+                            y_true=y_true,
+                            y_pred=y_pred,
+                            logit_list=logit_list,
+                            task="classification",
+                            test_missing_type=test_mechanism,
+                            test_channel_sync=test_channel_sync,
+                            test_missing_seed=test_missing_seed,
+                            save_predictions=save_predictions,
+                        )
+                    else:
+                        pred_list, target_list = [], []
+                        with torch.no_grad():
+                            for batch in test_batch:
+                                mask = _expand_mask_or_delta(batch['x_mask'], batch['x_missing'])
+                                delta = _expand_mask_or_delta(batch['x_delta'], batch['x_missing'])
+                                x_values = batch['x_missing'] if use_raw_flow_input else torch.nan_to_num(batch['x_missing'], 0)
+                                seq = torch.stack([
+                                    x_values,
+                                    mask,
+                                    delta,
+                                ], dim=1).to(device)
 
-                    output = model(seq, batch['coeffs'].to(device))
-                    pred = output[0] if isinstance(output, tuple) else output
-                    target = batch["target"].to(device).float()
-                    pred, target = _align_prediction_target(pred, target, task)
-                    pred_list.append(pred.detach().cpu().numpy())
-                    target_list.append(target.detach().cpu().numpy())
+                                output = model(seq, batch['coeffs'].to(device))
+                                pred = output[0] if isinstance(output, tuple) else output
+                                target = batch["target"].to(device).float()
+                                pred, target = _align_prediction_target(pred, target, task)
+                                pred_list.append(pred.detach().cpu().numpy())
+                                target_list.append(target.detach().cpu().numpy())
 
-            task_pred = np.concatenate(pred_list, axis=0)
-            task_target = np.concatenate(target_list, axis=0)
-            eval_result = _build_evaluation_result(
-                task=task,
-                test_missing_rate=test_rate,
-                task_pred=task_pred,
-                task_target=task_target,
-                save_predictions=save_predictions,
-            )
-        evaluations.append(eval_result)
-        metrics = eval_result["metrics"]
+                        task_pred = np.concatenate(pred_list, axis=0)
+                        task_target = np.concatenate(target_list, axis=0)
+                        eval_result = _build_evaluation_result(
+                            test_missing_rate=test_rate,
+                            task_pred=task_pred,
+                            task_target=task_target,
+                            task=task,
+                            test_missing_type=test_mechanism,
+                            test_channel_sync=test_channel_sync,
+                            test_missing_seed=test_missing_seed,
+                            save_predictions=save_predictions,
+                        )
+                    evaluations.append(eval_result)
+                    metrics = eval_result["metrics"]
 
-        if task == "classification":
-            LOGGER.info(
-                "Robustness eval dataset=%s model=%s test_missing=%.1f acc=%.6f f1=%.6f wf1=%.6f save_predictions=%s",
-                data_name,
-                model_name,
-                test_rate,
-                metrics["accuracy"],
-                metrics["f1"],
-                metrics["wf1"],
-                save_predictions,
-            )
-        else:
-            LOGGER.info(
-                "Robustness eval dataset=%s model=%s test_missing=%.1f task=%s mse=%.6f mae=%.6f save_predictions=%s",
-                data_name,
-                model_name,
-                test_rate,
-                task,
-                metrics["mse"],
-                metrics["mae"],
-                save_predictions,
-            )
+                    if task == "classification":
+                        LOGGER.info(
+                            "Robustness eval dataset=%s model=%s test_missing=%.1f type=%s channel_sync=%s missing_seed=%d acc=%.6f f1=%.6f wf1=%.6f save_predictions=%s",
+                            data_name,
+                            model_name,
+                            test_rate,
+                            test_mechanism,
+                            test_channel_sync,
+                            test_missing_seed,
+                            metrics["accuracy"],
+                            metrics["f1"],
+                            metrics["wf1"],
+                            save_predictions,
+                        )
+                    else:
+                        LOGGER.info(
+                            "Robustness eval dataset=%s model=%s test_missing=%.1f type=%s channel_sync=%s missing_seed=%d task=%s mse=%.6f mae=%.6f save_predictions=%s",
+                            data_name,
+                            model_name,
+                            test_rate,
+                            test_mechanism,
+                            test_channel_sync,
+                            test_missing_seed,
+                            task,
+                            metrics["mse"],
+                            metrics["mae"],
+                            save_predictions,
+                        )
 
     return evaluations
 
@@ -1414,7 +1656,13 @@ def main():
 
     # Robustness mode: train on missing=0, test on multiple rates
     if args.robustness_mode:
-        LOGGER.info("Robustness mode enabled: train on missing=0.0, test on %s", args.robustness_test_rates)
+        LOGGER.info(
+            "Robustness mode enabled: train on missing=0.0, test rates=%s, test types=%s, channel_sync=%s, missing_seeds=%s",
+            args.robustness_test_rates,
+            args.robustness_test_mechanisms,
+            args.robustness_channel_sync_options,
+            args.robustness_test_seeds,
+        )
         for data_name in data_selected:
             for model_name in model_name_list:
                 if max_runs is not None and _completed_runs() >= max_runs:
@@ -1448,6 +1696,9 @@ def main():
                         CHECK=args.check,
                         robustness_mode=True,
                         robustness_test_rates=args.robustness_test_rates,
+                        robustness_test_mechanisms=args.robustness_test_mechanisms,
+                        robustness_channel_sync_options=args.robustness_channel_sync_options,
+                        robustness_test_seeds=args.robustness_test_seeds,
                         split_root=args.split_root,
                         out_root=args.out_root,
                         run_id=run_id,
@@ -1467,6 +1718,10 @@ def main():
                             seed,
                             args.out_root,
                             robustness_mode=True,
+                            robustness_test_rates=args.robustness_test_rates,
+                            robustness_test_mechanisms=args.robustness_test_mechanisms,
+                            robustness_channel_sync_options=args.robustness_channel_sync_options,
+                            robustness_test_seeds=args.robustness_test_seeds,
                         )
                         split_path = os.path.join(args.split_root, data_name, f"{data_name}_{seed}")
                         if args.existing_policy == "fail":
@@ -1476,6 +1731,10 @@ def main():
                                     "dataset": data_name,
                                     "model": model_name,
                                     "missing_rate": 0.0,
+                                    "robustness_test_rates": [float(rate) for rate in args.robustness_test_rates],
+                                    "robustness_test_mechanisms": list(args.robustness_test_mechanisms),
+                                    "robustness_channel_sync_options": list(args.robustness_channel_sync_options),
+                                    "robustness_test_seeds": [int(seed) for seed in args.robustness_test_seeds],
                                     "task": args.task,
                                     "reason": reason,
                                 }
@@ -1490,6 +1749,10 @@ def main():
                                     "model": model_name,
                                     "seed": seed,
                                     "missing_rate": 0.0,
+                                    "robustness_test_rates": [float(rate) for rate in args.robustness_test_rates],
+                                    "robustness_test_mechanisms": list(args.robustness_test_mechanisms),
+                                    "robustness_channel_sync_options": list(args.robustness_channel_sync_options),
+                                    "robustness_test_seeds": [int(seed) for seed in args.robustness_test_seeds],
                                     "task": args.task,
                                     "target_source": args.target_source,
                                     "split_path": str(split_path),

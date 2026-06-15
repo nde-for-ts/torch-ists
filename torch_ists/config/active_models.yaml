@@ -7,8 +7,8 @@ models:
   - gru
   - bilstm
   - gru-simple
-  - tlstm
   - plstm
+  - tlstm
   - tglstm
   - transformer
   - transformer-mask
@@ -45,3 +45,6 @@ models:
   - neural_lsde
   - neural_lnsde
   - neural_gsde
+  - ancde
+  - exit
+  - leap

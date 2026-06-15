@@ -1,6 +1,6 @@
 # torch-ists New Model Onboarding
 
-> **Package Version**: 0.1.5
+> **Package Version**: 0.1.6
 > **Scope**: Custom model wrapper guide for user-owned PyTorch models.
 
 **Related docs**: [Package overview](../README.md) · [Docs index](README.md) · [API Reference](api_reference.md) · [Model Reference](model_reference.md) · [Scripts Reference](scripts_reference.md) · [New Data Onboarding](new_data_onboarding.md) · [CIKM 2025 Tutorial site](https://nde-for-ts.github.io/)
@@ -23,7 +23,7 @@ This guide shows how to use `torch-ists` data utilities with your own PyTorch mo
 
 ## 1. What This Guide Covers
 
-Version `0.1.5` supports custom-model workflows where you:
+Version `0.1.6` supports custom-model workflows where you:
 
 - define user-owned `torch.nn.Module` implementations outside the `torch_ists` namespace
 - use packaged data loading, split utilities, preprocessing helpers, and seed utilities
@@ -35,7 +35,7 @@ For custom models, keep these responsibilities in your project code:
 - model construction and training logic
 - command-line entry points for your own experiments
 - model metadata and reporting labels for your custom method
-- result reporting that distinguishes your custom model from the 44 packaged models shipped in version `0.1.5`
+- result reporting that distinguishes your custom model from the 47 packaged models shipped in version `0.1.6`
 
 ## 2. Sequence Wrapper Pattern
 

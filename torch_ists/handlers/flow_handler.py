@@ -14,7 +14,7 @@ from ..module.flow.operators import resolve_flow_backend
 
 
 class FlowHandler(BaseHandler):
-    """Handler for canonical `neuralflow-{r,g,c}`, `flowpath-{r,g,c}`, and `dualdynamics-{r,g,c}` models."""
+    """Handler for canonical `neuralflow-{r,g,c}`, `dualdynamics-{r,g,c}`, and `flowpath-{r,g,c}` models."""
 
     name: str = "flow"
     _FLOW_OPTIONS = ("r", "g", "c")

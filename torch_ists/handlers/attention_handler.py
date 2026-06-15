@@ -22,7 +22,7 @@ class AttentionHandler(BaseHandler):
     """
 
     name: str = "attention"
-    ATTENTION_MODELS = {"transformer", "transformer-mask", "miam", "mtan", "sand"}
+    ATTENTION_MODELS = {"transformer", "transformer-mask", "sand", "mtan", "miam"}
 
     def can_handle(self, model_name: str) -> bool:
         return model_name in self.ATTENTION_MODELS
@@ -132,7 +132,7 @@ class AttentionHandler(BaseHandler):
                 hn = out[:, -1, :] if out.dim() == 3 else out
             return out, hn
 
-        if model_name in {"miam", "mtan"}:
+        if model_name in {"mtan", "miam"}:
             out, hn = model(x, seq, seq_ts)
             return out, hn
 

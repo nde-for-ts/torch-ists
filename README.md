@@ -1,6 +1,6 @@
 # torch-ists
 
-[![Version](https://img.shields.io/badge/version-0.1.5-blue)](pyproject.toml) [![Python](https://img.shields.io/badge/python-%3E%3D3.10-blue)](pyproject.toml) [![PyTorch](https://img.shields.io/badge/PyTorch-%3E%3D2.0-ee4c2c)](pyproject.toml) [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![Package status](https://img.shields.io/badge/status-preview-orange)](#project-status)
+[![Version](https://img.shields.io/badge/version-0.1.6-blue)](pyproject.toml) [![Python](https://img.shields.io/badge/python-%3E%3D3.10-blue)](pyproject.toml) [![PyTorch](https://img.shields.io/badge/PyTorch-%3E%3D2.0-ee4c2c)](pyproject.toml) [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![Package status](https://img.shields.io/badge/status-preview-orange)](#project-status)
 
 **PyTorch toolkit for irregular and multivariate time series modeling with sequence models, attention models, neural ODE, neural CDE, neural SDE, stable SDE, and hybrid continuous-time models.**
 
@@ -10,7 +10,7 @@
 
 ## Overview
 
-`torch-ists` provides a unified interface for training and evaluating continuous-time and discrete-time PyTorch models on irregularly sampled multivariate time series. Version `0.1.5` ships 44 models across sequence, attention, CDE/control-path, flow, ODE, SDE, and hybrid method families, with the classification benchmark pipeline as the stable, reproducible workflow. In this package line, `neuralflow` is the flow-only row, while `flowpath` and `dualdynamics` are CDE/control-path methodology rows with flow-operator variants.
+`torch-ists` provides a unified interface for training and evaluating continuous-time and discrete-time PyTorch models on irregularly sampled multivariate time series. Version `0.1.6` ships 47 models across sequence, attention, CDE/control-path, flow, ODE, SDE, and hybrid method families, with the classification benchmark pipeline as the stable, reproducible workflow. In this package line, `neuralflow` is the flow-only row, while `flowpath` and `dualdynamics` are CDE/control-path methodology rows with flow-operator variants, and `ancde`, `exit`, and `leap` are advanced CDE control-path rows.
 
 The package exposes `ists_classifier` for the stable classification path and the lower-level `ists_model` constructor for advanced experimentation with additional task heads, irregular sampling, missing observations, and continuous-time model variants.
 
@@ -98,11 +98,11 @@ Input preparation:
 
 - sequence baselines, `plstm`, `tlstm`, `tglstm`, `transformer`, `transformer-mask`, `miam`, `mtan`, `sand`, `neuralflow`, `neuralflow-r/g/c`, `ode-lstm`, `ode-rnn`, `latentode`, and `gru-ode-bayes` accept the sequence stack directly with `coeffs=None`.
 - `flowpath`, `dualdynamics`, `neuralcde*`, `gru-d*`, `gru-ode`, `ode-rnn-spline`, and the SDE family need `preprocess(X, model_name=...)` to build matching coefficients.
-- `flowpath` and `dualdynamics` use CDE control paths, so install `.[cde]` or `.[all]` before running those models.
+- `flowpath`, `dualdynamics`, `ancde`, `exit`, and `leap` use CDE control paths, so install `.[cde]` or `.[all]` before running those models.
 
 ## Models Included
 
-Version `0.1.5` includes 44 models across the groups below:
+Version `0.1.6` includes 47 models across the groups below:
 
 | Family | Models |
 |--------|--------|
@@ -113,10 +113,11 @@ Version `0.1.5` includes 44 models across the groups below:
 | **NeuralFlow** | flow-only official name `neuralflow`; explicit variants `neuralflow-r`, `neuralflow-g`, `neuralflow-c` |
 | **Neural CDE** | `neuralcde`, `neuralcde-l`, `neuralcde-r`, `neuralcde-c`, `neuralcde-h` |
 | **Advanced Neural CDE control-path models** | official names `flowpath`, `dualdynamics`; explicit flow-operator variants `flowpath-r/g/c`, `dualdynamics-r/g/c` |
+| **Advanced CDE control-path (new in 0.1.6)** | `ancde`, `exit`, `leap` |
 | **Continuous-time baseline adapters** | `naive_cde`, `neural_ode`, `neural_ode_t`, `neural_sde`, `neural_sde_t` |
 | **Stable Neural SDE** | `neural_lsde`, `neural_lnsde`, `neural_gsde` |
 
-In version `0.1.5`, model-family names use the residual-flow default: `neuralflow`, `flowpath`, and `dualdynamics`. The `-r`, `-g`, and `-c` suffixes remain accepted explicit native flow-operator variants. Methodologically, do not read all three as one pure flow family: `neuralflow` is flow-only, while `flowpath` and `dualdynamics` are CDE/control-path rows that use native flow operators.
+In version `0.1.6`, model-family names use the residual-flow default: `neuralflow`, `flowpath`, and `dualdynamics`. The `-r`, `-g`, and `-c` suffixes remain accepted explicit native flow-operator variants. Methodologically, do not read all three as one pure flow family: `neuralflow` is flow-only, while `flowpath` and `dualdynamics` are CDE/control-path rows that use native flow operators. `ancde`, `exit`, and `leap` are additional CDE/control-path rows added in version `0.1.6`.
 
 ## Packaged Scripts
 
@@ -134,7 +135,7 @@ PYTHONPATH=. python scripts/model_run.py --help
 
 ## New Model Onboarding
 
-Version `0.1.5` documents how external models can compose with the package. Custom PyTorch modules should live outside the `torch_ists` namespace and reuse the bundled data, split, preprocessing, and task wrappers from user-owned code. Registering new model names is not provided in this release.
+Version `0.1.6` documents how external models can compose with the package. Custom PyTorch modules should live outside the `torch_ists` namespace and reuse the bundled data, split, preprocessing, and task wrappers from user-owned code. Registering new model names is not provided in this release.
 
 See `docs/new_model_onboarding.md` for the wrapper pattern.
 
@@ -153,14 +154,14 @@ A companion tutorial on Neural Differential Equations for irregular time series 
 
 ## Project Status
 
-This is a **preview** release (`v0.1.5`):
+This is a **preview** release (`v0.1.6`):
 
 - Core classification pipeline is reproducible
-- The package includes the sequence, attention, ODE, NeuralFlow, NeuralCDE, FlowPath/DualDynamics CDE/control-path, continuous-time baseline adapter, and SDE groups listed above
-- Version `0.1.5` keeps the 44-model roster and includes the canonical `torch_ists.benchmark_loader` submodule
-- benchmark loading and bundled script import paths are documented for the `0.1.5` workflow
+- The package includes the sequence, attention, ODE, NeuralFlow, NeuralCDE, FlowPath/DualDynamics CDE/control-path, advanced CDE control-path (`ancde`, `exit`, `leap`), continuous-time baseline adapter, and SDE groups listed above
+- Version `0.1.6` ships 47 models and includes the canonical `torch_ists.benchmark_loader` submodule
+- benchmark loading and bundled script import paths are documented for the `0.1.6` workflow
 - New-model onboarding guidance documents the supported external-wrapper pattern
-- Documentation and bundled scripts cover the packaged `0.1.5` workflow
+- Documentation and bundled scripts cover the packaged `0.1.6` workflow
 
 ## How to Cite
 

@@ -1,7 +1,7 @@
 # torch-ists Model Reference
 
-> **Package Version**: 0.1.5
-> **Scope**: Origin paper, canonical repository, and implementation note for every model shipped in `0.1.5`.
+> **Package Version**: 0.1.6
+> **Scope**: Origin paper, canonical repository, and implementation note for every model shipped in `0.1.6`.
 
 **Related docs**: [Package overview](../README.md) · [Docs index](README.md) · [API Reference](api_reference.md) · [Scripts Reference](scripts_reference.md) · [New Data Onboarding](new_data_onboarding.md) · [New Model Onboarding](new_model_onboarding.md) · [CIKM 2025 Tutorial site](https://nde-for-ts.github.io/)
 
@@ -20,6 +20,7 @@ This document is a companion to [`api_reference.md`](api_reference.md). Use the 
 7. [Stable Neural SDE](#7-stable-neural-sde)
 8. [NeuralFlow](#8-neuralflow)
 9. [DualDynamics and FlowPath](#9-dualdynamics-and-flowpath)
+10. [Advanced CDE](#10-advanced-cde)
 
 ---
 
@@ -53,13 +54,13 @@ These baselines do not invoke any ODE / CDE / SDE solver and do not consume inte
 | `mtan` | [Shukla and Marlin, *Multi-Time Attention Networks for Irregularly Sampled Time Series* (ICLR 2021)](https://arxiv.org/abs/2101.10318) | Packaged multi-time attention row routed through `AttentionHandler`; consumes values, original sequence stack, and normalized sequence timestamps |
 | `miam` | [Lee et al., *Multi-View Integrative Attention-Based Deep Representation Learning for Irregular Clinical Time-Series Data* (IEEE J-BHI 2022)](https://arxiv.org/abs/2101.09986) | Packaged time-aware attention row routed through `AttentionHandler`; consumes values, original sequence stack, and normalized sequence timestamps |
 
-Version `0.1.5` includes five attention-backed rows. They use the direct sequence stack and do not consume interpolation coefficients in the packaged runtime.
+Version `0.1.6` includes five attention-backed rows. They use the direct sequence stack and do not consume interpolation coefficients in the packaged runtime.
 
 **Limitation.** `transformer` follows the same naive missing-data treatment as the sequence baselines: it zero-fills `NaN`, ignores interpolation coefficients, and does not apply `src_key_padding_mask` in the current runtime. Use it as a direct attention baseline rather than a missingness-aware attention model.
 
 **Masked variant note.** `transformer-mask` keeps the same backbone and zero-fill preprocessing, but it applies `src_key_padding_mask` using the packaged observation mask. Treat it as a package-specific mitigation variant, not as a separate external paper-backed method.
 
-**SAnD mask note.** `sand` follows the direct zero-filled attention path and does not apply `src_key_padding_mask` in version `0.1.5`. Treat it as a basic attention baseline rather than a missingness-aware attention variant in this version.
+**SAnD mask note.** `sand` follows the direct zero-filled attention path and does not apply `src_key_padding_mask` in version `0.1.6`. Treat it as a basic attention baseline rather than a missingness-aware attention variant in this version.
 
 ---
 
@@ -148,7 +149,7 @@ The Stable Neural SDE family comes from a single paper:
 
 ## 8. NeuralFlow
 
-Version `0.1.5` adds NeuralFlow as an independent flow-method row on the packaged native backend line:
+Version `0.1.6` retains NeuralFlow as an independent flow-method row on the packaged native backend line:
 
 | Model group | Models | Runtime note |
 |---|---|---|
@@ -156,7 +157,7 @@ Version `0.1.5` adds NeuralFlow as an independent flow-method row on the package
 
 Origin paper: [*Neural Flows: Efficient Alternative to Neural ODEs* (NeurIPS 2021)](https://arxiv.org/abs/2110.13040).
 
-The official public model name is `neuralflow`, which uses the residual-flow variant by default. The suffix selects the native flow operator when an explicit variant is needed: `-r` = residual flow, `-g` = GRU-style flow, and `-c` = coupling-style flow. The default runtime uses the repo-native backend and does not require `stribor`. Guarded NFE/stribor compatibility is not included in the default `0.1.5` runtime profile.
+The official public model name is `neuralflow`, which uses the residual-flow variant by default. The suffix selects the native flow operator when an explicit variant is needed: `-r` = residual flow, `-g` = GRU-style flow, and `-c` = coupling-style flow. The default runtime uses the repo-native backend and does not require `stribor`. Guarded NFE/stribor compatibility is not included in the default `0.1.6` runtime profile.
 
 Accepted model names for this family:
 
@@ -172,7 +173,7 @@ For missing-data handling, `neuralflow` and its explicit variants keep raw missi
 
 ## 9. DualDynamics and FlowPath
 
-DualDynamics and FlowPath are advanced Neural CDE/control-path methodology rows implemented through the packaged `FlowHandler` in version `0.1.5`, listed by publication year (DualDynamics: AAAI 2025; FlowPath: AAAI 2026). They share the packaged native flow-operator runtime with NeuralFlow, but they are not flow-only comparators: they consume interpolation coefficients and use CDE-style control paths.
+DualDynamics and FlowPath are advanced Neural CDE/control-path methodology rows implemented through the packaged `FlowHandler` in version `0.1.6`, listed by publication year (DualDynamics: AAAI 2025; FlowPath: AAAI 2026). They share the packaged native flow-operator runtime with NeuralFlow, but they are not flow-only comparators: they consume interpolation coefficients and use CDE-style control paths.
 
 | Model group | Models | Runtime note |
 |---|---|---|
@@ -183,7 +184,7 @@ Origin papers:
 - DualDynamics: [*DualDynamics: Synergizing Implicit and Explicit Methods for Robust Irregular Time Series Analysis* (AAAI 2025)](https://ojs.aaai.org/index.php/AAAI/article/view/34173) · [arXiv:2401.04979](https://arxiv.org/abs/2401.04979)
 - FlowPath: [*FlowPath: Learning Data-Driven Manifolds with Invertible Flows for Robust Irregularly-sampled Time Series Classification* (AAAI 2026)](https://ojs.aaai.org/index.php/AAAI/article/view/39643) · [arXiv:2511.10841](https://arxiv.org/abs/2511.10841)
 
-The official model names `dualdynamics` and `flowpath` use residual-flow variants by default. The suffix selects the native flow operator when an explicit variant is needed: `-r` = residual flow, `-g` = GRU-style flow, and `-c` = coupling-style flow. Their method taxonomy remains CDE/control-path; the flow suffix only selects the packaged native flow operator. These rows use the repo-native backend; `ancde`, `exit`, and `leap` are not included in version `0.1.5`.
+The official model names `dualdynamics` and `flowpath` use residual-flow variants by default. The suffix selects the native flow operator when an explicit variant is needed: `-r` = residual flow, `-g` = GRU-style flow, and `-c` = coupling-style flow. Their method taxonomy remains CDE/control-path; the flow suffix only selects the packaged native flow operator. These rows use the repo-native backend; `ancde`, `exit`, and `leap` are included in version `0.1.6` as advanced CDE control-path rows (see the Advanced CDE section).
 
 Accepted model names for these families:
 
@@ -197,6 +198,26 @@ Accepted model names for these families:
 | `flowpath-c` | coupling-style flow control-path variant |
 
 For missing-data handling, `dualdynamics`, `flowpath`, and their explicit variants are coeff-centric CDE/control-path models and should be used with `preprocess(X, model_name=...)` to build matching interpolation coefficients.
+
+---
+
+## 10. Advanced CDE
+
+`ancde`, `exit`, and `leap` are advanced CDE control-path models added in version `0.1.6`. Like the Neural CDE family and the FlowPath/DualDynamics rows, they consume interpolation coefficients and route through the CDE handler, using the control-path control-differential-equation formulation. Each uses its own modified vendored control-path solver and is independent of the pip `torchcde` package and the `neuralcde` base backend. The default solver is `rk4` with a fixed-grid step size derived from the input times.
+
+| Model | Paper | Behavior |
+|---|---|---|
+| `ancde` | Jhin et al., *Attentive Neural Controlled Differential Equations for Time-series Classification and Forecasting* (ICDM 2021) | Attention-gated control path (ANCDE). Returns `(out, hn)`. No auxiliary loss. |
+| `exit` | Jhin et al., *EXIT: Extrapolation and Interpolation-based Neural Controlled Differential Equations for Time-series Classification and Forecasting* | CDE with kinetic-energy regularization. Returns `(out, hn, reg)`, where `reg` is the auxiliary kinetic-energy regularization term. |
+| `leap` | *LEAP: Learnable Path CDE* | Learnable-path CDE. Returns `(out, hn, loss)`, where `loss` is an auxiliary loss term. |
+
+**LEAP normalized-time caveat.** The packaged `leap` implementation uses a normalized `[0, 1]` control-path time (forward-time), differing from the upstream integer-grid assumption. Results may not directly match experiments that relied on integer-grid control-path time. Use this implementation with awareness of that difference.
+
+**EXIT/LEAP auxiliary-output note.** `exit` and `leap` return auxiliary outputs in addition to `(out, hn)`. When using `ists_classifier` or `ists_model` with `return_aux_loss=True`, the auxiliary term is returned alongside the prediction. `ancde` does not return an auxiliary output.
+
+**Solver note.** All three models use their own modified vendored control-path solver. This solver is independent of the pip `torchcde` package and of the `neuralcde` base backend. The default is `rk4` with a fixed-grid step size from the input times. Install `.[cde]` or `.[all]` for the full dependency set.
+
+**Preprocessing.** Use `preprocess(X, model_name=...)` with `ancde`, `exit`, or `leap` to obtain matching natural-cubic-spline coefficients (`interpolation='natural'`).
 
 ---
 

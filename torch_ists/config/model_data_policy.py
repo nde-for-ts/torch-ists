@@ -26,6 +26,9 @@ _NATURAL_INTERPOLATION_MODELS = frozenset(
         "latentode",
         "gru-ode-bayes",
         "neuralcde",
+        "ancde",
+        "exit",
+        "leap",
     ]
 )
 
@@ -59,8 +62,8 @@ _CUBIC_INTERPOLATION_MODELS = frozenset(
         "gru",
         "gru-simple",
         "bilstm",
-        "plstm",
         "tlstm",
+        "plstm",
         "tglstm",
         "transformer",
         "transformer-mask",
@@ -94,8 +97,8 @@ _BASIC_SEQUENCE_MODELS = frozenset(
         "gru",
         "gru-simple",
         "bilstm",
-        "plstm",
         "tlstm",
+        "plstm",
         "tglstm",
     ]
 )
@@ -115,7 +118,12 @@ _ATTENTION_NUM_LAYERS_MODELS = frozenset(
     ]
 )
 
-_AUXILIARY_LOSS_MODELS = frozenset()
+_AUXILIARY_LOSS_MODELS = frozenset(
+    [
+        "leap",
+        "exit",
+    ]
+)
 _FLOW_DEFAULT_DEPTH = 2
 _FLOW_DEFAULT_HEAD_DEPTH = 1
 
