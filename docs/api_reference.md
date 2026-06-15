@@ -1,9 +1,9 @@
 # torch-ists API Reference
 
-> **Package Version**: 0.1.6
+> **Package Version**: 0.1.7
 > **Status**: Package reference
-> **Scope**: Exported runtime APIs and packaged scripts shipped in `0.1.6`
-> **Note**: This document describes the `0.1.6` package release. It covers the model and task lists shipped in this version.
+> **Scope**: Exported runtime APIs and packaged scripts shipped in `0.1.7`
+> **Note**: This document describes the `0.1.7` package release. It covers the model and task lists shipped in this version.
 
 ---
 
@@ -50,7 +50,7 @@ Environment:
 - `.[ode]` installs the packaged ODE backend requirements (`torchdiffeq`, `torchdyn`)
 - `.[cde]` installs the packaged NeuralCDE backend requirements (`torchcde`, `torchdiffeq`)
 - `.[sde]` installs the packaged SDE backend requirements (`torchsde`, `torchcde`)
-- `.[all]` installs the optional data and model backend dependencies for version `0.1.6`
+- `.[all]` installs the optional data and model backend dependencies for version `0.1.7`
 - `TORCH_ISTS_RUNTIME_ROOT` is optional when running the bundled scripts from outside the package directory
 - Base-install CLI discovery is supported: `scripts/* --help` must not import optional tuning/model dependencies before the selected runtime path needs them.
 
@@ -71,7 +71,7 @@ seq = torch.randn(16, 3, 64, 8)  # [batch, channels, length, features]
 output = model(seq, coeffs=None)  # → [16, 2]
 ```
 
-Import package as `torch_ists`. This document covers the `0.1.6` package surface.
+Import package as `torch_ists`. This document covers the `0.1.7` package surface.
 
 ---
 
@@ -265,9 +265,9 @@ Benchmark loader behavior: packaged scripts pool the original UCR/UEA train and 
 
 #### Train/test split behavior
 
-The loader concatenates the original UCR/UEA train and test partitions before the project split is created. The project split (`set_splits.py`, stratified) is applied to the pooled data, so the train/val/test split that downstream scripts use does not correspond to the original UCR/UEA partition. Version `0.1.6` does not preserve the original partition in the bundled scripts; benchmarks that need the original split should load `X_train` / `y_train` / `X_test` / `y_test` directly via `sktime.datasets.load_UCR_UEA_dataset` or their own loader and run training/evaluation outside the bundled scripts.
+The loader concatenates the original UCR/UEA train and test partitions before the project split is created. The project split (`set_splits.py`, stratified) is applied to the pooled data, so the train/val/test split that downstream scripts use does not correspond to the original UCR/UEA partition. Version `0.1.7` does not preserve the original partition in the bundled scripts; benchmarks that need the original split should load `X_train` / `y_train` / `X_test` / `y_test` directly via `sktime.datasets.load_UCR_UEA_dataset` or their own loader and run training/evaluation outside the bundled scripts.
 
-In version `0.1.6`, the benchmark loader is included in the installed package and package checkout. Packaged split generation through `--dataset-source default` depends on this submodule.
+In version `0.1.7`, the benchmark loader is included in the installed package and package checkout. Packaged split generation through `--dataset-source default` depends on this submodule.
 
 ---
 
@@ -411,7 +411,7 @@ bundle = DataLoader.from_file(
 ### Overview
 
 The Preprocessing API provides:
-1. **Missingness**: `apply_missingness()` - Synthetic missing data (MCAR/MAR/MNAR)
+1. **Missingness**: `apply_missingness()` - Synthetic missing data (MCAR/MAR/MNAR/BLOCK/BURST)
 2. **Preprocessing**: `preprocess()` - Canonical preprocessing path (interpolation + intensity + delta)
 
 **Exported**: ✅ `preprocess`, `apply_missingness`, `MISSINGNESS_EXPERIMENTAL`
@@ -447,7 +447,7 @@ def preprocess(
 | `use_intensity` | `Optional[bool]` | `None` | Whether to include intensity channels. If omitted and `model_name` is not set, defaults to `True` for backward compatibility. |
 | `seed` | `int` | `0` | RNG seed used when synthetic missingness is injected. |
 | `channel_sync` | `bool` | `False` | If `True`, synchronize injected missing positions across channels. |
-| `mechanism` | `str` | `"MCAR"` | Missingness mechanism (`MCAR`, `MAR`, `MNAR`). |
+| `mechanism` | `str` | `"MCAR"` | Missingness mechanism (`MCAR`, `MAR`, `MNAR`, `BLOCK`, `BURST`). `MAR`, `MNAR`, `BLOCK`, and `BURST` are experimental. |
 | `model_name` | `Optional[str]` | `None` | Optional model key. When set, `interpolate` and `use_intensity` default to `get_data_config(model_name)`. Explicit kwargs still override. |
 
 #### Returns
@@ -483,13 +483,13 @@ When `model_name` is set, `interpolate` and `use_intensity` default to `get_data
 | `'linear'` | Linear interpolation | Fast, piecewise linear |
 | `'rectilinear'` | Rectilinear linear interpolation | Stepwise observation paths |
 | `'cubic'` | Cubic spline | Global fallback and coeff scaffolding for basic/attention rows |
-| `'hermite'` | Hermite cubic spline | Hermite-selected continuous-time rows in the packaged 0.1.6 model set |
+| `'hermite'` | Hermite cubic spline | Hermite-selected continuous-time rows in the packaged 0.1.7 model set |
 
 ---
 
 ### 4.2 `apply_missingness()`
 
-Apply synthetic missingness to data (MCAR/MAR/MNAR).
+Apply synthetic missingness to data (MCAR/MAR/MNAR/BLOCK/BURST).
 
 #### Signature
 
@@ -509,7 +509,7 @@ def apply_missingness(
 |-----------|------|---------|-------------|
 | `X` | `np.ndarray` | (required) | Input data `[N, D, L]` |
 | `rate` | `float` | (required) | Missing rate (0-1) |
-| `mechanism` | `str` | `"MCAR"` | Mechanism: `"MCAR"`, `"MAR"`, `"MNAR"` |
+| `mechanism` | `str` | `"MCAR"` | Mechanism: `"MCAR"`, `"MAR"`, `"MNAR"`, `"BLOCK"`, `"BURST"`. Default `"MCAR"`. |
 | `seed` | `int` | `0` | Random seed |
 | `channel_sync` | `bool` | `False` | Synchronize missingness across channels |
 
@@ -538,10 +538,19 @@ print(np.isnan(X_missing).mean())  # ~0.3
 | **MCAR** | Missing completely at random | ✅ Production |
 | **MAR** | Missing at random (feature-dependent) | ⚠️ Experimental |
 | **MNAR** | Missing not at random (value-dependent) | ⚠️ Experimental |
+| **BLOCK** | One contiguous temporal gap per sample/channel | ⚠️ Experimental |
+| **BURST** | Several short contiguous temporal gaps per sample/channel | ⚠️ Experimental |
 
-**Feature Flag**: `MISSINGNESS_EXPERIMENTAL = True` keeps MAR/MNAR available in the packaged API.
+**Feature Flag**: `MISSINGNESS_EXPERIMENTAL = True` keeps MAR/MNAR/BLOCK/BURST available in the packaged API.
 
 **Behavior**: missingness is controlled by `rate`, `mechanism`, `seed`, and `channel_sync`.
+
+> **Missingness caveats**
+>
+> - **Rate realization**: `MCAR`, `BLOCK`, and `BURST` hit the target `rate` exactly (per channel; per sample when `channel_sync=True`). `MAR` and `MNAR` are probability-driven and realize only an approximate rate (e.g., target `0.30` → actual ~`0.28`).
+> - **BURST short-sequence degeneracy**: for very short sequences (length &lt; ~10), `BURST` degenerates toward scattered single-step drops (≈ `MCAR`) because the maximum burst length floors at 1.
+> - **`channel_sync` semantics**: when `channel_sync=False` (default), missing indices are sampled independently per channel. When `channel_sync=True`, the same missing time indices are shared across all channels.
+> - **Experimental surface**: `BLOCK`, `BURST`, and the robustness result schema are experimental and may change without semver guarantee. `MISSINGNESS_EXPERIMENTAL = True` signals that this entire synthetic-missingness type-slice is not under the stable API contract.
 
 ---
 
@@ -658,14 +667,14 @@ The package model API is model-centric:
 Canonical model construction lives in `torch_ists.model`.
 
 Task support tiers:
-- `classification`: primary supported path in version `0.1.6`
+- `classification`: primary supported path in version `0.1.7`
 - `regression`, `forecasting`, `imputation`, `outlier_detection`, `change_detection`: experimental
 
 Readiness note:
-- use `ists_classifier` when you want the most stable path in version `0.1.6`.
-- non-classification tasks are available through `ists_model` for advanced use in version `0.1.6`.
+- use `ists_classifier` when you want the most stable path in version `0.1.7`.
+- non-classification tasks are available through `ists_model` for advanced use in version `0.1.7`.
 
-Use `torch_ists.model` or the top-level `torch_ists` exports; `torch_ists.classifier` is not provided in version `0.1.6`.
+Use `torch_ists.model` or the top-level `torch_ists` exports; `torch_ists.classifier` is not provided in version `0.1.7`.
 
 ### 6.1 `ists_classifier` (Stable)
 
@@ -700,14 +709,14 @@ Forward call:
 def forward(seq, coeffs) -> torch.Tensor  # [N, num_class]
 ```
 
-The current `0.1.6` package scope exposes logits-only forward returns.
+The current `0.1.7` package scope exposes logits-only forward returns.
 
 Behavior notes:
 - If `use_intensity` is omitted (`None`), runtime resolves it from `get_data_config(model_name)`.
-- `method` is an advanced solver argument for continuous-time families. The effective solver behavior after argument normalization remains family-specific; version `0.1.6` does not promise one package-wide default across ODE/CDE/SDE families.
+- `method` is an advanced solver argument for continuous-time families. The effective solver behavior after argument normalization remains family-specific; version `0.1.7` does not promise one package-wide default across ODE/CDE/SDE families.
 - For sequence baselines, `transformer`, and `sand`, the packaged runtime applies `torch.nan_to_num(..., nan=0.0)` before the backbone call and does not pass a padding mask into the attention backbone.
 - `transformer-mask` uses the same zero-filled values, but it also applies `src_key_padding_mask` derived from the packaged observation mask.
-- `miam` and `mtan` consume zero-filled values together with the original sequence stack and normalized timestamps; they do not use interpolation coefficients.
+- `mtan` and `miam` consume zero-filled values together with the original sequence stack and normalized timestamps; they do not use interpolation coefficients.
 - In the bundled script pipeline, train-only z-score normalization makes this zero-fill path behave like per-channel mean imputation in raw value space; outside that workflow it is literal zero-fill.
 - Non-finite backbone outputs, hidden states, or logits raise `RuntimeError`; the package does not silently zero-fill them.
 
@@ -753,12 +762,12 @@ Unsupported task names are fail-fast with `NotImplementedError`.
 
 Broader task surface:
 - `regression/forecasting/imputation/outlier_detection/change_detection` are available for advanced use.
-- `classification` remains the primary packaged path in version `0.1.6`.
+- `classification` remains the primary packaged path in version `0.1.7`.
 
 Behavior notes:
 - If `use_intensity` is omitted (`None`), runtime resolves it from `get_data_config(model_name)` inside `ists_layer`.
 - `method` is accepted for continuous-time backbones, but effective `dt/step_size/rtol/atol/adjoint` behavior remains family-specific and should not be read as a single global runtime default.
-- Sequence/attention backbone behavior (zero-fill, `transformer-mask` padding mask, `miam`/`mtan` timestamp consumption, bundled-script z-score normalization) is the same as for `ists_classifier`; see §6.1 behavior notes above.
+- Sequence/attention backbone behavior (zero-fill, `transformer-mask` padding mask, `mtan`/`miam` timestamp consumption, bundled-script z-score normalization) is the same as for `ists_classifier`; see §6.1 behavior notes above.
 - Some continuous-time rows honor `method` only at model creation.
 - Some compatibility models accept solver-shaped inputs only for backward compatibility and may emit a runtime warning.
 - Unsupported solver knobs raise `ValueError` instead of silently changing family behavior.
@@ -768,13 +777,13 @@ Behavior notes:
 
 ### 6.3 Using External Models
 
-Version `0.1.6` documents a supported pattern for using external models alongside the packaged runtime. The packaged CLI model list is fixed for this release, and custom models should be called from user-owned training code.
+Version `0.1.7` documents a supported pattern for using external models alongside the packaged runtime. The packaged CLI model list is fixed for this release, and custom models should be called from user-owned training code.
 
 Recommended pattern:
 - keep custom PyTorch modules in a user-owned namespace outside `torch_ists`
 - reuse the bundled data loading, split utilities, preprocessing, and task wrappers where they fit
 - call the external model from user-owned training code
-- treat the list of model names shipped in `0.1.6` as fixed unless a later release explicitly adds a model name
+- treat the list of model names shipped in `0.1.7` as fixed unless a later release explicitly adds a model name
 
 For custom models, the bundled scripts do not train names outside the packaged model list. Use user-owned training code for external model names.
 
@@ -785,16 +794,16 @@ See [New Model Onboarding](new_model_onboarding.md) for the wrapper pattern.
 `head_depth` and `flow_depth` are different knobs.
 
 - `head_depth`: controls the depth of the prediction head after the backbone. `1` applies a direct projection, and `k > 1` adds `k - 1` hidden-to-hidden layers before the final projection.
-- `flow_depth`: controls the number of native flow blocks for `neuralflow`, `flowpath`, `dualdynamics`, and their explicit flow-operator variants.
+- `flow_depth`: controls the number of native flow blocks for `neuralflow`, `dualdynamics`, `flowpath`, and their explicit flow-operator variants.
 
-Current `0.1.6` defaults:
+Current `0.1.7` defaults:
 - `cnn`, `rnn`, `lstm`, `gru`: `head_depth` is not used
 - `neuralcde*` and the SDE baseline/stable-SDE models: `head_depth` defaults to the script/runtime-provided layer depth
 - `neuralflow`: `flow_depth=3` by default
 - `dualdynamics`: `flow_depth=2` by default
 - `flowpath`: `flow_depth=1` by default
-- `neuralflow` uses the native flow backend by default. `flowpath` and `dualdynamics` are CDE/control-path methodology rows that use CDE-style controls with packaged native flow-operator variants in this version. Optional `NFE`/`stribor` backends are not installed by default.
-- In version `0.1.6`, model-family names use residual-flow defaults: `neuralflow`, `flowpath`, and `dualdynamics`. Explicit `-r/-g/-c` variants remain accepted variants.
+- `neuralflow` uses the native flow backend by default. `dualdynamics` and `flowpath` are CDE/control-path methodology rows that use CDE-style controls with packaged native flow-operator variants in this version. Optional `NFE`/`stribor` backends are not installed by default.
+- In version `0.1.7`, model-family names use residual-flow defaults: `neuralflow`, `dualdynamics`, and `flowpath`. Explicit `-r/-g/-c` variants remain accepted variants.
 
 Compatibility mapping:
 - legacy `num_hidden_layers` is interpreted as `head_depth`.
@@ -805,7 +814,7 @@ Compatibility mapping:
 
 The bundled scripts `scripts/set_splits.py`, `scripts/param_search.py`, and `scripts/model_run.py` are CLI entry points for the benchmark workflow. Helper modules under `scripts/` support those entry points and are documented in the scripts reference.
 
-Bundled workflow behavior in version `0.1.6`:
+Bundled workflow behavior in version `0.1.7`:
 - `scripts/param_search.py` and `scripts/model_run.py` choose solver methods from model-specific package defaults.
 - Most users can rely on those defaults without setting solver arguments manually.
 - Import-level solver kwargs are advanced controls, and supported options vary by model family.
@@ -850,7 +859,7 @@ def get_data_config(model_name: str) -> Dict[str, Any]:
 |------------|--------------|---------------|--------------|
 | `cnn`, `rnn`, `lstm`, `gru`, `bilstm`, `gru-simple`, `plstm`, `tlstm`, `tglstm`, `transformer`, `sand` | `'cubic'` | `False` | `coeffs` ignored; packaged handlers use the sequence stack directly, replace `NaN` with `0.0`, and do not apply an attention padding mask |
 | `transformer-mask` | `'cubic'` | `False` | `coeffs` ignored; packaged handler uses the sequence stack directly, replaces `NaN` with `0.0`, and applies `src_key_padding_mask` from the packaged observation mask |
-| `miam`, `mtan` | `'cubic'` | `False` | `coeffs` ignored; packaged handler uses values, the original sequence stack, and normalized sequence timestamps |
+| `mtan`, `miam` | `'cubic'` | `False` | `coeffs` ignored; packaged handler uses values, the original sequence stack, and normalized sequence timestamps |
 | `neuralcde` | `'natural'` | `False` | consumes `coeffs` |
 | `neuralcde-l/r/c/h` | override (`linear/rectilinear/cubic/hermite`) | `False` | consumes `coeffs` |
 | `gru-d`, `gru-dt`, `ode-rnn-spline` | `'natural'` | `True` | consumes `coeffs` with intensity channels |
@@ -858,7 +867,7 @@ def get_data_config(model_name: str) -> Dict[str, Any]:
 | `ode-lstm` | `'cubic'` | `False` | packaged handler ignores `coeffs`; uses values, timestamps, and mask directly |
 | `ode-rnn`, `latentode`, `gru-ode-bayes` | `'natural'` | `False` | packaged handler ignores `coeffs`; uses the sequence stack and reconstructed times directly |
 | `neuralflow` and explicit NeuralFlow variants | `'hermite'` | `False` | `coeffs` ignored; packaged handler uses the direct value/time path with raw missing-value handling |
-| `flowpath`, `dualdynamics`, and their explicit variants | `'hermite'` | `False` | consumes `coeffs`; CDE/control-path rows using the packaged native flow-operator backend |
+| `dualdynamics`, `flowpath`, and their explicit variants | `'hermite'` | `False` | consumes `coeffs`; CDE/control-path rows using the packaged native flow-operator backend |
 | `ancde`, `exit`, `leap` | `'natural'` | `False` | consumes `coeffs`; advanced CDE control-path rows using their own modified vendored control-path solver (rk4, fixed-grid step from input times) |
 | `naive_cde`, `neural_ode`, `neural_ode_t`, `neural_sde`, `neural_sde_t`, `neural_lsde`, `neural_lnsde`, `neural_gsde` | `'hermite'` | `False` | consumes `coeffs` |
 
@@ -882,9 +891,9 @@ print(config)  # {'interpolation': 'cubic', 'use_intensity': False}
 
 If `ists_classifier()` or `ists_model()` is called with `use_intensity=None`, the runtime resolves the flag from this policy.
 
-For sequence baselines, `transformer`, `transformer-mask`, `miam`, `mtan`, `sand`, and `neuralflow`, this policy mainly matters when you call `preprocess(X, model_name=...)`; the packaged forward path still uses `coeffs=None`. In the sequence and attention rows, `'cubic'` is a preprocessing setting rather than a control-path runtime setting. The packaged runtime zero-fills `NaN` before the backbone call. `transformer-mask` additionally applies `src_key_padding_mask`; `sand` does not. In the bundled scripts, prior train-only z-score normalization makes this behave like per-channel mean imputation in raw value space.
+For sequence baselines, `transformer`, `transformer-mask`, `sand`, `mtan`, `miam`, and `neuralflow`, this policy mainly matters when you call `preprocess(X, model_name=...)`; the packaged forward path still uses `coeffs=None`. In the sequence and attention rows, `'cubic'` is a preprocessing setting rather than a control-path runtime setting. The packaged runtime zero-fills `NaN` before the backbone call. `transformer-mask` additionally applies `src_key_padding_mask`; `sand` does not. In the bundled scripts, prior train-only z-score normalization makes this behave like per-channel mean imputation in raw value space.
 
-This reference documents the 47 models shipped in version `0.1.6`.
+This reference documents the 47 models shipped in version `0.1.7`.
 
 ---
 
@@ -904,7 +913,7 @@ def has_auxiliary_loss(model_name: str) -> bool:
 
 #### Models with Auxiliary Loss
 
-Version `0.1.6` introduces two models that return auxiliary outputs alongside the hidden state:
+Version `0.1.7` introduces two models that return auxiliary outputs alongside the hidden state:
 
 - `exit` returns a kinetic-energy regularization term as an auxiliary output (`(out, hn, reg)`).
 - `leap` returns an auxiliary loss term (`(out, hn, loss)`).

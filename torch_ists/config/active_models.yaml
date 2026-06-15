@@ -12,18 +12,18 @@ models:
   - tglstm
   - transformer
   - transformer-mask
-  - miam
-  - mtan
   - sand
+  - mtan
+  - miam
   - neuralflow-r
   - neuralflow-g
   - neuralflow-c
-  - flowpath-r
-  - flowpath-g
-  - flowpath-c
   - dualdynamics-r
   - dualdynamics-g
   - dualdynamics-c
+  - flowpath-r
+  - flowpath-g
+  - flowpath-c
   - neuralcde
   - neuralcde-l
   - neuralcde-r

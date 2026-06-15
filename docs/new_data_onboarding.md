@@ -1,11 +1,11 @@
 # torch-ists New Data Onboarding
 
-> **Package Version**: 0.1.6
+> **Package Version**: 0.1.7
 > **Scope**: Data onboarding guide for benchmark datasets and user-provided datasets.
 
 **Related docs**: [Package overview](../README.md) · [Docs index](README.md) · [API Reference](api_reference.md) · [Model Reference](model_reference.md) · [Scripts Reference](scripts_reference.md) · [New Model Onboarding](new_model_onboarding.md) · [CIKM 2025 Tutorial site](https://nde-for-ts.github.io/)
 
-This guide describes how data enters `torch-ists` in version `0.1.6`. It is based on the current implementation of `torch_ists.DataLoader`, `torch_ists.benchmark_loader`, `torch_ists.preprocessing.preprocess`, `torch_ists.split_utils`, and the bundled scripts.
+This guide describes how data enters `torch-ists` in version `0.1.7`. It is based on the current implementation of `torch_ists.DataLoader`, `torch_ists.benchmark_loader`, `torch_ists.preprocessing.preprocess`, `torch_ists.split_utils`, and the bundled scripts.
 
 ---
 
@@ -24,7 +24,7 @@ This guide describes how data enters `torch-ists` in version `0.1.6`. It is base
 
 ## 1. Supported Data Paths
 
-Version `0.1.6` supports these data paths:
+Version `0.1.7` supports these data paths:
 
 - built-in benchmark archive loading through `torch_ists.benchmark_loader.get_data(dataset_name)`
 - user-provided arrays through `DataLoader.from_numpy`
@@ -34,7 +34,7 @@ Version `0.1.6` supports these data paths:
 - bundled script execution on one local NPZ dataset with `--dataset-source npz --dataset-npz <path>`
 - externally prepared split files through `save_splits` / `load_splits`
 
-Current limitations in version `0.1.6`:
+Current limitations in version `0.1.7`:
 
 - registering a new dataset catalog entry inside the package
 - preserving the original UCR/UEA train/test split in the bundled scripts
@@ -50,7 +50,7 @@ All supported data paths use this array format:
 |---|---|---|---|
 | `X` | `[N, D, L]` | yes | `N` samples, `D` feature channels, `L` time steps. Use `float32` where possible. |
 | `y` | `[N]` | yes | One label per sample for the stable classification workflow. Integer labels are recommended. |
-| `timestamps` | `[N, L]` | optional | Stored by `DataLoader`, but not consumed by the bundled script pipeline in `0.1.6`. |
+| `timestamps` | `[N, L]` | optional | Stored by `DataLoader`, but not consumed by the bundled script pipeline in `0.1.7`. |
 
 Missing values should be represented as `NaN`. For variable-length series, pad shorter series to a fixed `L` with `NaN`; `preprocess` builds the observed-value mask from those `NaN` positions.
 
@@ -167,7 +167,7 @@ PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/model_run.py \
 |---|---|---|
 | `X_missing` | `[N,L,D]` | Values after existing and synthetic missingness are represented with `NaN`. |
 | `X_mask` | `[N,L,D]` | Observed-value mask, `1.0` observed and `0.0` missing. |
-| `X_delta` | `[N,L,D]` | Index-based steps since previous observation; this is not timestamp-aware in `0.1.6`. |
+| `X_delta` | `[N,L,D]` | Index-based steps since previous observation; this is not timestamp-aware in `0.1.7`. |
 | `coeffs` | model-dependent | Interpolation coefficients for CDE/SDE/continuous-time rows. |
 
 When `model_name` is supplied, interpolation mode and intensity-channel policy come from `torch_ists.config.model_data_policy.get_data_config(model_name)`. Explicit `interpolate=` and `use_intensity=` arguments override that default.
@@ -177,7 +177,7 @@ Missingness controls:
 | Argument | Default | Notes |
 |---|---|---|
 | `missing_rate` | `0.0` when omitted | Additional synthetic missingness rate in `[0,1)`. Existing `NaN` values remain missing. |
-| `mechanism` | `"MCAR"` | `"MAR"` and `"MNAR"` are available but marked experimental. |
+| `mechanism` | `"MCAR"` | Missingness mechanism: `"MCAR"`, `"MAR"`, `"MNAR"`, `"BLOCK"`, `"BURST"`. `"MAR"`, `"MNAR"`, `"BLOCK"`, and `"BURST"` are experimental. |
 | `seed` | `0` | Controls synthetic missingness sampling. |
 | `channel_sync` | `False` | If true, synthetic missing time indices are shared across feature channels. |
 

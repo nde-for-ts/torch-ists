@@ -7,8 +7,8 @@ This handler supports 9 models:
 - gru: RNNBackbone (cell='gru')
 - gru-simple: RNNBackbone (cell='gru', concat_input=True)
 - bilstm: RNNBackbone (cell='lstm', bidirectional=True)
-- tlstm: TLSTM (time-aware)
 - plstm: PLSTM (time-aware)
+- tlstm: TLSTM (time-aware)
 - tglstm: TGLSTM (time-aware, sequence-first input contract)
 
 Transformer-family models are handled by ``AttentionHandler``.
@@ -47,8 +47,8 @@ class BasicHandler(BaseHandler):
         'gru': {'type': 'rnn', 'cell': 'gru', 'bidirectional': False, 'concat_input': False},
         'gru-simple': {'type': 'rnn', 'cell': 'gru', 'bidirectional': False, 'concat_input': True},
         'bilstm': {'type': 'rnn', 'cell': 'lstm', 'bidirectional': True, 'concat_input': False},
-        'tlstm': {'type': 'time_aware', 'cell': 'tlstm', 'bidirectional': False},
         'plstm': {'type': 'time_aware', 'cell': 'plstm', 'bidirectional': False},
+        'tlstm': {'type': 'time_aware', 'cell': 'tlstm', 'bidirectional': False},
         'tglstm': {'type': 'time_aware', 'cell': 'tglstm', 'bidirectional': False},
     }
 

@@ -16,9 +16,9 @@ class AttentionHandler(BaseHandler):
     Supports 5 models:
     - transformer: vanilla transformer backbone
     - transformer-mask: transformer backbone with padding-mask-aware attention
-    - miam: Missing Information Attention Model
-    - mtan: Multi-Time Attention Network
     - sand: Simply Attend and Diagnose
+    - mtan: Multi-Time Attention Network
+    - miam: Missing Information Attention Model
     """
 
     name: str = "attention"

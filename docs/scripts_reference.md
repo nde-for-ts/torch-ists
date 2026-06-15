@@ -1,6 +1,6 @@
 # torch-ists Scripts Reference
 
-> **Package Version**: 0.1.6
+> **Package Version**: 0.1.7
 > **Scope**: Command-line entry points to the bundled benchmark pipeline.
 
 **Related docs**: [Package overview](../README.md) · [Docs index](README.md) · [API Reference](api_reference.md) · [Model Reference](model_reference.md) · [New Data Onboarding](new_data_onboarding.md) · [New Model Onboarding](new_model_onboarding.md) · [CIKM 2025 Tutorial site](https://nde-for-ts.github.io/)
@@ -101,7 +101,7 @@ python scripts/param_search.py \
 | `--datasets` | `str` | (required) | Comma-separated dataset list. |
 | `--dataset-source` | `{default,npz}` | `default` | Dataset source backend. `default` loads benchmark archive data by dataset name through `torch_ists.benchmark_loader.get_data`; `npz` loads one local file through `--dataset-npz`. |
 | `--dataset-npz` | `str` | `None` | Required when `--dataset-source npz`; `--datasets` must contain exactly one dataset name. |
-| `--models` | `str` | (all packaged models) | Comma-separated model list. Defaults to all 47 models shipped in v0.1.6. |
+| `--models` | `str` | (all packaged models) | Comma-separated model list. Defaults to all 47 models shipped in v0.1.7. |
 | `--missing-rate` | `float` | `0.0` | Single missing rate applied uniformly during tuning. |
 | `--num-samples` | `int` | `20` | Ray Tune `num_samples` — hyperparameter trial budget. |
 | `--max-num-epochs` | `int` | `10` | Per-trial training budget. |
@@ -116,9 +116,9 @@ python scripts/param_search.py \
 | `--param-root` | `str` | `params` | Output parameter artifact root. |
 | `--contract-dir` | `str` | `evidence` | Directory for run manifests (stage = `search`). |
 | `--run-id` | `str` | (auto) | Run identifier. |
-| `--task` | `{classification}` | `classification` | Task head. Only `classification` is stable in v0.1.6. |
+| `--task` | `{classification}` | `classification` | Task head. Only `classification` is stable in v0.1.7. |
 | `--targets-root` | `str` | `targets` | Root directory for dataset target bundles when a task uses external targets. |
-| `--model-scope-variant` | `{active}` | `active` | Model scope. Only `active` is supported in v0.1.6. |
+| `--model-scope-variant` | `{active}` | `active` | Model scope. Only `active` is supported in v0.1.7. |
 
 ### Search Modes
 
@@ -168,7 +168,7 @@ python scripts/model_run.py \
 | `--datasets` | `str` | (default list) | Comma-separated dataset list. Defaults to the packaged dataset list. |
 | `--dataset-source` | `{default,npz}` | `default` | Dataset source backend. `default` loads benchmark archive data by dataset name through `torch_ists.benchmark_loader.get_data`; `npz` loads one local file through `--dataset-npz`. |
 | `--dataset-npz` | `str` | `None` | Required when `--dataset-source npz`; `--datasets` must contain exactly one dataset name. |
-| `--models` | `str` | (all packaged models) | Comma-separated model list. Defaults to all 47 models shipped in v0.1.6. |
+| `--models` | `str` | (all packaged models) | Comma-separated model list. Defaults to all 47 models shipped in v0.1.7. |
 | `--missing-rates` | `str` | `0.0,0.3,0.5,0.7` | Comma-separated missing rates for standard mode. Ignored in robustness mode. |
 | `--epochs` | `int` | `100` | Epochs per (dataset, missing-rate, model) run. |
 | `--max-runs` | `int` | `None` | Stop after this many runs across the run grid. |
@@ -184,7 +184,7 @@ python scripts/model_run.py \
 | `--out-root` | `str` | `out` | Output prediction artifact root. |
 | `--contract-dir` | `str` | `evidence` | Directory for run manifests (stage = `run`). |
 | `--run-id` | `str` | (auto) | Run identifier. |
-| `--task` | `{classification}` | `classification` | Task head. Only `classification` is stable in v0.1.6. |
+| `--task` | `{classification}` | `classification` | Task head. Only `classification` is stable in v0.1.7. |
 | `--targets-root` | `str` | `targets` | Root directory for dataset target bundles. |
 | `--model-scope-variant` | `{active}` | `active` | Model scope. |
 
@@ -203,10 +203,12 @@ python scripts/model_run.py \
    "meta": {...}}
   ```
 
+  The robustness runner exposes axes for missingness mechanism (`MCAR`, `MAR`, `MNAR`, `BLOCK`, `BURST`), `channel_sync`, and missingness seed. Result records include `test_missing_type`, `test_missing_rate`, `test_channel_sync`, and `test_missing_seed` fields, plus payload meta `robustness_axes`. **This result schema is experimental and may change without semver guarantee** (planned additions include train/test regime fields). `MISSINGNESS_EXPERIMENTAL = True` signals that the entire synthetic-missingness surface — including `BLOCK` and `BURST` mechanisms — is not under the stable API contract.
+
 ### Task Support Tiers
 
 - **Stable**: `classification` (default).
-- **Experimental** (available through the underlying `ists_model` but not yet a stable script entry point in v0.1.6): `regression`, `forecasting`, `imputation`, `outlier_detection`, `change_detection`.
+- **Experimental** (available through the underlying `ists_model` but not yet a stable script entry point in v0.1.7): `regression`, `forecasting`, `imputation`, `outlier_detection`, `change_detection`.
 
 ### Metrics
 

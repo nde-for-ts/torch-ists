@@ -1,6 +1,6 @@
 # torch-ists Docs
 
-Reference docs for the `0.1.6` package release.
+Reference docs for the `0.1.7` package release.
 
 **Related docs**: [Package overview](../README.md) · [API Reference](api_reference.md) · [Model Reference](model_reference.md) · [Scripts Reference](scripts_reference.md) · [New Data Onboarding](new_data_onboarding.md) · [New Model Onboarding](new_model_onboarding.md) · [CIKM 2025 Tutorial site](https://nde-for-ts.github.io/)
 
@@ -27,7 +27,7 @@ Reference docs for the `0.1.6` package release.
 
 - classification is the primary supported workflow
 - the bundled scripts cover split creation, parameter search, and evaluation
-- the docs in this directory describe the models and scripts shipped in version `0.1.6`
+- the docs in this directory describe the models and scripts shipped in version `0.1.7`
 - the documented model roster contains 47 packaged models
 - benchmark loading, implementation files, and CLI import behavior are documented in the API, model, and scripts references
 - new-data onboarding documents the supported custom dataset path through `DataLoader`, NPZ inputs, and packaged split artifacts
