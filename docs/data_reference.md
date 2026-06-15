@@ -4,7 +4,7 @@
 
 **Related docs**: [Package overview](../README.md) · [Docs index](README.md) · [API Reference](api_reference.md) · [Model Reference](model_reference.md) · [Scripts Reference](scripts_reference.md) · [Custom Model Reference](custom_model_reference.md) · [CIKM 2025 Tutorial site](https://nde-for-ts.github.io/)
 
-This reference describes how data enters `torch-ists`. It is based on the current implementation of `torch_ists.DataLoader`, `torch_ists.benchmark_loader`, `torch_ists.preprocessing.preprocess`, `torch_ists.split_utils`, and the source-checkout scripts.
+Data entry paths for torch-ists: built-in benchmark loader, user-provided arrays/data frames/files, and the source-checkout script pipeline.
 
 ---
 
@@ -53,8 +53,6 @@ All supported data paths use this array format:
 
 Missing values should be represented as `NaN`. For variable-length series, pad shorter series to a fixed `L` with `NaN`; `preprocess` builds the observed-value mask from those `NaN` positions.
 
-The source-checkout scripts normalize values with statistics computed only from the training split. If a feature channel is entirely missing in the training split, normalization for that channel is not well-defined.
-
 ## 3. Choose a Data Source
 
 | Use case | API or script path | Expected input |
@@ -65,7 +63,7 @@ The source-checkout scripts normalize values with statistics computed only from 
 | NPZ file from Python | `DataLoader.from_file("data.npz")` | Accepts `X`/`y` or `x`/`Y`; optional `timestamps`. |
 | NPZ file in source-checkout scripts | `--dataset-source npz --dataset-npz data/ToyDataset.npz` | Accepts `X`/`y` or `x`/`Y`; ignores optional `timestamps`. |
 
-Benchmark loader behavior: `get_data` pools original UCR/UEA TRAIN+TEST partitions before the package creates project splits. Variable-length resampling is fitted on the pooled TRAIN+TEST length distribution, labels default to pooled TRAIN+TEST encoding, and ragged padding defaults to `NaN`.
+`get_data` pools UCR/UEA TRAIN+TEST before the project split is created. See [API Reference §3](api_reference.md#3-data-loading-api) for the legacy-mode caveats and full schema.
 
 ## 4. Build a User-Provided NPZ Dataset
 
@@ -97,7 +95,7 @@ bundle = DataLoader.from_file(
 )
 ```
 
-`DataLoader.from_dataframe` and CSV/parquet `from_file` produce a `DatasetBundle`; they do not write an NPZ file automatically. The source-checkout scripts consume NPZ for user-provided datasets, so persist `bundle.X` and `bundle.y` when you want to use the script chain.
+`DataLoader.from_dataframe` and CSV/parquet `from_file` return a `DatasetBundle` without writing NPZ; persist `bundle.X` and `bundle.y` if you want to run the source-checkout scripts on it.
 
 ## 5. Generate or Reuse Splits
 
@@ -156,7 +154,7 @@ PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/model_run.py \
   --seed 0
 ```
 
-`param_search.py` and `model_run.py` require exactly one dataset name when `--dataset-source npz` is used. The dataset name controls split, parameter, output, and manifest paths; the NPZ path controls the actual data file.
+When `--dataset-source npz` is used, `--datasets` must contain exactly one name (it controls split/param/output paths; the NPZ path controls the data file).
 
 ## 7. Preprocessing
 
@@ -164,12 +162,12 @@ PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/model_run.py \
 
 | Output | Shape | Meaning |
 |---|---|---|
-| `X_missing` | `[N,L,D]` | Values after existing and synthetic missingness are represented with `NaN`. |
-| `X_mask` | `[N,L,D]` | Observed-value mask, `1.0` observed and `0.0` missing. |
-| `X_delta` | `[N,L,D]` | Index-based steps since previous observation; this is not timestamp-aware. |
-| `coeffs` | model-dependent | Interpolation coefficients for CDE/SDE/continuous-time rows. |
+| `X_missing` | `[N,L,D]` | values with `NaN` at missing positions |
+| `X_mask` | `[N,L,D]` | 1.0 observed, 0.0 missing |
+| `X_delta` | `[N,L,D]` | index-based steps since last observation (not timestamp-aware) |
+| `coeffs` | model-dependent | interpolation coefficients |
 
-When `model_name` is supplied, interpolation mode and intensity-channel policy come from `torch_ists.config.model_data_policy.get_data_config(model_name)`. Explicit `interpolate=` and `use_intensity=` arguments override that default.
+When `model_name` is supplied, `interpolate` and `use_intensity` default to `get_data_config(model_name)`; explicit kwargs override.
 
 Missingness controls:
 
@@ -180,7 +178,7 @@ Missingness controls:
 | `seed` | `0` | Controls synthetic missingness sampling. |
 | `channel_sync` | `False` | If true, synthetic missing time indices are shared across feature channels. |
 
-For direct sequence models, the packaged runtime can consume the sequence stack with `coeffs=None`. For CDE/control-path, ODE-with-coeffs, and SDE methods, use `preprocess(X, model_name=...)` so the coefficients match the model's data policy.
+Sequence/attention baselines can use `coeffs=None`; CDE/SDE/continuous-time methods need `preprocess(X, model_name=...)`.
 
 ## 8. Validation Checklist
 
@@ -190,10 +188,7 @@ Before running the source-checkout script chain on a new dataset:
 - Use numeric labels for classification, preferably 0-based contiguous integers.
 - Use `NaN` for missing or padded values; do not use a numeric sentinel such as `-999`.
 - Ensure each class has at least 7 samples for the default split ratios.
-- Check that every feature channel has observed values in the training split.
 - Use a single dataset name for `--dataset-source npz`.
-- Keep `--dataset-name` / `--datasets`, `--seed`, `--split-root`, `--param-root`, and `--out-root` consistent across stages.
-- Use `DataLoader` for CSV/parquet conversion, then persist NPZ if the source-checkout scripts should run on that data.
 
 ---
 

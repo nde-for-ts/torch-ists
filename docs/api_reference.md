@@ -19,7 +19,6 @@
 5. [Split Utils API](#5-split-utils-api)
 6. [Model API](#6-model-api)
 7. [Config API](#7-config-api)
-8. [Related References](#8-related-references)
 
 ---
 
@@ -51,8 +50,6 @@ Environment:
 - `.[sde]` installs the packaged SDE backend requirements (`torchsde`, `torchcde`)
 - `.[all]` installs the optional data and model backend dependencies
 - `TORCH_ISTS_RUNTIME_ROOT` is optional when running the source-checkout scripts from outside the package directory
-- Source-checkout CLI discovery is base-dependency compatible: `scripts/* --help` must not import optional tuning/model dependencies before the selected runtime path needs them.
-- Built wheels do not install `scripts/*` files or console entry points.
 
 ### 1.2 Basic Usage
 
@@ -262,9 +259,7 @@ Benchmark loader behavior: source-checkout scripts pool the original UCR/UEA tra
 
 #### Train/test split behavior
 
-The loader concatenates the original UCR/UEA train and test partitions before the project split is created. The project split (`set_splits.py`, stratified) is applied to the pooled data, so the train/val/test split that downstream scripts use does not correspond to the original UCR/UEA partition. The source-checkout scripts do not preserve the original partition; benchmarks that need the original split should load `X_train` / `y_train` / `X_test` / `y_test` directly via `sktime.datasets.load_UCR_UEA_dataset` or their own loader and run training/evaluation outside the source-checkout scripts.
-
-The benchmark loader is included in the installed package and the source checkout.
+The loader concatenates the original UCR/UEA train and test partitions before the project split (`set_splits.py`, stratified) is applied. The source-checkout scripts do not preserve the original UCR/UEA partition; to evaluate on the original split, load via `sktime.datasets.load_UCR_UEA_dataset` outside the script chain.
 
 ---
 
@@ -468,7 +463,7 @@ X_missing, X_mask, X_delta, coeffs = preprocess(
 )
 ```
 
-When `model_name` is set, `interpolate` and `use_intensity` default to `get_data_config(model_name)`. Explicit values for those kwargs still override the model-derived defaults. If `model_name` is omitted, the legacy defaults remain `interpolate="cubic"` and `use_intensity=True`.
+When `model_name` is set, `interpolate` and `use_intensity` default to `get_data_config(model_name)` (explicit kwargs override). When omitted, defaults are `interpolate="cubic"` and `use_intensity=True`.
 
 #### Interpolation Modes
 
@@ -538,14 +533,10 @@ print(np.isnan(X_missing).mean())  # ~0.3
 
 **Feature flag**: `MISSINGNESS_EXPERIMENTAL = True` marks MAR/MNAR/BLOCK/BURST and robustness result schemas as experimental.
 
-**Behavior**: missingness is controlled by `rate`, `mechanism`, `seed`, and `channel_sync`.
-
 Missingness caveats:
 
 - **Rate realization**: `MCAR`, `BLOCK`, and `BURST` hit the target `rate` exactly (per channel; per sample when `channel_sync=True`). `MAR` and `MNAR` are probability-driven and realize only an approximate rate (e.g., target `0.30` -> actual ~`0.28`).
-- **BURST short-sequence degeneracy**: for very short sequences (length < ~10), `BURST` degenerates toward scattered single-step drops (approximately `MCAR`) because the maximum burst length floors at 1.
 - **`channel_sync` semantics**: when `channel_sync=False` (default), missing indices are sampled independently per channel. When `channel_sync=True`, the same missing time indices are shared across all channels.
-- **Experimental surface**: `BLOCK`, `BURST`, and robustness result schemas are experimental.
 
 ---
 
@@ -708,7 +699,7 @@ Behavior notes:
 - For sequence baselines, `transformer`, and `sand`, the packaged runtime applies `torch.nan_to_num(..., nan=0.0)` before the backbone call and does not pass a padding mask into the attention backbone.
 - `transformer-mask` uses the same zero-filled values, but it also applies `src_key_padding_mask` derived from the packaged observation mask.
 - `mtan` and `miam` consume zero-filled values together with the original sequence stack and normalized timestamps; they do not use interpolation coefficients.
-- In the source-checkout script pipeline, train-only z-score normalization makes this zero-fill path behave like per-channel mean imputation in raw value space; outside that workflow it is literal zero-fill.
+- Under the source-checkout scripts' train-only z-score normalization, the zero-fill path becomes per-channel mean imputation in raw value space.
 - `imputation_strategy` selects how missing entries on the value channel are filled before the backbone: `"zero"` (default, the zero-fill path described above) and the experimental opt-in alternatives `"last_observed"` (last-observation-carried-forward; leading gaps become `0`) and `"channel_mean"` (per-series observed mean; all-missing channels become `0`). It applies only to the value channel; the observation mask and time-delta channels are unaffected. An unknown value raises `ValueError`.
 - Non-finite backbone outputs, hidden states, or logits raise `RuntimeError`; the package does not silently zero-fill them.
 
@@ -770,13 +761,7 @@ Behavior notes:
 
 ### 6.3 Using Custom Models
 
-Use custom models from user-owned training code. The source-checkout CLI accepts only packaged model names.
-
-Recommended pattern:
-- keep custom PyTorch modules in a user-owned namespace outside `torch_ists`
-- reuse the packaged data loading, split utilities, preprocessing, and task wrappers where they fit
-- call the custom model from user-owned training code
-- treat the packaged model-name list as fixed
+Use custom models from user-owned training code. The source-checkout CLI accepts only packaged model names. Reuse the packaged data loading, split utilities, and preprocessing; treat the packaged model-name list as fixed.
 
 See [Custom Model Reference](custom_model_reference.md) for the wrapper pattern.
 
@@ -799,17 +784,10 @@ Current defaults:
 Compatibility mapping:
 - legacy `num_hidden_layers` is interpreted as `head_depth`.
 - legacy `flow_num_layers` is interpreted as `flow_depth`.
-- packaged pipeline scripts use the same runtime depth resolver.
 
 ### 6.5 Command-Line Scripts
 
 The source-checkout scripts `scripts/set_splits.py`, `scripts/param_search.py`, and `scripts/model_run.py` are CLI entry points for the benchmark workflow. Helper modules under `scripts/` support those entry points and are documented in the scripts reference. They are not installed as wheel console commands.
-
-Source-checkout workflow behavior:
-- `scripts/param_search.py` and `scripts/model_run.py` choose solver methods from model-specific package defaults.
-- Most users can rely on those defaults without setting solver arguments manually.
-- Import-level solver kwargs are optional controls, and supported options vary by model.
-- Unsupported solver knobs raise `ValueError` instead of silently changing runtime behavior.
 
 ## 7. Config API
 
@@ -879,9 +857,7 @@ print(config)  # {'interpolation': 'cubic', 'use_intensity': False}
 
 If `ists_classifier()` or `ists_model()` is called with `use_intensity=None`, the runtime resolves the flag from this policy.
 
-For sequence baselines, `transformer`, `transformer-mask`, `sand`, `mtan`, `miam`, and `neuralflow`, this policy mainly matters when you call `preprocess(X, model_name=...)`; the packaged forward path still uses `coeffs=None`. In the sequence and attention rows, `'cubic'` is a preprocessing setting rather than a control-path runtime setting. The packaged runtime zero-fills `NaN` before the backbone call. `transformer-mask` additionally applies `src_key_padding_mask`; `sand` does not. In the source-checkout scripts, prior train-only z-score normalization makes this behave like per-channel mean imputation in raw value space.
-
-This reference documents the 47 packaged models.
+For sequence baselines, `transformer`, `transformer-mask`, `sand`, `mtan`, `miam`, and `neuralflow`, the `'cubic'` policy applies only when you explicitly call `preprocess(X, model_name=...)`; the packaged forward path itself uses `coeffs=None` and zero-fills `NaN`. `transformer-mask` additionally applies `src_key_padding_mask`.
 
 ---
 
@@ -901,12 +877,7 @@ def has_auxiliary_loss(model_name: str) -> bool:
 
 #### Models with Auxiliary Loss
 
-Two Neural CDE methods return auxiliary outputs alongside the hidden state:
-
-- `exit` returns a kinetic-energy regularization term as an auxiliary output (`(out, hn, reg)`).
-- `leap` returns an auxiliary loss term (`(out, hn, loss)`).
-
-`has_auxiliary_loss()` returns `True` for `exit` and `leap`. All other packaged models return `False`.
+Returns `True` for `exit` and `leap`; `False` for all other packaged models. Use `forward(..., return_aux_loss=True)` to receive the auxiliary term alongside the prediction.
 
 #### Example
 
@@ -922,15 +893,6 @@ print(has_auxiliary_loss('ancde'))       # False
 ```
 
 ---
-
-## 8. Related References
-
-This API reference stays focused on exported entry points.
-
-- For the packaged model roster, per-method origin notes, and package-scope notes, use [Model Reference](model_reference.md).
-- For source-checkout CLI scripts, flags, output artifacts, and pipeline order, use [Scripts Reference](scripts_reference.md).
-- For custom model usage, use [Custom Model Reference](custom_model_reference.md).
-- For installation and the package overview, use the [package README](../README.md).
 
 ---
 

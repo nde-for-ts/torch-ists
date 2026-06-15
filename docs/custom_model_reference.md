@@ -15,26 +15,12 @@ This reference shows how to use `torch-ists` data utilities with your own PyTorc
 3. [Missing-Value Policy](#3-missing-value-policy)
 4. [NDE Wrapper Pattern with Coeffs](#4-nde-wrapper-pattern-with-coeffs)
 5. [Using Packaged Splits](#5-using-packaged-splits)
-6. [Project Layout](#6-project-layout)
-7. [Related References](#7-related-references)
 
 ---
 
 ## 1. What This Reference Covers
 
-The package supports custom-model workflows where you:
-
-- define user-owned `torch.nn.Module` implementations outside the `torch_ists` namespace
-- use packaged data loading, split utilities, preprocessing helpers, and seed utilities
-- run your own training loop and call your custom model directly
-- compose `torch_ists` helpers with modules owned by your project
-
-Keep these responsibilities in your project code:
-
-- model construction and training logic
-- command-line entry points for your own experiments
-- model metadata and reporting labels for your custom method
-- result reporting that distinguishes your custom model from the 47 packaged models
+You can compose a user-owned `torch.nn.Module` (outside `torch_ists`) with the package's data loading, split utilities, preprocessing, and seed helpers. Training and any command-line entry points stay in your own code; the source-checkout CLI only accepts packaged model names. The rest of this doc shows the pattern.
 
 ## 2. Sequence Wrapper Pattern
 
@@ -72,10 +58,9 @@ The sequence stack is `[batch, channels, length, features]`; channel 0 contains 
 
 Recommended custom-model paths:
 
-- Direct wrapper: use `coeffs=None` plus your own imputation policy, and keep mask/time-delta channels if your architecture can consume them.
-- Missingness-aware discrete wrapper: consume the packaged `(values, mask, delta)` stack directly instead of reading only `seq[:, 0]`.
-- NDE-style wrapper: use `preprocess(...)` to build interpolation `coeffs` and pass those coefficients into the custom model.
-- Hybrid wrapper: combine explicit imputed values for discrete features with interpolation `coeffs` for the continuous-time path.
+- Use `coeffs=None` plus your own imputation policy, keeping mask and time-delta channels if your architecture can consume them.
+- Consume the `(values, mask, delta)` stack directly instead of reading only `seq[:, 0]`.
+- Use `preprocess(...)` to build interpolation `coeffs` and pass those coefficients into the custom model.
 
 ## 4. NDE Wrapper Pattern with Coeffs
 
@@ -160,18 +145,9 @@ PYTHONPATH=. python scripts/set_splits.py \
   --seed 0
 ```
 
-`scripts/param_search.py` and `scripts/model_run.py` only accept the packaged model names and are source-checkout scripts, not installed wheel console commands. Use them for those models from a checkout, and use custom training code for custom models.
-
-## 6. Project Layout
+Use the source-checkout CLI only for packaged models; run custom models from your own training script.
 
 Keep custom model code under a project namespace such as `my_project.models` or `experiments.custom_models`. Avoid placing project-specific modules inside `torch_ists`.
-
-## 7. Related References
-
-- For packaged model names and method lineage, use [Model Reference](model_reference.md).
-- For exported Python APIs, use [API Reference](api_reference.md).
-- For source-checkout CLI scripts, use [Scripts Reference](scripts_reference.md).
-- For installation and a quick start, use the [package README](../README.md).
 
 ---
 

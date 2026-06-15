@@ -4,7 +4,7 @@
 
 **Related docs**: [Package overview](../README.md) · [Docs index](README.md) · [API Reference](api_reference.md) · [Model Reference](model_reference.md) · [Data Reference](data_reference.md) · [Custom Model Reference](custom_model_reference.md) · [CIKM 2025 Tutorial site](https://nde-for-ts.github.io/)
 
-This document covers the three source-checkout scripts: [`scripts/set_splits.py`](../scripts/set_splits.py), [`scripts/param_search.py`](../scripts/param_search.py), and [`scripts/model_run.py`](../scripts/model_run.py). Built wheels do not install these top-level files or expose console entry points. Use the API reference for Python class signatures, the model reference for per-model origin, and the data reference for user-provided dataset preparation.
+This document covers the three source-checkout scripts: [`scripts/set_splits.py`](../scripts/set_splits.py), [`scripts/param_search.py`](../scripts/param_search.py), and [`scripts/model_run.py`](../scripts/model_run.py). Built wheels do not install these files or expose console entry points.
 
 ---
 
@@ -41,10 +41,7 @@ All three scripts also append a JSON manifest to `evidence/` for run tracking.
 - `TORCH_ISTS_RUNTIME_ROOT` (optional) — override the runtime root when running the scripts from outside the package directory.
 - `TORCH_ISTS_DATA_ROOT` (optional) — override the built-in UCR/UEA archive root used by `--dataset-source default`.
 
-CLI import behavior:
-- `scripts/set_splits.py --help`, `scripts/param_search.py --help`, and `scripts/model_run.py --help` must run from the source checkout with `PYTHONPATH=.`.
-- Optional model/tuning dependencies are imported lazily. Ray Tune is required for Ray-backed multi-sample search, but `--help` and the local `--num-samples 1` path do not import Ray at module load time.
-- `--dataset-source default` uses the packaged `torch_ists.benchmark_loader` submodule, which pools original UCR/UEA TRAIN+TEST before project split generation.
+- `--help` works from a source checkout with `PYTHONPATH=.`.
 
 ---
 
@@ -81,7 +78,7 @@ PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/set_splits.py --dataset-name ECG2
 
 ## 3. `param_search.py`
 
-**Purpose**: Run a hyperparameter search for one or more models on one or more datasets, using the splits produced by `set_splits.py`. Multi-sample search uses Ray Tune; the single-sample local path is the base-dependency bypass.
+**Purpose**: Run a hyperparameter search for one or more models on one or more datasets, using splits from `set_splits.py`. Multi-sample search uses Ray Tune; single-sample search (`--num-samples 1`) runs locally without Ray.
 
 **Usage**:
 
@@ -207,7 +204,7 @@ PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/model_run.py \
 ### Task Support Tiers
 
 - **Stable**: `classification` (default).
-- **Experimental** (available through the underlying `ists_model` but not yet a stable script entry point): `regression`, `forecasting`, `imputation`, `outlier_detection`, `change_detection`.
+- **Experimental**: `regression`, `forecasting`, `imputation`, `outlier_detection`, `change_detection` (available through `ists_model`).
 
 ### Metrics
 
