@@ -40,7 +40,7 @@ This document is a companion to [`api_reference.md`](api_reference.md). Use the 
 
 These baselines do not invoke any ODE / CDE / SDE solver and do not consume interpolation coefficients. They consume the `(values, mask, time-deltas)` channel stack as a regular tensor, and the packaged runtime replaces `NaN` values with `0.0` before the backbone forward pass.
 
-**Limitation.** `cnn`, `rnn`, `lstm`, `gru`, and `bilstm` are intentionally naive baselines in this package. The mask channel is available in the input tensor but is not consumed by these backbones at forward time. After `nan_to_num(..., nan=0.0)`, the model cannot distinguish a true zero or normalized-mean value from a missing position. In the bundled scripts, the sequence values are z-scored with training-only statistics before this step, so the fallback is mathematically equivalent to per-channel mean imputation in raw value space. Outside that normalized workflow it is literal zero-fill. When missingness awareness matters, prefer `gru-simple`, `plstm`, `tlstm`, `tglstm`, `gru-d`, `gru-dt`, and the ODE / CDE / SDE families.
+**Limitation.** `cnn`, `rnn`, `lstm`, `gru`, and `bilstm` are intentionally naive baselines in this package. The mask channel is available in the input tensor but is not consumed by these backbones at forward time. After `nan_to_num(..., nan=0.0)`, the model cannot distinguish a true zero or normalized-mean value from a missing position. In the source-checkout scripts, the sequence values are z-scored with training-only statistics before this step, so the fallback is mathematically equivalent to per-channel mean imputation in raw value space. Outside that normalized workflow it is literal zero-fill. When missingness awareness matters, prefer `gru-simple`, `plstm`, `tlstm`, `tglstm`, `gru-d`, `gru-dt`, and the ODE / CDE / SDE families.
 
 ---
 
@@ -203,7 +203,7 @@ For missing-data handling, `dualdynamics`, `flowpath`, and their explicit varian
 
 ## 10. Advanced CDE
 
-`ancde`, `exit`, and `leap` are advanced CDE control-path models added in version `0.1.7`. Like the Neural CDE family and the FlowPath/DualDynamics rows, they consume interpolation coefficients and route through the CDE handler, using the control-path control-differential-equation formulation. Each uses its own modified vendored control-path solver and is independent of the pip `torchcde` package and the `neuralcde` base backend. The default solver is `rk4` with a fixed-grid step size derived from the input times.
+`ancde`, `exit`, and `leap` are advanced CDE control-path models added in version `0.1.6` and retained in version `0.1.7`. Like the Neural CDE family and the DualDynamics/FlowPath rows, they consume interpolation coefficients and route through the CDE handler, using the control-path control-differential-equation formulation. Each uses its own modified vendored control-path solver and is independent of the pip `torchcde` package and the `neuralcde` base backend. The default solver is `rk4` with a fixed-grid step size derived from the input times.
 
 | Model | Paper | Behavior |
 |---|---|---|

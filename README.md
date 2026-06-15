@@ -4,9 +4,9 @@
 
 **PyTorch toolkit for irregular and multivariate time series modeling with sequence models, attention models, neural ODE, neural CDE, neural SDE, stable SDE, and hybrid continuous-time models.**
 
-`torch-ists` is a research-oriented Python package for irregularly sampled multivariate time series modeling, missing-data benchmarks, and continuous-time sequence modeling. It provides a consistent PyTorch API with task heads for classification, regression, forecasting, imputation, outlier detection, and change detection. The current package pairs those runtime APIs with packaged benchmark scripts for the stable classification workflow, benchmark archive data loading, and documented model lineage for neural differential equation methods including neural ODE, neural CDE, neural SDE, stable SDE, and hybrid continuous-time models.
+`torch-ists` is a research-oriented Python package for irregularly sampled multivariate time series modeling, missing-data benchmarks, and continuous-time sequence modeling. It provides a consistent PyTorch API with task heads for classification, regression, forecasting, imputation, outlier detection, and change detection. The current package pairs those runtime APIs with source-checkout benchmark scripts for the stable classification workflow, benchmark archive data loading, and documented model lineage for neural differential equation methods including neural ODE, neural CDE, neural SDE, stable SDE, and hybrid continuous-time models.
 
-**Related docs**: [Docs index](docs/README.md) · [API Reference](docs/api_reference.md) · [Model Reference](docs/model_reference.md) · [Scripts Reference](docs/scripts_reference.md) · [New Data Onboarding](docs/new_data_onboarding.md) · [New Model Onboarding](docs/new_model_onboarding.md) · [CIKM 2025 Tutorial site](https://nde-for-ts.github.io/)
+**Related source docs**: [Docs index](docs/README.md) · [API Reference](docs/api_reference.md) · [Model Reference](docs/model_reference.md) · [Scripts Reference](docs/scripts_reference.md) · [New Data Onboarding](docs/new_data_onboarding.md) · [New Model Onboarding](docs/new_model_onboarding.md) · [CIKM 2025 Tutorial site](https://nde-for-ts.github.io/)
 
 ## Overview
 
@@ -20,7 +20,7 @@ Requirements:
 
 - `Python >= 3.10`
 - `PyTorch >= 2.0`
-- `PYTHONNOUSERSITE=1` for runtime and packaged script commands
+- `PYTHONNOUSERSITE=1` for runtime and source-checkout script commands
 
 Install the base package:
 
@@ -28,6 +28,13 @@ Install the base package:
 PYTHONNOUSERSITE=1 python -m pip install -e .
 PYTHONNOUSERSITE=1 python -c "import torch_ists; print(torch_ists.__version__)"
 ```
+
+Artifact boundary for version `0.1.7`:
+
+- built wheels install the `torch_ists` runtime package and package data only
+- top-level `docs/`, `scripts/`, and `PACKAGE_STATUS.json` are source-checkout assets
+- the benchmark script chain is run from a source checkout with `PYTHONPATH=.`
+- no console entry points are exposed in this preview release
 
 Optional dependencies:
 
@@ -53,7 +60,7 @@ PYTHONNOUSERSITE=1 python -m pip install -e .[all]
 
 ## Data Loading
 
-Use `DataLoader` for user-provided NumPy arrays, data frames, or files. Use `torch_ists.benchmark_loader` for built-in benchmark archive datasets and the bundled benchmark scripts:
+Use `DataLoader` for user-provided NumPy arrays, data frames, or files. Use `torch_ists.benchmark_loader` for built-in benchmark archive datasets and the source-checkout benchmark scripts:
 
 ```python
 from torch_ists import benchmark_loader
@@ -63,7 +70,7 @@ X, y = benchmark_loader.get_data("ECG200")
 
 See the API reference for archive cache-location details and `docs/new_data_onboarding.md` for custom dataset onboarding.
 
-Benchmark loader behavior: the bundled scripts pool the original UCR/UEA TRAIN+TEST partitions before generating project splits. Variable-length padding/resampling is fitted on the pooled TRAIN+TEST length distribution, labels default to pooled TRAIN+TEST encoding, and ragged padding defaults to `NaN`.
+Benchmark loader behavior: the source-checkout scripts pool the original UCR/UEA TRAIN+TEST partitions before generating project splits. Variable-length padding/resampling is fitted on the pooled TRAIN+TEST length distribution, labels default to pooled TRAIN+TEST encoding, and ragged padding defaults to `NaN`.
 
 ## Quick Start
 
@@ -86,12 +93,12 @@ logits = model(seq, coeffs=None)
 print(logits.shape)  # torch.Size([16, 2])
 ```
 
-For the full classification benchmark pipeline:
+For the full classification benchmark pipeline from a source checkout:
 
 ```bash
-python scripts/set_splits.py
-python scripts/param_search.py
-python scripts/model_run.py
+PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/set_splits.py
+PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/param_search.py
+PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/model_run.py
 ```
 
 Input preparation:
@@ -119,13 +126,13 @@ Version `0.1.7` includes 47 models across the groups below:
 
 In version `0.1.7`, model-family names use the residual-flow default: `neuralflow`, `dualdynamics`, and `flowpath`. The `-r`, `-g`, and `-c` suffixes remain accepted explicit native flow-operator variants. Methodologically, do not read all three as one pure flow family: `neuralflow` is flow-only, while `dualdynamics` and `flowpath` are CDE/control-path rows that use native flow operators. `ancde`, `exit`, and `leap` are additional CDE/control-path rows added in version `0.1.6`.
 
-## Packaged Scripts
+## Source Checkout Scripts
 
 - `scripts/set_splits.py` — generate reproducible train/validation/test splits
 - `scripts/param_search.py` — parameter search for packaged models and datasets; Ray Tune is loaded only for the Ray-backed search path
 - `scripts/model_run.py` — train and evaluate a selected packaged model
 
-The public script help paths are base-install compatible:
+These scripts are tracked in the source checkout and are not installed as wheel console commands. Their help paths are base-dependency compatible:
 
 ```bash
 PYTHONPATH=. python scripts/set_splits.py --help
@@ -135,16 +142,18 @@ PYTHONPATH=. python scripts/model_run.py --help
 
 ## New Model Onboarding
 
-Version `0.1.7` documents how external models can compose with the package. Custom PyTorch modules should live outside the `torch_ists` namespace and reuse the bundled data, split, preprocessing, and task wrappers from user-owned code. Registering new model names is not provided in this release.
+Version `0.1.7` documents how external models can compose with the package. Custom PyTorch modules should live outside the `torch_ists` namespace and reuse the packaged data, split, preprocessing, and task wrappers from user-owned code. Registering new model names is not provided in this release.
 
 See `docs/new_model_onboarding.md` for the wrapper pattern.
 
 ## Documentation
 
+The `docs/` directory is part of the source checkout. Built wheels embed this README as package metadata but do not install the top-level documentation tree.
+
 - `docs/README.md` — docs index for the current package
-- `docs/api_reference.md` — exported runtime API and packaged script behavior
+- `docs/api_reference.md` — exported runtime API and source-checkout script behavior
 - `docs/model_reference.md` — per-model origin paper, canonical repo, and implementation note
-- `docs/scripts_reference.md` — bundled CLI scripts: flags, outputs, and pipeline order
+- `docs/scripts_reference.md` — source-checkout CLI scripts: flags, outputs, and pipeline order
 - `docs/new_data_onboarding.md` — guidance for adding user-provided datasets and NPZ script inputs
 - `docs/new_model_onboarding.md` — guidance for using external custom models alongside the package
 
@@ -157,11 +166,12 @@ A companion tutorial on Neural Differential Equations for irregular time series 
 This is a **preview** release (`v0.1.7`):
 
 - Core classification pipeline is reproducible
-- The package includes the sequence, attention, ODE, NeuralFlow, NeuralCDE, FlowPath/DualDynamics CDE/control-path, advanced CDE control-path (`ancde`, `exit`, `leap`), continuous-time baseline adapter, and SDE groups listed above
+- The package includes the sequence, attention, ODE, NeuralFlow, NeuralCDE, DualDynamics/FlowPath CDE/control-path, advanced CDE control-path (`ancde`, `exit`, `leap`), continuous-time baseline adapter, and SDE groups listed above
 - Version `0.1.7` ships 47 models and includes the canonical `torch_ists.benchmark_loader` submodule
-- benchmark loading and bundled script import paths are documented for the `0.1.7` workflow
+- benchmark loading and source-checkout script import paths are documented for the `0.1.7` workflow
 - New-model onboarding guidance documents the supported external-wrapper pattern
-- Documentation and bundled scripts cover the packaged `0.1.7` workflow
+- Source documentation and source-checkout scripts cover the packaged `0.1.7` workflow
+- Built wheels install the runtime package only; source docs, scripts, and `PACKAGE_STATUS.json` remain source-checkout assets
 - **Experimental**: Synthetic missingness now supports five mechanisms — `MCAR`, `MAR`, `MNAR`, `BLOCK`, and `BURST` — via `apply_missingness()`. The `BLOCK` and `BURST` mechanisms and the robustness result schema are experimental and flagged by `MISSINGNESS_EXPERIMENTAL = True`. They are not under the stable API contract and may change without semver guarantee.
 
 ## How to Cite

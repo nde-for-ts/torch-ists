@@ -5,7 +5,7 @@
 
 **Related docs**: [Package overview](../README.md) · [Docs index](README.md) · [API Reference](api_reference.md) · [Model Reference](model_reference.md) · [Scripts Reference](scripts_reference.md) · [New Data Onboarding](new_data_onboarding.md) · [CIKM 2025 Tutorial site](https://nde-for-ts.github.io/)
 
-This guide shows how to use `torch-ists` data utilities with your own PyTorch model. Custom models run in your project code, while the bundled CLI scripts run the packaged models listed in the [Model Reference](model_reference.md).
+This guide shows how to use `torch-ists` data utilities with your own PyTorch model. Custom models run in your project code, while the source-checkout CLI scripts run the packaged models listed in the [Model Reference](model_reference.md).
 
 ---
 
@@ -69,7 +69,7 @@ The expected sequence stack is `[batch, channels, length, features]`. The first 
 
 ## 3. Missing-Value Policy
 
-`torch.nan_to_num(seq[:, 0], nan=0.0)` is a naive direct-sequence baseline policy, not the recommended missing-data policy for new methods. In the bundled script pipeline, values are normalized with training-only statistics before the model forward pass, so replacing `NaN` with `0.0` is equivalent to per-channel mean imputation in raw value space. Outside that normalized workflow it is literal zero-fill.
+`torch.nan_to_num(seq[:, 0], nan=0.0)` is a naive direct-sequence baseline policy, not the recommended missing-data policy for new methods. In the source-checkout script pipeline, values are normalized with training-only statistics before the model forward pass, so replacing `NaN` with `0.0` is equivalent to per-channel mean imputation in raw value space. Outside that normalized workflow it is literal zero-fill.
 
 Do not treat blind `nan_to_num` as a robust imputation method. It discards the distinction between a true zero, a normalized mean value, and a missing observation unless the model separately consumes mask or delta channels.
 
@@ -142,7 +142,7 @@ This pattern keeps the continuous-time path explicit: the external model owns th
 
 ## 5. Using Packaged Splits
 
-The bundled split utilities can still be used with external training code. See [New Data Onboarding](new_data_onboarding.md) for the full dataset shape, NPZ input, and split file format.
+The packaged split utilities can still be used with external training code. See [New Data Onboarding](new_data_onboarding.md) for the full dataset shape, NPZ input, and split file format.
 
 ```python
 from pathlib import Path
@@ -153,7 +153,7 @@ from torch_ists import load_splits
 train_idx, valid_idx, test_idx = load_splits(Path("split/ECG200/ECG200_0"))
 ```
 
-For custom NPZ datasets, generate the split artifact with the packaged script, then train the custom model from a user-owned script:
+For custom NPZ datasets, generate the split artifact with the source-checkout script, then train the custom model from a user-owned script:
 
 ```bash
 PYTHONPATH=. python scripts/set_splits.py \
@@ -163,7 +163,7 @@ PYTHONPATH=. python scripts/set_splits.py \
   --seed 0
 ```
 
-`scripts/param_search.py` and `scripts/model_run.py` only accept the model names shipped with the package. Use them for those models, and use external training code for custom models.
+`scripts/param_search.py` and `scripts/model_run.py` only accept the model names shipped with the package and are source-checkout scripts, not installed wheel console commands. Use them for those models from a checkout, and use external training code for custom models.
 
 ## 6. Project Layout
 
@@ -173,7 +173,7 @@ Keep custom code under a project namespace such as `my_project.models` or `exper
 
 - For packaged model names and method lineage, use [Model Reference](model_reference.md).
 - For exported Python APIs, use [API Reference](api_reference.md).
-- For bundled CLI scripts, use [Scripts Reference](scripts_reference.md).
+- For source-checkout CLI scripts, use [Scripts Reference](scripts_reference.md).
 - For installation and a quick start, use the [package README](../README.md).
 
 ---

@@ -5,7 +5,7 @@
 
 **Related docs**: [Package overview](../README.md) · [Docs index](README.md) · [API Reference](api_reference.md) · [Model Reference](model_reference.md) · [Scripts Reference](scripts_reference.md) · [New Model Onboarding](new_model_onboarding.md) · [CIKM 2025 Tutorial site](https://nde-for-ts.github.io/)
 
-This guide describes how data enters `torch-ists` in version `0.1.7`. It is based on the current implementation of `torch_ists.DataLoader`, `torch_ists.benchmark_loader`, `torch_ists.preprocessing.preprocess`, `torch_ists.split_utils`, and the bundled scripts.
+This guide describes how data enters `torch-ists` in version `0.1.7`. It is based on the current implementation of `torch_ists.DataLoader`, `torch_ists.benchmark_loader`, `torch_ists.preprocessing.preprocess`, `torch_ists.split_utils`, and the source-checkout scripts.
 
 ---
 
@@ -16,7 +16,7 @@ This guide describes how data enters `torch-ists` in version `0.1.7`. It is base
 3. [Choose a Data Source](#3-choose-a-data-source)
 4. [Build a Custom NPZ Dataset](#4-build-a-custom-npz-dataset)
 5. [Generate or Reuse Splits](#5-generate-or-reuse-splits)
-6. [Run the Bundled Pipeline on Custom Data](#6-run-the-bundled-pipeline-on-custom-data)
+6. [Run the Source Checkout Pipeline on Custom Data](#6-run-the-source-checkout-pipeline-on-custom-data)
 7. [Preprocessing](#7-preprocessing)
 8. [Validation Checklist](#8-validation-checklist)
 
@@ -30,15 +30,15 @@ Version `0.1.7` supports these data paths:
 - user-provided arrays through `DataLoader.from_numpy`
 - user-provided long-format tables through `DataLoader.from_dataframe`
 - user-provided `npz`, `csv`, or `parquet` files through `DataLoader.from_file`
-- bundled script execution on built-in benchmark datasets with `--dataset-source default`
-- bundled script execution on one local NPZ dataset with `--dataset-source npz --dataset-npz <path>`
+- source-checkout script execution on built-in benchmark datasets with `--dataset-source default`
+- source-checkout script execution on one local NPZ dataset with `--dataset-source npz --dataset-npz <path>`
 - externally prepared split files through `save_splits` / `load_splits`
 
 Current limitations in version `0.1.7`:
 
 - registering a new dataset catalog entry inside the package
-- preserving the original UCR/UEA train/test split in the bundled scripts
-- per-sample timestamp grids in the bundled scripts
+- preserving the original UCR/UEA train/test split in the source-checkout scripts
+- per-sample timestamp grids in the source-checkout scripts
 - multi-dataset NPZ sweeps from one command invocation
 - CSV or parquet input directly through `scripts/set_splits.py`, `scripts/param_search.py`, or `scripts/model_run.py`
 
@@ -50,11 +50,11 @@ All supported data paths use this array format:
 |---|---|---|---|
 | `X` | `[N, D, L]` | yes | `N` samples, `D` feature channels, `L` time steps. Use `float32` where possible. |
 | `y` | `[N]` | yes | One label per sample for the stable classification workflow. Integer labels are recommended. |
-| `timestamps` | `[N, L]` | optional | Stored by `DataLoader`, but not consumed by the bundled script pipeline in `0.1.7`. |
+| `timestamps` | `[N, L]` | optional | Stored by `DataLoader`, but not consumed by the source-checkout script pipeline in `0.1.7`. |
 
 Missing values should be represented as `NaN`. For variable-length series, pad shorter series to a fixed `L` with `NaN`; `preprocess` builds the observed-value mask from those `NaN` positions.
 
-The bundled scripts normalize values with statistics computed only from the training split. If a feature channel is entirely missing in the training split, normalization for that channel is not well-defined.
+The source-checkout scripts normalize values with statistics computed only from the training split. If a feature channel is entirely missing in the training split, normalization for that channel is not well-defined.
 
 ## 3. Choose a Data Source
 
@@ -64,13 +64,13 @@ The bundled scripts normalize values with statistics computed only from the trai
 | In-memory NumPy arrays | `DataLoader.from_numpy(X, y)` | `X [N,D,L]`, `y [N]`, optional `timestamps [N,L]`. |
 | Long-format pandas data frame | `DataLoader.from_dataframe(...)` | Groups by `series_id` by default, sorts each group by `time_col`, pads with `NaN`. |
 | NPZ file from Python | `DataLoader.from_file("data.npz")` | Accepts `X`/`y` or `x`/`Y`; optional `timestamps`. |
-| NPZ file in bundled scripts | `--dataset-source npz --dataset-npz data/ToyDataset.npz` | Accepts `X`/`y` or `x`/`Y`; ignores optional `timestamps`. |
+| NPZ file in source-checkout scripts | `--dataset-source npz --dataset-npz data/ToyDataset.npz` | Accepts `X`/`y` or `x`/`Y`; ignores optional `timestamps`. |
 
 Benchmark loader behavior: `get_data` pools original UCR/UEA TRAIN+TEST partitions before the package creates project splits. Variable-length resampling is fitted on the pooled TRAIN+TEST length distribution, labels default to pooled TRAIN+TEST encoding, and ragged padding defaults to `NaN`.
 
 ## 4. Build a Custom NPZ Dataset
 
-The bundled script path for custom data expects an NPZ file with `X` and `y` keys:
+The source-checkout script path for custom data expects an NPZ file with `X` and `y` keys:
 
 ```python
 import numpy as np
@@ -98,7 +98,7 @@ bundle = DataLoader.from_file(
 )
 ```
 
-`DataLoader.from_dataframe` and CSV/parquet `from_file` produce a `DatasetBundle`; they do not write an NPZ file automatically. The bundled scripts consume NPZ for custom datasets, so persist `bundle.X` and `bundle.y` when you want to use the script chain.
+`DataLoader.from_dataframe` and CSV/parquet `from_file` produce a `DatasetBundle`; they do not write an NPZ file automatically. The source-checkout scripts consume NPZ for custom datasets, so persist `bundle.X` and `bundle.y` when you want to use the script chain.
 
 ## 5. Generate or Reuse Splits
 
@@ -133,7 +133,7 @@ save_splits(path, train_idx, valid_idx, test_idx)
 
 `set_splits.py --if-exists reuse` keeps an existing split artifact. Use the same `--dataset-name` and `--seed` in `param_search.py` and `model_run.py`.
 
-## 6. Run the Bundled Pipeline on Custom Data
+## 6. Run the Source Checkout Pipeline on Custom Data
 
 For a local NPZ dataset, use the same `--dataset-source npz --dataset-npz ...` pair in all three stages:
 
@@ -185,7 +185,7 @@ For direct sequence models, the packaged runtime can consume the sequence stack 
 
 ## 8. Validation Checklist
 
-Before running the packaged script chain on a new dataset:
+Before running the source-checkout script chain on a new dataset:
 
 - Confirm `X.shape == (N, D, L)` and `y.shape == (N,)`.
 - Use numeric labels for classification, preferably 0-based contiguous integers.
@@ -194,7 +194,7 @@ Before running the packaged script chain on a new dataset:
 - Check that every feature channel has observed values in the training split.
 - Use a single dataset name for `--dataset-source npz`.
 - Keep `--dataset-name` / `--datasets`, `--seed`, `--split-root`, `--param-root`, and `--out-root` consistent across stages.
-- Use `DataLoader` for CSV/parquet conversion, then persist NPZ if the bundled scripts should run on that data.
+- Use `DataLoader` for CSV/parquet conversion, then persist NPZ if the source-checkout scripts should run on that data.
 
 ---
 

@@ -1,11 +1,11 @@
 # torch-ists Scripts Reference
 
 > **Package Version**: 0.1.7
-> **Scope**: Command-line entry points to the bundled benchmark pipeline.
+> **Scope**: Source-checkout command-line entry points to the benchmark pipeline.
 
 **Related docs**: [Package overview](../README.md) · [Docs index](README.md) · [API Reference](api_reference.md) · [Model Reference](model_reference.md) · [New Data Onboarding](new_data_onboarding.md) · [New Model Onboarding](new_model_onboarding.md) · [CIKM 2025 Tutorial site](https://nde-for-ts.github.io/)
 
-This document covers the three bundled scripts: [`scripts/set_splits.py`](../scripts/set_splits.py), [`scripts/param_search.py`](../scripts/param_search.py), and [`scripts/model_run.py`](../scripts/model_run.py). Use the API reference for Python class signatures, the model reference for per-model origin, and the new data onboarding guide for custom dataset preparation.
+This document covers the three source-checkout scripts: [`scripts/set_splits.py`](../scripts/set_splits.py), [`scripts/param_search.py`](../scripts/param_search.py), and [`scripts/model_run.py`](../scripts/model_run.py). Built wheels do not install these top-level files or expose console entry points in version `0.1.7`. Use the API reference for Python class signatures, the model reference for per-model origin, and the new data onboarding guide for custom dataset preparation.
 
 ---
 
@@ -43,7 +43,7 @@ All three scripts also append a JSON manifest to `evidence/` for run tracking.
 - `TORCH_ISTS_DATA_ROOT` (optional) — override the built-in UCR/UEA archive root used by `--dataset-source default`.
 
 CLI import behavior:
-- `scripts/set_splits.py --help`, `scripts/param_search.py --help`, and `scripts/model_run.py --help` must run from the package checkout with `PYTHONPATH=.`.
+- `scripts/set_splits.py --help`, `scripts/param_search.py --help`, and `scripts/model_run.py --help` must run from the source checkout with `PYTHONPATH=.`.
 - Optional model/tuning dependencies are imported lazily. Ray Tune is required for Ray-backed multi-sample search, but `--help` and the local `--num-samples 1` path do not import Ray at module load time.
 - `--dataset-source default` uses the packaged `torch_ists.benchmark_loader` submodule, which pools original UCR/UEA TRAIN+TEST before project split generation.
 
@@ -56,7 +56,7 @@ CLI import behavior:
 **Usage**:
 
 ```bash
-python scripts/set_splits.py --dataset-name ECG200 --seed 0
+PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/set_splits.py --dataset-name ECG200 --seed 0
 ```
 
 ### Flags
@@ -82,12 +82,12 @@ python scripts/set_splits.py --dataset-name ECG200 --seed 0
 
 ## 3. `param_search.py`
 
-**Purpose**: Run a hyperparameter search for one or more models on one or more datasets, using the splits produced by `set_splits.py`. Multi-sample search uses Ray Tune; the single-sample local path is the base-install bypass.
+**Purpose**: Run a hyperparameter search for one or more models on one or more datasets, using the splits produced by `set_splits.py`. Multi-sample search uses Ray Tune; the single-sample local path is the base-dependency bypass.
 
 **Usage**:
 
 ```bash
-python scripts/param_search.py \
+PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/param_search.py \
     --datasets ECG200,GunPoint \
     --models neuralcde,neural_lsde \
     --seed 0
@@ -143,7 +143,7 @@ Requires split files from `set_splits.py --seed <SEED>` for every dataset in `--
 **Usage** (standard mode):
 
 ```bash
-python scripts/model_run.py \
+PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/model_run.py \
     --datasets ECG200 \
     --models neural_lsde \
     --seed 0
@@ -152,7 +152,7 @@ python scripts/model_run.py \
 **Usage** (robustness mode):
 
 ```bash
-python scripts/model_run.py \
+PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/model_run.py \
     --datasets ECG200 \
     --models neural_lsde \
     --seed 0 \
