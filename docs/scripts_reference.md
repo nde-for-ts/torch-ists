@@ -80,14 +80,17 @@ PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/set_splits.py --dataset-name ECG2
 
 **Purpose**: Run a hyperparameter search for one or more models on one or more datasets, using splits from `set_splits.py`. Multi-sample search uses Ray Tune; single-sample search (`--num-samples 1`) runs locally without Ray.
 
-**Usage**:
+**Usage** (bounded first-run smoke):
 
 ```bash
 PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/param_search.py \
     --datasets ECG200,GunPoint \
     --models neuralcde,neural_lsde \
-    --seed 0
+    --seed 0 \
+    --num-samples 1 --max-num-epochs 1
 ```
+
+This is a bounded smoke run; the full defaults (`--num-samples 20 --max-num-epochs 10`) are the production settings documented in the flags table below.
 
 ### Flags
 
@@ -136,14 +139,17 @@ Requires split files from `set_splits.py --seed <SEED>` for every dataset in `--
 
 **Purpose**: Train models with the searched hyperparameters and evaluate on the test set, in either standard mode (sweep over missing rates) or robustness mode (train at `missing=0`, test on multiple rates).
 
-**Usage** (standard mode):
+**Usage** (standard mode, bounded first-run smoke):
 
 ```bash
 PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/model_run.py \
     --datasets ECG200 \
     --models neural_lsde \
-    --seed 0
+    --seed 0 \
+    --epochs 1 --max-runs 1
 ```
+
+This is a bounded smoke run; the full default (`--epochs 100`) is the production setting documented in the flags table below.
 
 **Usage** (robustness mode):
 

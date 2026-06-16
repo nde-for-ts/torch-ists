@@ -49,6 +49,12 @@ PYTHONNOUSERSITE=1 python -m pip install -e .[sde]
 PYTHONNOUSERSITE=1 python -m pip install -e .[all]
 ```
 
+NeuralCDE / ANCDE / EXIT / LEAP additionally require a manual signatory install from source:
+
+```bash
+PYTHONNOUSERSITE=1 python -m pip install git+https://github.com/patrick-kidger/signatory.git
+```
+
 ## Data Loading
 
 Use `DataLoader` for user-provided NumPy arrays, data frames, or files. Use `torch_ists.benchmark_loader` for built-in benchmark archive datasets and the source-checkout benchmark scripts:
@@ -67,7 +73,7 @@ See [Data Reference](docs/data_reference.md) for cache locations and user-provid
 import torch
 from torch_ists import ists_classifier, set_global_seed
 
-set_global_seed(0)
+set_global_seed(0)  # optional - for reproducibility
 
 model = ists_classifier(
     model_name="transformer",
@@ -82,13 +88,27 @@ logits = model(seq, coeffs=None)
 print(logits.shape)  # torch.Size([16, 2])
 ```
 
+To go from a raw array to the forward call, build the sequence stack and continuous-time coefficients with `preprocess`:
+
+```python
+from torch_ists import preprocess
+# X: your raw array of shape [N, D, L]
+X_missing, X_mask, X_delta, coeffs = preprocess(X, model_name="neuralcde")
+seq = torch.stack([X_missing, X_mask, X_delta], dim=1)  # [N, 3, L, D]
+logits = model(seq, coeffs=coeffs)
+```
+
+Direct sequence and attention baselines take `coeffs=None`, while continuous-time methods (Neural CDE/ODE/SDE) consume the `coeffs` returned by `preprocess(...)`.
+
 For the full classification benchmark pipeline from a source checkout:
 
 ```bash
 PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/set_splits.py
-PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/param_search.py
-PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/model_run.py
+PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/param_search.py --num-samples 1 --max-num-epochs 1
+PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/model_run.py --epochs 1 --max-runs 1
 ```
+
+These are bounded smoke-safe runs; the full defaults (`param_search.py --num-samples 20`, `model_run.py --epochs 100`) and all flags are documented in `docs/scripts_reference.md`.
 
 See [Model Reference](docs/model_reference.md) for which models need `preprocess(X, model_name=...)` versus the direct sequence stack.
 
@@ -101,16 +121,16 @@ Imputation strategy:
 
 The package includes 47 models across the groups below. See [Model Reference](docs/model_reference.md) for per-model details.
 
-- **Sequence baselines** — `cnn`, `rnn`, `lstm`, `gru`, `bilstm`, `gru-simple`, `plstm`, `tlstm`, `tglstm` (§2)
-- **Attention-based methods** — `transformer`, `transformer-mask`, `sand`, `mtan`, `miam` (§3)
-- **Neural ODE methods** — `gru-dt`, `gru-d`, `gru-ode`, `ode-rnn-spline`, `ode-lstm` (§4)
-- **ODE-RNN, Latent ODE, and GRU-ODE-Bayes** — `ode-rnn`, `latentode`, `gru-ode-bayes` (§5)
-- **Neural CDE** — `neuralcde`, `neuralcde-l`, `neuralcde-r`, `neuralcde-c`, `neuralcde-h` (§6)
-- **ANCDE, EXIT, and LEAP** — `ancde`, `exit`, `leap` (§7)
-- **NeuralFlow** — `neuralflow`, `neuralflow-r`, `neuralflow-g`, `neuralflow-c` (§8)
-- **DualDynamics and FlowPath** — `dualdynamics`, `flowpath`, and `-r/g/c` variants (§9)
-- **SDE baselines** — `naive_cde`, `neural_ode`, `neural_ode_t`, `neural_sde`, `neural_sde_t` (§10)
-- **Stable Neural SDEs** — `neural_lsde`, `neural_lnsde`, `neural_gsde` (§11)
+- **Sequence baselines** — `cnn`, `rnn`, `lstm`, `gru`, `bilstm`, `gru-simple`, `plstm`, `tlstm`, `tglstm` (§1)
+- **Attention-based methods** — `transformer`, `transformer-mask`, `sand`, `mtan`, `miam` (§2)
+- **Neural ODE methods** — `gru-dt`, `gru-d`, `gru-ode`, `ode-rnn-spline`, `ode-lstm` (§3)
+- **ODE-RNN, Latent ODE, and GRU-ODE-Bayes** — `ode-rnn`, `latentode`, `gru-ode-bayes` (§4)
+- **Neural CDE** — `neuralcde`, `neuralcde-l`, `neuralcde-r`, `neuralcde-c`, `neuralcde-h` (§5)
+- **ANCDE, EXIT, and LEAP** — `ancde`, `exit`, `leap` (§6)
+- **NeuralFlow** — `neuralflow` (residual-flow alias for `neuralflow-r`), `neuralflow-r`, `neuralflow-g`, `neuralflow-c` (§7)
+- **DualDynamics and FlowPath** — `dualdynamics`, `flowpath`, and `-r/g/c` variants; the bare `dualdynamics` and `flowpath` names are residual-flow aliases of `dualdynamics-r` and `flowpath-r` (§8)
+- **SDE baselines** — `naive_cde`, `neural_ode`, `neural_ode_t`, `neural_sde`, `neural_sde_t` (§9)
+- **Stable Neural SDEs** — `neural_lsde`, `neural_lnsde`, `neural_gsde` (§10)
 
 ## Source Checkout Scripts
 
@@ -143,9 +163,9 @@ Tutorial: <https://nde-for-ts.github.io/> (CIKM 2025).
 
 This is a **preview** release:
 
-- `0.2.0` is a coherent-subset testbed checkpoint of the `0.1.x` line: the same 47-model roster and API as `0.1.9`, with no new methods or interface changes. It marks the accumulated `0.1.x` surface as a coherent milestone; it is **not** a stable or parity-verified claim (`1.0.0` remains the stable target).
 - Classification is the primary supported workflow.
 - Synthetic missingness (`MCAR`/`MAR`/`MNAR`/`BLOCK`/`BURST`) and robustness result schemas are experimental.
+- Stable and parity-verified claims remain future work (`1.0.0` is the stable target).
 
 ## How to Cite
 

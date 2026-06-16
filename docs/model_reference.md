@@ -66,7 +66,7 @@ ODE-style recurrent methods. The GRU-D, GRU-ODE, and ODE-RNN-spline rows are bui
 | `gru-d` | re-implemented | [Che et al., *Recurrent Neural Networks for Multivariate Time Series with Missing Values* (Scientific Reports 2018)](https://arxiv.org/abs/1606.01865) | [Han-JD/GRU-D](https://github.com/Han-JD/GRU-D) | NeuralCDE-baseline GRU-D variant (missing-data-aware). Discrete-step; no ODE solver runs at inference time. |
 | `gru-dt` | packaged | — (delta-time variant of GRU-D, maintained alongside `gru-d` in the NeuralCDE baseline code) | — | Discrete-step GRU-D with explicit time-gap features. |
 | `gru-ode` | packaged | [Kidger et al., *Neural Controlled Differential Equations* (NeurIPS 2020)](https://arxiv.org/abs/2005.08926) (NeuralCDE-style ODE wrapper) | [patrick-kidger/NeuralCDE](https://github.com/patrick-kidger/NeuralCDE) | GRU-driven ODE field on the NeuralCDE infrastructure. `gru-ode-bayes` in [§4](#4-ode-rnn-latent-ode-and-gru-ode-bayes) is a separate canonical implementation. |
-| `ode-rnn-spline` | packaged | [Kidger et al., *Neural Controlled Differential Equations* (NeurIPS 2020)](https://arxiv.org/abs/2005.08926) (NeuralCDE-style ODE-RNN with spline control path) | [patrick-kidger/NeuralCDE](https://github.com/patrick-kidger/NeuralCDE) | ODE-RNN with a natural-cubic-spline control path on the NeuralCDE infrastructure. `ode-rnn` in [§4](#4-ode-rnn-latent-ode-and-gru-ode-bayes) is a separate canonical implementation. |
+| `ode-rnn-spline` | packaged | [Kidger et al., *Neural Controlled Differential Equations* (NeurIPS 2020)](https://arxiv.org/abs/2005.08926) (NeuralCDE-style ODE-RNN with spline control path) | [patrick-kidger/NeuralCDE](https://github.com/patrick-kidger/NeuralCDE) | ODE-RNN with a natural-cubic-spline control path on the NeuralCDE infrastructure. `ode-rnn` in [§4](#4-ode-rnn-latent-ode-and-gru-ode-bayes) is a separate canonical implementation. (NeuralCDE-based ODE-RNN with a spline control path - distinct from the canonical 'ode-rnn' in §4, which comes from the Rubanova 2019 repo) |
 | `ode-lstm` | canonical | [Lechner and Hasani, *Learning Long-Term Dependencies in Irregularly-Sampled Time Series* (NeurIPS 2020)](https://arxiv.org/abs/2006.04418) | [mlech26l/ode-lstms](https://github.com/mlech26l/ode-lstms) | LSTM cell with continuous-time hidden state evolved by an ODE between observations. |
 
 ---
@@ -107,9 +107,9 @@ ANCDE, EXIT, LEAP, DualDynamics, and FlowPath also use CDE-style control paths a
 
 | Model | Paper | Behavior |
 |---|---|---|
-| `ancde` | Jhin et al., *Attentive Neural Controlled Differential Equations for Time-series Classification and Forecasting* (ICDM 2021) | Attention-gated control path. No auxiliary loss. |
-| `exit` | Jhin et al., *EXIT: Extrapolation and Interpolation-based Neural Controlled Differential Equations for Time-series Classification and Forecasting* | Control path with kinetic-energy regularization. Returns an auxiliary term when called with `return_aux_loss=True`. |
-| `leap` | *LEAP: Learnable Path CDE* | Learnable-path CDE. Returns an auxiliary loss when called with `return_aux_loss=True`. |
+| `ancde` | Jhin et al., *Attentive Neural Controlled Differential Equations for Time-series Classification and Forecasting* (ICDM 2021). Reference repo: [sheoyon-jhin/ANCDE](https://github.com/sheoyon-jhin/ANCDE) | Attention-gated control path. No auxiliary loss. |
+| `exit` | Jhin et al., *EXIT: Extrapolation and Interpolation-based Neural Controlled Differential Equations for Time-series Classification and Forecasting* (ACM Web Conference 2022). Reference repo: [sheoyon-jhin/EXIT](https://github.com/sheoyon-jhin/EXIT) | Control path with kinetic-energy regularization. Returns an auxiliary term when called with `return_aux_loss=True`. |
+| `leap` | *LEAP: Learnable Path CDE* (citation pending) | Learnable-path CDE. Returns an auxiliary loss when called with `return_aux_loss=True`. |
 
 - **Solver and dependencies**: all three use `rk4` with a fixed-grid step size from input times; install `.[cde]` or `.[all]`.
 - **Preprocessing**: use `preprocess(X, model_name=...)` to obtain matching natural-cubic-spline coefficients.

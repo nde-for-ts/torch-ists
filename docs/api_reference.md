@@ -22,6 +22,19 @@
 
 ---
 
+## Which path should I use?
+
+| Your input | Use | coeffs | See |
+|------------|-----|--------|-----|
+| Own raw arrays / dataframe / file | `DataLoader` + `preprocess(...)` | coeffs for continuous-time models | [Data Reference](data_reference.md) |
+| Built-in benchmark archive | `benchmark_loader` | — | [Data Reference](data_reference.md) |
+| Direct sequence / attention baseline | build `seq`, `coeffs=None` | none | [Model Reference](model_reference.md) |
+| Continuous-time method (Neural CDE/ODE/SDE) | `preprocess(...)` then pass `coeffs` | from `preprocess` | [Model Reference](model_reference.md) |
+| Source-checkout benchmark pipeline | `scripts/` | — | [Scripts Reference](scripts_reference.md) |
+| Custom model outside `torch_ists` | wrapper pattern | model-defined | [Custom Model Reference](custom_model_reference.md) |
+
+---
+
 ## 1. Quick Start
 
 ### 1.1 Installation
@@ -50,6 +63,11 @@ Environment:
 - `.[sde]` installs the packaged SDE backend requirements (`torchsde`, `torchcde`)
 - `.[all]` installs the optional data and model backend dependencies
 - `TORCH_ISTS_RUNTIME_ROOT` is optional when running the source-checkout scripts from outside the package directory
+- `signatory` must be installed manually for the NeuralCDE, ANCDE, EXIT, and LEAP paths
+
+```bash
+PYTHONNOUSERSITE=1 python -m pip install git+https://github.com/patrick-kidger/signatory.git
+```
 
 ### 1.2 Basic Usage
 
@@ -64,6 +82,18 @@ import torch
 seq = torch.randn(16, 3, 64, 8)  # [batch, channels, length, features]
 output = model(seq, coeffs=None)  # [16, 2]
 ```
+
+To bridge raw arrays into a forward call, run `preprocess` and stack the value, mask, and delta channels:
+
+```python
+from torch_ists import preprocess
+# X: raw array of shape [N, D, L]
+X_missing, X_mask, X_delta, coeffs = preprocess(X, model_name="neuralcde")
+seq = torch.stack([X_missing, X_mask, X_delta], dim=1)  # [N, 3, L, D]
+logits = model(seq, coeffs=coeffs)
+```
+
+Direct sequence and attention baselines pass `coeffs=None`, while continuous-time methods consume the `coeffs` returned by `preprocess`.
 
 Import package as `torch_ists`.
 
@@ -692,6 +722,8 @@ def forward(seq, coeffs) -> torch.Tensor  # [N, num_class]
 ```
 
 The classifier returns logits only.
+
+`file` is an optional compatibility / pass-through parameter and should be left unset (`file=None`) for normal use; this also applies to `ists_model` and `ists_layer`.
 
 Behavior notes:
 - If `use_intensity` is omitted (`None`), runtime resolves it from `get_data_config(model_name)`.
