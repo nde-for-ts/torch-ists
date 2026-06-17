@@ -115,7 +115,7 @@ This is a bounded smoke run; the full defaults (`--num-samples 20 --max-num-epoc
 | `--max-runs` | `int` | `None` | Stop after this many runs across the dataset × model grid. |
 | `--max-runs-mode` | `{completed, new}` | `completed` | What counts toward `--max-runs`: `completed` (executed + reused) or `new` (executed only). |
 | `--existing-policy` | `{reuse, fail}` | `reuse` | Behavior when a param artifact already exists. **Note**: the artifact filename (`<dataset>_<model>[_cv]`) does not encode the search seed; the search seed is held at `42` by policy. If you override `--seed`, delete or back up the existing `params/` directory and pass `--existing-policy fail` to surface any silently-reused artifact. |
-| `--search-mode` | `{default, cv}` | `default` | `default` runs a single-seed search at the configured `--seed` (default `42`, fixed by policy); `cv` averages over `SEED=0–4` (≈5× compute; note that `cv` uses the evaluation seeds for hyperparameter selection). |
+| `--search-mode` | `{default, cv}` | `default` | `default` runs the single-seed policy search (default `--seed 42`, fixed by policy); `cv` averages over `SEED=0–4` (≈5× compute; note that `cv` uses the evaluation seeds for hyperparameter selection). |
 | `--ray-cpu` | `float` | `16.0` | CPU per Ray trial. |
 | `--ray-gpu` | `float` | `0.5` | GPU per Ray trial (`0` for CPU-only). |
 | `--device` | `{auto, cpu, cuda}` | `auto` | Per-trial device selection. |
@@ -129,7 +129,7 @@ This is a bounded smoke run; the full defaults (`--num-samples 20 --max-num-epoc
 
 ### Search Modes
 
-- **`default`** — single-seed search at the configured `--seed` (default `42`, fixed by policy; disjoint from evaluation seeds `0-4`). Output filename: `<dataset>_<model>`.
+- **`default`** — single-seed policy search (default `--seed 42`, fixed by policy; disjoint from evaluation seeds `0-4`). Output filename: `<dataset>_<model>`.
 - **`cv`** — cross-validated search averaging over `SEED=0–4`. Output filename: `<dataset>_<model>_cv`. ≈5× the compute. Note: `cv` uses the evaluation seeds for hyperparameter selection, so the resulting numbers are not disjoint from the evaluation; prefer `default` when fairness is the priority.
 
 ### Output
