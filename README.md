@@ -1,12 +1,12 @@
 # torch-ists
 
-[![Version](https://img.shields.io/badge/version-0.2.0-blue)](pyproject.toml) [![Python](https://img.shields.io/badge/python-%3E%3D3.10-blue)](pyproject.toml) [![PyTorch](https://img.shields.io/badge/PyTorch-%3E%3D2.0-ee4c2c)](pyproject.toml) [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![Package status](https://img.shields.io/badge/status-preview-orange)](#project-status)
+[![Version](https://img.shields.io/badge/version-0.2.2-blue)](pyproject.toml) [![Python](https://img.shields.io/badge/python-%3E%3D3.10-blue)](pyproject.toml) [![PyTorch](https://img.shields.io/badge/PyTorch-%3E%3D2.0-ee4c2c)](pyproject.toml) [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![Package status](https://img.shields.io/badge/status-preview-orange)](#project-status)
 
 **PyTorch toolkit for irregularly sampled multivariate time series with continuous-time methods (Neural ODE/CDE/SDE) and discrete-time baselines.**
 
 It provides runtime APIs, benchmark scripts, and a built-in benchmark archive loader.
 
-**Related source docs**: [Docs index](docs/README.md) · [API Reference](docs/api_reference.md) · [Model Reference](docs/model_reference.md) · [Scripts Reference](docs/scripts_reference.md) · [Custom Data Guide](docs/custom_data_guide.md) · [Custom Model Guide](docs/custom_model_guide.md) · [Third-Party Notices](docs/third_party_notices.md) · [CIKM 2025 Tutorial site](https://nde-for-ts.github.io/)
+**Related source docs**: [Docs index](docs/README.md) · [API Reference](docs/api_reference.md) · [Model Reference](docs/model_reference.md) · [Scripts Reference](docs/scripts_reference.md) · [Custom Data Guide](docs/custom_data_guide.md) · [Custom Model Guide](docs/custom_model_guide.md) · [Packaging Build Diagnostics](docs/packaging_build_diagnostics.md) · [Third-Party Notices](docs/third_party_notices.md) · [CIKM 2025 Tutorial site](https://nde-for-ts.github.io/)
 
 ## Overview
 
@@ -18,11 +18,13 @@ Requirements:
 
 - `Python >= 3.10`
 - `PyTorch >= 2.0`
+- `pip >= 22.3` for the pyproject-only build path. Ubuntu 22.04 system `pip 22.0.2` builds an empty `UNKNOWN-0.0.0` wheel from this source layout; upgrade pip first or apply the legacy compatibility shim documented in [Packaging Build Diagnostics](docs/packaging_build_diagnostics.md).
 - `PYTHONNOUSERSITE=1` for runtime and source-checkout script commands
 
 Install the base package:
 
 ```bash
+PYTHONNOUSERSITE=1 python -m pip install --upgrade pip
 PYTHONNOUSERSITE=1 python -m pip install -e .
 PYTHONNOUSERSITE=1 python -c "import torch_ists; print(torch_ists.__version__)"
 ```
@@ -135,7 +137,7 @@ PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/model_run.py \
     --split-root /tmp/torch_ists_demo/split --param-root /tmp/torch_ists_demo/params
 ```
 
-These are bounded smoke-safe runs; the full defaults (`param_search.py --num-samples 20`, `model_run.py --epochs 100`) and all flags are documented in `docs/scripts_reference.md`. The hyperparameter search seed (default `42`) is disjoint from the standard evaluation seeds (`0..4`), so reported numbers are out-of-sample with respect to hyperparameter selection. To reproduce the ICLR 2024 protocol pass `--seed 0` to step 1 (`set_splits.py`) and step 2 (`param_search.py`); steps 3 and 4 already run at seed `0`.
+These are bounded smoke-safe runs; the full defaults (`param_search.py --num-samples 20`, `model_run.py --epochs 100`) and all flags are documented in `docs/scripts_reference.md`. The hyperparameter search seed (default `42`) is disjoint from the standard evaluation seeds (`0..4`), so reported numbers are out-of-sample with respect to hyperparameter selection. To reproduce the ICLR 2024 protocol pass `--seed 0` to step 1 (`set_splits.py`); step 2 (`param_search.py`) keeps its default `--seed 42` because the search seed is held fixed by policy (the param artifact filename does not encode the seed); steps 3 and 4 already run at seed `0`.
 
 See [Model Reference](docs/model_reference.md) for which models need `preprocess(X, model_name=...)` versus the direct sequence stack.
 
@@ -183,6 +185,7 @@ User-owned `nn.Module` models can compose with packaged data, split, and preproc
 - `docs/scripts_reference.md` — source-checkout CLI scripts: flags, outputs, and pipeline order
 - `docs/custom_data_guide.md` — guidance for adding user-provided datasets and NPZ script inputs
 - `docs/custom_model_guide.md` — guidance for using custom models alongside the package
+- `docs/packaging_build_diagnostics.md` — diagnosis and resolution options for legacy pip builds
 - `docs/third_party_notices.md` — upstream sources and licenses for third-party code in the package
 
 Tutorial: <https://nde-for-ts.github.io/> (CIKM 2025).

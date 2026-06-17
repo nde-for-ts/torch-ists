@@ -43,7 +43,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--dataset-npz",
         default=None,
-        help=argparse.SUPPRESS,
+        help="Path to .npz file containing X and y (required when --dataset-source=npz)",
     )
     parser.add_argument("--seed", type=int, default=42, help="Random seed for split generation (default 42; eval seeds 0-4 are disjoint).")
     parser.add_argument(

@@ -40,10 +40,10 @@ All three scripts also append a JSON manifest to `evidence/` for run tracking.
 
 **Seed policy** (default: hyperparameter search and evaluation seeds are disjoint):
 - `set_splits.py --seed` default = `42` — the hyperparameter search split.
-- `param_search.py --seed` default = `42` — selects hyperparameters on the split at seed `42`.
+- `param_search.py --seed` default = `42` — selects hyperparameters on the split at seed `42`. **The search seed is held at `42` by policy**: the param artifact filename (`<dataset>_<model>[_cv]`) does not encode the search seed, so overriding `--seed` silently reuses or overwrites the seed-42 artifact. Override only after backing up or deleting `params/` and passing `--existing-policy fail`.
 - `model_run.py --seed` is passed explicitly per evaluation point; the standard reported evaluation uses seeds `0`, `1`, `2`, `3`, `4`.
 - The hyperparameter search seed (`42`) is disjoint from the evaluation seeds (`0-4`), so every reported number is out-of-sample with respect to hyperparameter selection.
-- Reproducing the ICLR 2024 protocol (hyperparameter search at seed `0`): pass `--seed 0` explicitly to both `set_splits.py` and `param_search.py`.
+- Reproducing the ICLR 2024 evaluation seed: after generating the fixed search split at seed `42`, pass `--seed 0` to `set_splits.py` and `model_run.py`. Keep `param_search.py --seed` at its default `42` — the search seed is fixed by policy (see above).
 
 **Environment variable**:
 - `TORCH_ISTS_RUNTIME_ROOT` (optional) — override the runtime root when running the scripts from outside the package directory.
@@ -104,7 +104,7 @@ This is a bounded smoke run; the full defaults (`--num-samples 20 --max-num-epoc
 
 | Flag | Type | Default | Description |
 |---|---|---|---|
-| `--seed` | `int` | `42` | Global seed for split selection and reproducibility. Default `42` is the hyperparameter search seed; it is disjoint from evaluation seeds `0-4`, so reported numbers are out-of-sample with respect to hyperparameter selection. Pass `--seed 0` to reproduce the ICLR 2024 protocol. |
+| `--seed` | `int` | `42` | Global seed for split selection and reproducibility. Default `42` is the fixed search seed by policy (the param artifact filename does not encode the search seed, so overriding silently reuses or overwrites the seed-42 artifact). Disjoint from evaluation seeds `0-4`, so reported numbers are out-of-sample with respect to hyperparameter selection. |
 | `--datasets` | `str` | (required) | Comma-separated dataset list. |
 | `--dataset-source` | `{default,npz}` | `default` | Dataset source backend. `default` loads benchmark archive data by dataset name through `torch_ists.benchmark_loader.get_data`; `npz` loads one local file through `--dataset-npz`. |
 | `--dataset-npz` | `str` | `None` | Required when `--dataset-source npz`; `--datasets` must contain exactly one dataset name. |
@@ -114,8 +114,8 @@ This is a bounded smoke run; the full defaults (`--num-samples 20 --max-num-epoc
 | `--max-num-epochs` | `int` | `10` | Per-trial training budget. |
 | `--max-runs` | `int` | `None` | Stop after this many runs across the dataset × model grid. |
 | `--max-runs-mode` | `{completed, new}` | `completed` | What counts toward `--max-runs`: `completed` (executed + reused) or `new` (executed only). |
-| `--existing-policy` | `{reuse, fail}` | `reuse` | Behavior when a param artifact already exists. **Note**: the artifact filename does not encode the search seed, so a stale `params/` tree from a prior `--seed` run is silently reused under the default `reuse`. After upgrading to the seed-42 disjoint policy, delete or back up the existing `params/` directory, or pass `--existing-policy fail` to surface any pre-policy artifact. |
-| `--search-mode` | `{default, cv}` | `default` | `default` runs a single-seed search at the configured `--seed` (default `42`; ICLR 2024 reproducibility = `--seed 0`); `cv` averages over `SEED=0–4` (≈5× compute; note that `cv` uses the evaluation seeds for hyperparameter selection). |
+| `--existing-policy` | `{reuse, fail}` | `reuse` | Behavior when a param artifact already exists. **Note**: the artifact filename (`<dataset>_<model>[_cv]`) does not encode the search seed; the search seed is held at `42` by policy. If you override `--seed`, delete or back up the existing `params/` directory and pass `--existing-policy fail` to surface any silently-reused artifact. |
+| `--search-mode` | `{default, cv}` | `default` | `default` runs a single-seed search at the configured `--seed` (default `42`, fixed by policy); `cv` averages over `SEED=0–4` (≈5× compute; note that `cv` uses the evaluation seeds for hyperparameter selection). |
 | `--ray-cpu` | `float` | `16.0` | CPU per Ray trial. |
 | `--ray-gpu` | `float` | `0.5` | GPU per Ray trial (`0` for CPU-only). |
 | `--device` | `{auto, cpu, cuda}` | `auto` | Per-trial device selection. |
@@ -129,7 +129,7 @@ This is a bounded smoke run; the full defaults (`--num-samples 20 --max-num-epoc
 
 ### Search Modes
 
-- **`default`** — single-seed search at the configured `--seed` (default `42`, disjoint from evaluation seeds `0-4`). Output filename: `<dataset>_<model>`. Pass `--seed 0` to reproduce the ICLR 2024 protocol.
+- **`default`** — single-seed search at the configured `--seed` (default `42`, fixed by policy; disjoint from evaluation seeds `0-4`). Output filename: `<dataset>_<model>`.
 - **`cv`** — cross-validated search averaging over `SEED=0–4`. Output filename: `<dataset>_<model>_cv`. ≈5× the compute. Note: `cv` uses the evaluation seeds for hyperparameter selection, so the resulting numbers are not disjoint from the evaluation; prefer `default` when fairness is the priority.
 
 ### Output
@@ -139,7 +139,7 @@ This is a bounded smoke run; the full defaults (`--num-samples 20 --max-num-epoc
 
 ### Workflow Dependencies
 
-Requires the split file from `set_splits.py --seed 42` for every dataset in `--datasets` (the hyperparameter search seed; use `--seed 0..4` to also generate the evaluation splits consumed by `model_run.py`).
+Requires the split file from `set_splits.py` at the configured search seed (default `42`) for every dataset in `--datasets`. For standard evaluation, also generate `set_splits.py --seed 0..4` for the splits consumed by `model_run.py`; for the ICLR 2024 evaluation seed, generate and evaluate seed `0` while keeping `param_search.py --seed` at its default `42`.
 
 ---
 
@@ -237,7 +237,7 @@ PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/model_run.py \
 ### Workflow Dependencies
 
 Requires:
-- Split files from `set_splits.py` for every dataset at every reported evaluation seed (`--seed 0..4` for the standard evaluation; the `param_search.py` step additionally needs `--seed 42`).
+- Split files from `set_splits.py` for every dataset at every reported evaluation seed (`--seed 0..4` for the standard evaluation; the `param_search.py` step additionally needs the configured search seed, default `--seed 42`).
 - Param files from `param_search.py --search-mode {default|cv}` matching `--param-mode`.
 
 ---

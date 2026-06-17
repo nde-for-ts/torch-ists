@@ -251,7 +251,7 @@ def parse_cli_args():
         "--dataset-npz",
         type=str,
         default=None,
-        help=argparse.SUPPRESS,
+        help="Path to .npz dataset payload used when --dataset-source=npz.",
     )
     parser.add_argument(
         "--models",

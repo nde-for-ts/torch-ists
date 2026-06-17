@@ -100,7 +100,7 @@ def parse_cli_args():
     parser = argparse.ArgumentParser(
         description="Run parameter search loop (default full loop, optional subset mode)."
     )
-    parser.add_argument("--seed", type=int, default=42, help="Random seed (default 42; eval seeds 0-4 are disjoint).")
+    parser.add_argument("--seed", type=int, default=42, help="Search seed (default 42, held fixed by policy; eval seeds 0-4 are disjoint). The param artifact filename does not encode the seed, so overriding silently reuses the seed-42 artifact unless you back up params/ and pass --existing-policy fail.")
     parser.add_argument(
         "--datasets",
         type=str,
@@ -118,7 +118,7 @@ def parse_cli_args():
         "--dataset-npz",
         type=str,
         default=None,
-        help=argparse.SUPPRESS,
+        help="Path to .npz dataset payload used when --dataset-source=npz.",
     )
     parser.add_argument(
         "--models",
@@ -147,7 +147,7 @@ def parse_cli_args():
         type=str,
         choices=["reuse", "fail"],
         default="reuse",
-        help="Behavior when a param artifact already exists. The artifact filename does NOT encode the search seed, so a stale params/ tree from a prior --seed run will be silently reused under the default 'reuse'. After upgrading to the seed-42 disjoint policy, delete or back up your existing params/ directory, or pass --existing-policy fail to surface any pre-policy artifact.",
+        help="Behavior when a param artifact already exists. The artifact filename does NOT encode the search seed; by policy the default search seed is 42. If you override --seed, delete or back up params/ and pass --existing-policy fail to surface any silently reused artifact.",
     )
     parser.add_argument("--ray-cpu", type=float, default=16.0, help="CPU per Ray trial.")
     parser.add_argument("--ray-gpu", type=float, default=0.5, help="GPU per Ray trial.")
@@ -163,7 +163,7 @@ def parse_cli_args():
         type=_normalize_search_mode,
         default="default",
         metavar="{default,cv}",
-        help="Hyperparameter search mode. default runs a single-seed search at the configured --seed (default 42); cv averages over seeds 0-4 as an auxiliary cross-validated mode (approximately 5x compute).",
+        help="Hyperparameter search mode. default runs the single-seed policy search (default --seed 42); cv averages over seeds 0-4 as an auxiliary cross-validated mode (approximately 5x compute).",
     )
     parser.add_argument(
         "--split-root",
