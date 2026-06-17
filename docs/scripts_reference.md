@@ -28,6 +28,8 @@ set_splits.py  →  param_search.py  →  model_run.py
                                      evidence/  (run manifests, all stages)
 ```
 
+**Install requirement.** The scripts call `preprocess`, whose finalization imports `torchcde` before building interpolation coefficients — this runs for **every** model, including basic baselines such as `cnn`. So the source-checkout script workflow needs `torchcde` even when the selected model is not a continuous-time method. Install `.[all]` (recommended) or at least `.[tune,cde]`; `.[tune]` alone can fail with `No module named 'torchcde'`.
+
 Each step writes to a dedicated root directory and reads from the previous step's output:
 
 | Stage | Reads from | Writes to |
@@ -219,6 +221,8 @@ PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/model_run.py \
 
 - **Stable**: `classification` (default).
 - **Experimental**: `regression`, `forecasting`, `imputation`, `outlier_detection`, `change_detection` (available through `ists_model`).
+
+The task and metric tables in this document describe `ists_model` API outputs. The public source-checkout script workflow (`scripts/param_search.py`, `scripts/model_run.py`) accepts `--task classification` only in this package; the experimental tasks are reached through the `ists_model` API, not the scripts.
 
 ### Metrics
 

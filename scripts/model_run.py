@@ -1622,6 +1622,16 @@ def _evaluate_robustness(
 
 def main():
     args = parse_cli_args()
+    if (
+        args.task == "forecasting"
+        and getattr(args, "target_source", "surrogate") == "surrogate"
+        and getattr(args, "forecast_horizon", None) is None
+    ):
+        LOGGER.warning(
+            "forecasting with --target-source surrogate and no --forecast-horizon: the surrogate "
+            "target is the full sequence, so forecasting degenerates to imputation. Pass "
+            "--forecast-horizon < seq_len for genuine forecasting, or use --target-source dataset."
+        )
     scope_override = _resolve_model_scope_variant(args.model_scope_variant)
     apply_model_scope_variant(scope_override)
     seed = int(args.seed)
