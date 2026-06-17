@@ -45,7 +45,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help=argparse.SUPPRESS,
     )
-    parser.add_argument("--seed", type=int, default=0, help="Random seed for split generation")
+    parser.add_argument("--seed", type=int, default=42, help="Random seed for split generation (default 42; eval seeds 0-4 are disjoint).")
     parser.add_argument(
         "--if-exists",
         choices=["reuse", "fail"],

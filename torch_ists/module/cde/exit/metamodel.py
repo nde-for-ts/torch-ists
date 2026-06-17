@@ -150,7 +150,7 @@ class NeuralCDE_forecasting(torch.nn.Module):
             hidden_channels = hidden_channels + input_channels
 
         super(NeuralCDE_forecasting, self).__init__()
-        self.input_channels = input_channels # 여기 15 true_y는 14
+        self.input_channels = input_channels  # input_channels is 15 here while true_y is 14
         self.output_time = output_time
         self.hidden_channels = hidden_channels
         self.output_channels = output_channels
@@ -371,7 +371,7 @@ class NeuralCDE_IDEA4(torch.nn.Module):
             
         h_0 = self.fc(Encoder)
 
-        ## 여기서 func_f, func_g 두개 넘겨주기 .
+        ## pass both func_f and func_g here.
         # new_times = torch.arange(terminal_time[0].item(),terminal_time[-1].item()+1)
         new_times= terminal_time
         # new_times = torch.arange(0,torch.floor(max(terminal_time)).item()+1)

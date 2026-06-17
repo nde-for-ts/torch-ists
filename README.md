@@ -4,9 +4,9 @@
 
 **PyTorch toolkit for irregularly sampled multivariate time series with continuous-time methods (Neural ODE/CDE/SDE) and discrete-time baselines.**
 
-`torch-ists` provides runtime APIs, benchmark scripts, and benchmark archive loading for irregular time series.
+It provides runtime APIs, benchmark scripts, and a built-in benchmark archive loader.
 
-**Related source docs**: [Docs index](docs/README.md) · [API Reference](docs/api_reference.md) · [Model Reference](docs/model_reference.md) · [Scripts Reference](docs/scripts_reference.md) · [Data Reference](docs/data_reference.md) · [Custom Model Reference](docs/custom_model_reference.md) · [CIKM 2025 Tutorial site](https://nde-for-ts.github.io/)
+**Related source docs**: [Docs index](docs/README.md) · [API Reference](docs/api_reference.md) · [Model Reference](docs/model_reference.md) · [Scripts Reference](docs/scripts_reference.md) · [Custom Data Guide](docs/custom_data_guide.md) · [Custom Model Guide](docs/custom_model_guide.md) · [Third-Party Notices](docs/third_party_notices.md) · [CIKM 2025 Tutorial site](https://nde-for-ts.github.io/)
 
 ## Overview
 
@@ -65,7 +65,7 @@ from torch_ists import benchmark_loader
 X, y = benchmark_loader.get_data("ECG200")
 ```
 
-See [Data Reference](docs/data_reference.md) for cache locations and user-provided dataset handling.
+See [Custom Data Guide](docs/custom_data_guide.md) for cache locations and user-provided dataset handling.
 
 ## Quick Start
 
@@ -100,15 +100,42 @@ logits = model(seq, coeffs=coeffs)
 
 Direct sequence and attention baselines take `coeffs=None`, while continuous-time methods (Neural CDE/ODE/SDE) consume the `coeffs` returned by `preprocess(...)`.
 
-For the full classification benchmark pipeline from a source checkout:
+The source-checkout pipeline shares a continuous-time preprocessing path that builds cubic-spline coefficients with `torchcde`, so install the optional backends first:
 
 ```bash
-PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/set_splits.py
-PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/param_search.py --num-samples 1 --max-num-epochs 1
-PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/model_run.py --epochs 1 --max-runs 1
+PYTHONNOUSERSITE=1 python -m pip install -e .[all]
 ```
 
-These are bounded smoke-safe runs; the full defaults (`param_search.py --num-samples 20`, `model_run.py --epochs 100`) and all flags are documented in `docs/scripts_reference.md`.
+The pipeline runs `set_splits.py` -> `param_search.py` -> `model_run.py` in order; `model_run.py` reads the parameters written by `param_search.py`. The bounded smoke run below uses a small self-contained NPZ example, so it is reproducible without a dataset download:
+
+```bash
+# Create a toy NPZ payload: X of shape [N, D, L], y of shape [N]
+python -c "import numpy as np, pathlib; p=pathlib.Path('/tmp/torch_ists_demo'); p.mkdir(parents=True, exist_ok=True); rng=np.random.default_rng(0); np.savez(p/'toy.npz', X=rng.normal(size=(40, 3, 24)).astype('float32'), y=np.array([0, 1] * 20))"
+
+# 1) generate the split for the hyperparameter-search seed (seed 42, the new default)
+PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/set_splits.py \
+    --dataset-name Demo --dataset-source npz --dataset-npz /tmp/torch_ists_demo/toy.npz \
+    --seed 42 --out-dir /tmp/torch_ists_demo/split
+
+# 2) bounded parameter search (1 sample, 1 epoch; reads the seed-42 split)
+PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/param_search.py \
+    --datasets Demo --dataset-source npz --dataset-npz /tmp/torch_ists_demo/toy.npz \
+    --models cnn --seed 42 --num-samples 1 --max-num-epochs 1 --max-runs 1 \
+    --split-root /tmp/torch_ists_demo/split --param-root /tmp/torch_ists_demo/params --device cpu
+
+# 3) generate the split for one evaluation seed (the reported runs sweep seeds 0..4)
+PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/set_splits.py \
+    --dataset-name Demo --dataset-source npz --dataset-npz /tmp/torch_ists_demo/toy.npz \
+    --seed 0 --out-dir /tmp/torch_ists_demo/split
+
+# 4) train and evaluate the selected model on the seed-0 split (repeat with seeds 1..4 for the full evaluation)
+PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/model_run.py \
+    --datasets Demo --dataset-source npz --dataset-npz /tmp/torch_ists_demo/toy.npz \
+    --models cnn --seed 0 --epochs 1 --max-runs 1 \
+    --split-root /tmp/torch_ists_demo/split --param-root /tmp/torch_ists_demo/params
+```
+
+These are bounded smoke-safe runs; the full defaults (`param_search.py --num-samples 20`, `model_run.py --epochs 100`) and all flags are documented in `docs/scripts_reference.md`. The hyperparameter search seed (default `42`) is disjoint from the standard evaluation seeds (`0..4`), so reported numbers are out-of-sample with respect to hyperparameter selection. To reproduce the ICLR 2024 protocol pass `--seed 0` to step 1 (`set_splits.py`) and step 2 (`param_search.py`); steps 3 and 4 already run at seed `0`.
 
 See [Model Reference](docs/model_reference.md) for which models need `preprocess(X, model_name=...)` versus the direct sequence stack.
 
@@ -135,7 +162,7 @@ The package includes 47 models across the groups below. See [Model Reference](do
 ## Source Checkout Scripts
 
 - `scripts/set_splits.py` — generate reproducible train/validation/test splits
-- `scripts/param_search.py` — parameter search for packaged models and datasets; Ray Tune is loaded only for the Ray-backed search path
+- `scripts/param_search.py` — parameter search; Ray Tune is loaded only when the Ray-backed path runs
 - `scripts/model_run.py` — train and evaluate a selected packaged model
 
 ```bash
@@ -144,9 +171,9 @@ PYTHONPATH=. python scripts/param_search.py --help
 PYTHONPATH=. python scripts/model_run.py --help
 ```
 
-## Custom Model Reference
+## Custom Model Guide
 
-User-owned `nn.Module` models can compose with packaged data, split, and preprocessing utilities — see [Custom Model Reference](docs/custom_model_reference.md).
+User-owned `nn.Module` models can compose with packaged data, split, and preprocessing utilities — see [Custom Model Guide](docs/custom_model_guide.md).
 
 ## Documentation
 
@@ -154,8 +181,9 @@ User-owned `nn.Module` models can compose with packaged data, split, and preproc
 - `docs/api_reference.md` — exported runtime API
 - `docs/model_reference.md` — per-model origin paper, canonical repo, and implementation note
 - `docs/scripts_reference.md` — source-checkout CLI scripts: flags, outputs, and pipeline order
-- `docs/data_reference.md` — guidance for adding user-provided datasets and NPZ script inputs
-- `docs/custom_model_reference.md` — guidance for using custom models alongside the package
+- `docs/custom_data_guide.md` — guidance for adding user-provided datasets and NPZ script inputs
+- `docs/custom_model_guide.md` — guidance for using custom models alongside the package
+- `docs/third_party_notices.md` — upstream sources and licenses for third-party code in the package
 
 Tutorial: <https://nde-for-ts.github.io/> (CIKM 2025).
 

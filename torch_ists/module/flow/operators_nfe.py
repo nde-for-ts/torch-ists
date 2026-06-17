@@ -51,7 +51,7 @@ class ResNetFlow(_BaseNFEAdapter):
         **_: object,
     ):
         ensure_nfe_backend_enabled()
-        from ._vendor_nfe.flow import ResNetFlow as VendoredResNetFlow
+        from ._neural_flows.flow import ResNetFlow as VendoredResNetFlow
 
         depth = max(1, int(n_layers))
         dims = _make_hidden_dims(hidden_dims, dim)
@@ -75,7 +75,7 @@ class GRUFlow(_BaseNFEAdapter):
     ):
         del hidden_dims
         ensure_nfe_backend_enabled()
-        from ._vendor_nfe.gru import GRUFlow as VendoredGRUFlow
+        from ._neural_flows.gru import GRUFlow as VendoredGRUFlow
 
         depth = max(1, int(n_layers))
         model = VendoredGRUFlow(
@@ -96,7 +96,7 @@ class CouplingFlow(_BaseNFEAdapter):
         **_: object,
     ):
         ensure_nfe_backend_enabled()
-        from ._vendor_nfe.flow import CouplingFlow as VendoredCouplingFlow
+        from ._neural_flows.flow import CouplingFlow as VendoredCouplingFlow
 
         depth = max(1, int(n_layers))
         dims = _make_hidden_dims(hidden_dims, dim)

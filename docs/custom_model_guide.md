@@ -1,8 +1,9 @@
-# torch-ists Custom Model Reference
+# torch-ists Custom Model Guide
 
+> **Type**: Guide
 > **Scope**: Custom model wrapper guide for user-owned PyTorch models.
 
-**Related docs**: [Package overview](../README.md) · [Docs index](README.md) · [API Reference](api_reference.md) · [Model Reference](model_reference.md) · [Scripts Reference](scripts_reference.md) · [Data Reference](data_reference.md) · [CIKM 2025 Tutorial site](https://nde-for-ts.github.io/)
+**Related docs**: [Package overview](../README.md) · [Docs index](README.md) · [API Reference](api_reference.md) · [Model Reference](model_reference.md) · [Scripts Reference](scripts_reference.md) · [Custom Data Guide](custom_data_guide.md) · [Third-Party Notices](third_party_notices.md) · [CIKM 2025 Tutorial site](https://nde-for-ts.github.io/)
 
 This reference shows how to use `torch-ists` data utilities with your own PyTorch model. Custom models run in your project code; the source-checkout CLI runs packaged models only.
 
@@ -79,26 +80,26 @@ from torch_ists.preprocessing import preprocess
 
 
 class ExternalVectorField(nn.Module):
-    def __init__(self, hidden_dim: int, coeff_dim: int):
+    def __init__(self, hidden_dim: int, control_channels: int):
         super().__init__()
         self.hidden_dim = hidden_dim
-        self.coeff_dim = coeff_dim
+        self.control_channels = control_channels
         self.net = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim),
             nn.Tanh(),
-            nn.Linear(hidden_dim, hidden_dim * coeff_dim),
+            nn.Linear(hidden_dim, hidden_dim * control_channels),
         )
 
     def forward(self, t: torch.Tensor, z: torch.Tensor) -> torch.Tensor:
         del t
-        return self.net(z).view(z.shape[0], self.hidden_dim, self.coeff_dim)
+        return self.net(z).view(z.shape[0], self.hidden_dim, self.control_channels)
 
 
 class ExternalCoeffNDEClassifier(nn.Module):
-    def __init__(self, coeff_dim: int, num_class: int, hidden_dim: int = 32):
+    def __init__(self, control_channels: int, num_class: int, hidden_dim: int = 32):
         super().__init__()
-        self.initial = nn.Linear(coeff_dim, hidden_dim)
-        self.func = ExternalVectorField(hidden_dim=hidden_dim, coeff_dim=coeff_dim)
+        self.initial = nn.Linear(control_channels, hidden_dim)
+        self.func = ExternalVectorField(hidden_dim=hidden_dim, control_channels=control_channels)
         self.head = nn.Linear(hidden_dim, num_class)
 
     def forward(self, coeffs: torch.Tensor, times: torch.Tensor) -> torch.Tensor:
@@ -116,7 +117,10 @@ X_missing, X_mask, X_delta, coeffs = preprocess(
     use_intensity=False,
 )
 times = torch.linspace(0, 1, X.shape[-1])
-model = ExternalCoeffNDEClassifier(coeff_dim=coeffs.shape[-1], num_class=2)
+# Probe the control-path channel count from the interpolated control object
+# itself; it depends on D, use_intensity, and the interpolation scheme.
+control_channels = torchcde.CubicSpline(coeffs, times).evaluate(times[0]).shape[-1]
+model = ExternalCoeffNDEClassifier(control_channels=control_channels, num_class=2)
 logits = model(coeffs, times)
 ```
 
@@ -124,7 +128,7 @@ The custom model owns the NDE architecture; `torch-ists` supplies preprocessing 
 
 ## 5. Using Packaged Splits
 
-The packaged split utilities can still be used with custom training code. See [Data Reference](data_reference.md) for the full dataset shape, NPZ input, and split file format.
+The packaged split utilities can still be used with custom training code. See [Custom Data Guide](custom_data_guide.md) for the full dataset shape, NPZ input, and split file format.
 
 ```python
 from pathlib import Path
@@ -142,8 +146,10 @@ PYTHONPATH=. python scripts/set_splits.py \
   --dataset-name ToyDataset \
   --dataset-source npz \
   --dataset-npz data/ToyDataset.npz \
-  --seed 0
+  --seed 42
 ```
+
+Repeat with `--seed 0..4` to generate the evaluation splits as well; the hyperparameter-search seed (`42`) is disjoint from the evaluation seeds.
 
 Use the source-checkout CLI only for packaged models; run custom models from your own training script.
 
@@ -151,4 +157,4 @@ Keep custom model code under a project namespace such as `my_project.models` or 
 
 ---
 
-**End of Custom Model Reference**
+**End of Custom Model Guide**

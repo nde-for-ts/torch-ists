@@ -100,7 +100,7 @@ def parse_cli_args():
     parser = argparse.ArgumentParser(
         description="Run parameter search loop (default full loop, optional subset mode)."
     )
-    parser.add_argument("--seed", type=int, default=0, help="Random seed.")
+    parser.add_argument("--seed", type=int, default=42, help="Random seed (default 42; eval seeds 0-4 are disjoint).")
     parser.add_argument(
         "--datasets",
         type=str,
@@ -147,10 +147,10 @@ def parse_cli_args():
         type=str,
         choices=["reuse", "fail"],
         default="reuse",
-        help="Behavior when param artifact already exists.",
+        help="Behavior when a param artifact already exists. The artifact filename does NOT encode the search seed, so a stale params/ tree from a prior --seed run will be silently reused under the default 'reuse'. After upgrading to the seed-42 disjoint policy, delete or back up your existing params/ directory, or pass --existing-policy fail to surface any pre-policy artifact.",
     )
     parser.add_argument("--ray-cpu", type=float, default=16.0, help="CPU per Ray trial.")
-    parser.add_argument("--ray-gpu", type=float, default=0.3, help="GPU per Ray trial.")
+    parser.add_argument("--ray-gpu", type=float, default=0.5, help="GPU per Ray trial.")
     parser.add_argument(
         "--device",
         type=str,
@@ -163,7 +163,7 @@ def parse_cli_args():
         type=_normalize_search_mode,
         default="default",
         metavar="{default,cv}",
-        help="Hyperparameter search mode. default uses SEED=0 only; cv uses SEED=0~4 average.",
+        help="Hyperparameter search mode. default runs a single-seed search at the configured --seed (default 42); cv averages over seeds 0-4 as an auxiliary cross-validated mode (approximately 5x compute).",
     )
     parser.add_argument(
         "--split-root",
@@ -858,7 +858,7 @@ def optimize(
     num_samples=20,
     max_num_epochs=10,
     ray_cpu=16.0,
-    ray_gpu=0.3,
+    ray_gpu=0.5,
     device_mode="auto",
     search_mode="default",
     task="classification",

@@ -3,6 +3,7 @@ ODE-LSTM module adapted from the original implementation.
 
 Source:
 - https://github.com/mlech26l/ode-lstms/blob/master/torch_node_cell.py
+License: MIT License
 """
 
 from __future__ import annotations

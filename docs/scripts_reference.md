@@ -1,8 +1,9 @@
 # torch-ists Scripts Reference
 
+> **Type**: Reference
 > **Scope**: Source-checkout command-line entry points to the benchmark pipeline.
 
-**Related docs**: [Package overview](../README.md) · [Docs index](README.md) · [API Reference](api_reference.md) · [Model Reference](model_reference.md) · [Data Reference](data_reference.md) · [Custom Model Reference](custom_model_reference.md) · [CIKM 2025 Tutorial site](https://nde-for-ts.github.io/)
+**Related docs**: [Package overview](../README.md) · [Docs index](README.md) · [API Reference](api_reference.md) · [Model Reference](model_reference.md) · [Custom Data Guide](custom_data_guide.md) · [Custom Model Guide](custom_model_guide.md) · [Third-Party Notices](third_party_notices.md) · [CIKM 2025 Tutorial site](https://nde-for-ts.github.io/)
 
 This document covers the three source-checkout scripts: [`scripts/set_splits.py`](../scripts/set_splits.py), [`scripts/param_search.py`](../scripts/param_search.py), and [`scripts/model_run.py`](../scripts/model_run.py). Built wheels do not install these files or expose console entry points.
 
@@ -37,6 +38,13 @@ Each step writes to a dedicated root directory and reads from the previous step'
 
 All three scripts also append a JSON manifest to `evidence/` for run tracking.
 
+**Seed policy** (default: hyperparameter search and evaluation seeds are disjoint):
+- `set_splits.py --seed` default = `42` — the hyperparameter search split.
+- `param_search.py --seed` default = `42` — selects hyperparameters on the split at seed `42`.
+- `model_run.py --seed` is passed explicitly per evaluation point; the standard reported evaluation uses seeds `0`, `1`, `2`, `3`, `4`.
+- The hyperparameter search seed (`42`) is disjoint from the evaluation seeds (`0-4`), so every reported number is out-of-sample with respect to hyperparameter selection.
+- Reproducing the ICLR 2024 protocol (hyperparameter search at seed `0`): pass `--seed 0` explicitly to both `set_splits.py` and `param_search.py`.
+
 **Environment variable**:
 - `TORCH_ISTS_RUNTIME_ROOT` (optional) — override the runtime root when running the scripts from outside the package directory.
 - `TORCH_ISTS_DATA_ROOT` (optional) — override the built-in UCR/UEA archive root used by `--dataset-source default`.
@@ -52,7 +60,7 @@ All three scripts also append a JSON manifest to `evidence/` for run tracking.
 **Usage**:
 
 ```bash
-PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/set_splits.py --dataset-name ECG200 --seed 0
+PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/set_splits.py --dataset-name ECG200 --seed 42
 ```
 
 ### Flags
@@ -62,7 +70,7 @@ PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/set_splits.py --dataset-name ECG2
 | `--dataset-name` | `str` | (required) | Dataset id used in the split file path. |
 | `--dataset-source` | `{default,npz}` | `default` | Dataset source backend. `default` loads benchmark archive data by dataset name through `torch_ists.benchmark_loader.get_data`; `npz` loads a local file through `--dataset-npz`. |
 | `--dataset-npz` | `str` | `None` | Required when `--dataset-source npz`; NPZ must contain `X [N,D,L]` and `y [N]`. |
-| `--seed` | `int` | `0` | Random seed for the stratified split. |
+| `--seed` | `int` | `42` | Random seed for the stratified split. Default `42` is the hyperparameter search seed (disjoint from evaluation seeds `0-4`); pass `--seed 0..4` to generate the evaluation splits, or `--seed 0` for ICLR 2024 reproducibility. |
 | `--if-exists` | `{reuse, fail}` | `reuse` | Behavior when the split artifact already exists. `reuse` keeps the existing file; `fail` raises. |
 | `--out-dir` (alias `--output-dir`) | `str` | `split` | Root directory for split artifacts. |
 | `--contract-dir` | `str` | `evidence` | Directory for run manifests (stage = `split`). |
@@ -86,7 +94,7 @@ PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/set_splits.py --dataset-name ECG2
 PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/param_search.py \
     --datasets ECG200,GunPoint \
     --models neuralcde,neural_lsde \
-    --seed 0 \
+    --seed 42 \
     --num-samples 1 --max-num-epochs 1
 ```
 
@@ -96,7 +104,7 @@ This is a bounded smoke run; the full defaults (`--num-samples 20 --max-num-epoc
 
 | Flag | Type | Default | Description |
 |---|---|---|---|
-| `--seed` | `int` | `0` | Global seed for split selection and reproducibility. |
+| `--seed` | `int` | `42` | Global seed for split selection and reproducibility. Default `42` is the hyperparameter search seed; it is disjoint from evaluation seeds `0-4`, so reported numbers are out-of-sample with respect to hyperparameter selection. Pass `--seed 0` to reproduce the ICLR 2024 protocol. |
 | `--datasets` | `str` | (required) | Comma-separated dataset list. |
 | `--dataset-source` | `{default,npz}` | `default` | Dataset source backend. `default` loads benchmark archive data by dataset name through `torch_ists.benchmark_loader.get_data`; `npz` loads one local file through `--dataset-npz`. |
 | `--dataset-npz` | `str` | `None` | Required when `--dataset-source npz`; `--datasets` must contain exactly one dataset name. |
@@ -106,8 +114,8 @@ This is a bounded smoke run; the full defaults (`--num-samples 20 --max-num-epoc
 | `--max-num-epochs` | `int` | `10` | Per-trial training budget. |
 | `--max-runs` | `int` | `None` | Stop after this many runs across the dataset × model grid. |
 | `--max-runs-mode` | `{completed, new}` | `completed` | What counts toward `--max-runs`: `completed` (executed + reused) or `new` (executed only). |
-| `--existing-policy` | `{reuse, fail}` | `reuse` | Behavior when a param artifact already exists. |
-| `--search-mode` | `{default, cv}` | `default` | `default` runs at `SEED=0` only; `cv` averages over `SEED=0–4` (≈5× compute). |
+| `--existing-policy` | `{reuse, fail}` | `reuse` | Behavior when a param artifact already exists. **Note**: the artifact filename does not encode the search seed, so a stale `params/` tree from a prior `--seed` run is silently reused under the default `reuse`. After upgrading to the seed-42 disjoint policy, delete or back up the existing `params/` directory, or pass `--existing-policy fail` to surface any pre-policy artifact. |
+| `--search-mode` | `{default, cv}` | `default` | `default` runs a single-seed search at the configured `--seed` (default `42`; ICLR 2024 reproducibility = `--seed 0`); `cv` averages over `SEED=0–4` (≈5× compute; note that `cv` uses the evaluation seeds for hyperparameter selection). |
 | `--ray-cpu` | `float` | `16.0` | CPU per Ray trial. |
 | `--ray-gpu` | `float` | `0.5` | GPU per Ray trial (`0` for CPU-only). |
 | `--device` | `{auto, cpu, cuda}` | `auto` | Per-trial device selection. |
@@ -121,8 +129,8 @@ This is a bounded smoke run; the full defaults (`--num-samples 20 --max-num-epoc
 
 ### Search Modes
 
-- **`default`** — single-seed search at `SEED=0`. Output filename: `<dataset>_<model>`.
-- **`cv`** — cross-validated search averaging over `SEED=0–4`. Output filename: `<dataset>_<model>_cv`. ≈5× the compute.
+- **`default`** — single-seed search at the configured `--seed` (default `42`, disjoint from evaluation seeds `0-4`). Output filename: `<dataset>_<model>`. Pass `--seed 0` to reproduce the ICLR 2024 protocol.
+- **`cv`** — cross-validated search averaging over `SEED=0–4`. Output filename: `<dataset>_<model>_cv`. ≈5× the compute. Note: `cv` uses the evaluation seeds for hyperparameter selection, so the resulting numbers are not disjoint from the evaluation; prefer `default` when fairness is the priority.
 
 ### Output
 
@@ -131,7 +139,7 @@ This is a bounded smoke run; the full defaults (`--num-samples 20 --max-num-epoc
 
 ### Workflow Dependencies
 
-Requires split files from `set_splits.py --seed <SEED>` for every dataset in `--datasets`.
+Requires the split file from `set_splits.py --seed 42` for every dataset in `--datasets` (the hyperparameter search seed; use `--seed 0..4` to also generate the evaluation splits consumed by `model_run.py`).
 
 ---
 
@@ -229,7 +237,7 @@ PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/model_run.py \
 ### Workflow Dependencies
 
 Requires:
-- Split files from `set_splits.py --seed <SEED>` for every dataset.
+- Split files from `set_splits.py` for every dataset at every reported evaluation seed (`--seed 0..4` for the standard evaluation; the `param_search.py` step additionally needs `--seed 42`).
 - Param files from `param_search.py --search-mode {default|cv}` matching `--param-mode`.
 
 ---

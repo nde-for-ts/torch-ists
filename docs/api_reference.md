@@ -1,12 +1,12 @@
 # torch-ists API Reference
 
-> **Status**: Package reference
+> **Type**: Reference
 > **Scope**: Exported runtime APIs and source-checkout scripts for the current package
 > **Note**: Built wheels install the `torch_ists` runtime package only; top-level `docs/`, `scripts/`, and `PACKAGE_STATUS.json` are source-checkout assets.
 
 ---
 
-**Related docs**: [Package overview](../README.md) · [Docs index](README.md) · [Model Reference](model_reference.md) · [Scripts Reference](scripts_reference.md) · [Data Reference](data_reference.md) · [Custom Model Reference](custom_model_reference.md) · [CIKM 2025 Tutorial site](https://nde-for-ts.github.io/)
+**Related docs**: [Package overview](../README.md) · [Docs index](README.md) · [Model Reference](model_reference.md) · [Scripts Reference](scripts_reference.md) · [Custom Data Guide](custom_data_guide.md) · [Custom Model Guide](custom_model_guide.md) · [Third-Party Notices](third_party_notices.md) · [CIKM 2025 Tutorial site](https://nde-for-ts.github.io/)
 
 ---
 
@@ -26,12 +26,12 @@
 
 | Your input | Use | coeffs | See |
 |------------|-----|--------|-----|
-| Own raw arrays / dataframe / file | `DataLoader` + `preprocess(...)` | coeffs for continuous-time models | [Data Reference](data_reference.md) |
-| Built-in benchmark archive | `benchmark_loader` | — | [Data Reference](data_reference.md) |
+| Own raw arrays / dataframe / file | `DataLoader` + `preprocess(...)` | coeffs for continuous-time models | [Custom Data Guide](custom_data_guide.md) |
+| Built-in benchmark archive | `benchmark_loader` | — | [Custom Data Guide](custom_data_guide.md) |
 | Direct sequence / attention baseline | build `seq`, `coeffs=None` | none | [Model Reference](model_reference.md) |
 | Continuous-time method (Neural CDE/ODE/SDE) | `preprocess(...)` then pass `coeffs` | from `preprocess` | [Model Reference](model_reference.md) |
 | Source-checkout benchmark pipeline | `scripts/` | — | [Scripts Reference](scripts_reference.md) |
-| Custom model outside `torch_ists` | wrapper pattern | model-defined | [Custom Model Reference](custom_model_reference.md) |
+| Custom model outside `torch_ists` | wrapper pattern | model-defined | [Custom Model Guide](custom_model_guide.md) |
 
 ---
 
@@ -271,7 +271,7 @@ The Data Loading API provides:
 
 **Exported**: `DataLoader`, `DatasetBundle`, `benchmark_loader`
 
-`DataLoader` is for user-provided arrays, data frames, and files. The `benchmark_loader` submodule is the built-in archive loader used by the source-checkout benchmark scripts. For the end-to-end user-provided dataset workflow, see [Data Reference](data_reference.md).
+`DataLoader` is for user-provided arrays, data frames, and files. The `benchmark_loader` submodule is the built-in archive loader used by the source-checkout benchmark scripts. For the end-to-end user-provided dataset workflow, see [Custom Data Guide](custom_data_guide.md).
 
 ```python
 from torch_ists import benchmark_loader
@@ -795,7 +795,7 @@ Behavior notes:
 
 Use custom models from user-owned training code. The source-checkout CLI accepts only packaged model names. Reuse the packaged data loading, split utilities, and preprocessing; treat the packaged model-name list as fixed.
 
-See [Custom Model Reference](custom_model_reference.md) for the wrapper pattern.
+See [Custom Model Guide](custom_model_guide.md) for the wrapper pattern.
 
 ### 6.4 Depth Parameters
 

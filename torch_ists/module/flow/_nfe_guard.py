@@ -17,7 +17,7 @@ NFE_ENABLE_ENV = "TORCH_ISTS_ENABLE_NFE_BACKEND"
 
 
 def _vendor_root() -> Path:
-    return Path(__file__).resolve().parent / "_vendor_nfe"
+    return Path(__file__).resolve().parent / "_neural_flows"
 
 
 def _sha256(path: Path) -> str:

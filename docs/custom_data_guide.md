@@ -1,8 +1,9 @@
-# torch-ists Data Reference
+# torch-ists Custom Data Guide
 
-> **Scope**: Data reference for benchmark datasets and user-provided datasets.
+> **Type**: Guide
+> **Scope**: Guide for using benchmark datasets and bringing user-provided datasets (arrays, data frames, files, NPZ) into the pipeline.
 
-**Related docs**: [Package overview](../README.md) · [Docs index](README.md) · [API Reference](api_reference.md) · [Model Reference](model_reference.md) · [Scripts Reference](scripts_reference.md) · [Custom Model Reference](custom_model_reference.md) · [CIKM 2025 Tutorial site](https://nde-for-ts.github.io/)
+**Related docs**: [Package overview](../README.md) · [Docs index](README.md) · [API Reference](api_reference.md) · [Model Reference](model_reference.md) · [Scripts Reference](scripts_reference.md) · [Custom Model Guide](custom_model_guide.md) · [Third-Party Notices](third_party_notices.md) · [CIKM 2025 Tutorial site](https://nde-for-ts.github.io/)
 
 Data entry paths for torch-ists: built-in benchmark loader, user-provided arrays/data frames/files, and the source-checkout script pipeline.
 
@@ -99,23 +100,23 @@ bundle = DataLoader.from_file(
 
 ## 5. Generate or Reuse Splits
 
-The default split utility creates a stratified 70/15/15 train/valid/test split:
+The default split utility creates a stratified 70/15/15 train/valid/test split. Generate one split per seed; the standard workflow needs the hyperparameter-search seed `42` plus the evaluation seeds `0..4`:
 
 ```bash
 PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/set_splits.py \
   --dataset-name ToyDataset \
   --dataset-source npz \
   --dataset-npz data/ToyDataset.npz \
-  --seed 0
+  --seed 42
 ```
 
 The split file is written to:
 
 ```text
-split/ToyDataset/ToyDataset_0
+split/ToyDataset/ToyDataset_42
 ```
 
-The stratified splitter requires enough samples per class for all three partitions. With the default 70/15/15 ratios, each class needs at least 7 samples.
+Repeat with `--seed 0`, `--seed 1`, `--seed 2`, `--seed 3`, `--seed 4` to create the evaluation splits consumed by `model_run.py`. The stratified splitter requires enough samples per class for all three partitions; with the default 70/15/15 ratios, each class needs at least 7 samples.
 
 If you already have a fixed split, write it in the package split format before running search or evaluation:
 
@@ -124,11 +125,11 @@ from pathlib import Path
 
 from torch_ists import get_split_path, save_splits
 
-path = get_split_path(Path("split"), "ToyDataset", seed=0)
+path = get_split_path(Path("split"), "ToyDataset", seed=42)
 save_splits(path, train_idx, valid_idx, test_idx)
 ```
 
-`set_splits.py --if-exists reuse` keeps an existing split artifact. Use the same `--dataset-name` and `--seed` in `param_search.py` and `model_run.py`.
+`set_splits.py --if-exists reuse` keeps an existing split artifact. Use the same `--dataset-name` in `set_splits.py`, `param_search.py`, and `model_run.py`; the hyperparameter-search seed (default `42`) and the evaluation seeds (`0..4`) are independent.
 
 ## 6. Run the Source Checkout Pipeline on User-Provided Data
 
@@ -141,7 +142,7 @@ PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/param_search.py \
   --dataset-npz data/ToyDataset.npz \
   --models transformer \
   --num-samples 1 \
-  --seed 0
+  --seed 42
 ```
 
 ```bash
@@ -153,6 +154,8 @@ PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/model_run.py \
   --epochs 1 \
   --seed 0
 ```
+
+`model_run.py` is invoked once per reported evaluation seed (standard: `0`, `1`, `2`, `3`, `4`); the snippet above shows seed `0` only.
 
 When `--dataset-source npz` is used, `--datasets` must contain exactly one name (it controls split/param/output paths; the NPZ path controls the data file).
 
@@ -192,4 +195,4 @@ Before running the source-checkout script chain on a new dataset:
 
 ---
 
-**End of Data Reference**
+**End of Custom Data Guide**
