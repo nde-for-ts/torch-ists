@@ -87,6 +87,22 @@ def _normalize_dataset_source_arg(raw: str) -> str:
         raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
+def _normalize_search_mode(raw: str) -> str:
+    normalized = str(raw).strip().lower()
+    if normalized in {"default", "legacy"}:
+        return "default"
+    if normalized in {"cv", "improved"}:
+        return "cv"
+    raise argparse.ArgumentTypeError("search mode must be one of {'default', 'cv'}.")
+
+
+def _normalize_search_profile_arg(raw: str) -> str:
+    try:
+        return normalize_search_profile(raw)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+
+
 CONSTRAINED_SEARCH_POLICY = "constrained"
 AGGREGATED_SEARCH_REPEAT = "aggregated"
 
@@ -120,7 +136,7 @@ def _normalize_search_mode_alias(raw: str) -> tuple[str, str]:
 
 
 def _search_mode_from_repeat(search_repeat: str) -> str:
-    return "cv" if search_repeat == AGGREGATED_SEARCH_REPEAT else "default"
+    return "improved" if search_repeat == AGGREGATED_SEARCH_REPEAT else "legacy"
 
 
 def _fixed_search_seed_set(search_repeat: str, search_seed: int) -> list[int]:
@@ -135,6 +151,7 @@ def _build_param_artifact_name(
     *,
     search_policy: str,
     search_repeat: str,
+    task: str,
     param_target: str | None = None,
 ) -> str:
     parts = [data_name, model_name]
@@ -142,7 +159,11 @@ def _build_param_artifact_name(
         parts.append(str(param_target) if param_target else CONSTRAINED_MATCHED_CAPACITY_TARGET_NAME)
     if search_repeat == AGGREGATED_SEARCH_REPEAT:
         parts.append(AGGREGATED_SEARCH_REPEAT)
-    return "_".join(parts)
+    out_name = "_".join(parts)
+    task_name = str(task).strip().lower()
+    if task_name != "classification":
+        out_name = f"{out_name}__task_{task_name}"
+    return out_name
 
 
 def _infer_cli_search_policy(model_config: dict) -> str:
@@ -187,13 +208,6 @@ def _validate_existing_param_artifact_for_reuse(
             context=f"Param artifact {existing_param_path}",
         )
     return existing_profile
-
-
-def _normalize_search_profile_arg(raw: str) -> str:
-    try:
-        return normalize_search_profile(raw)
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
 def _resolve_model_scope_variant(requested_variant: str) -> str:
@@ -373,7 +387,7 @@ def parse_cli_args():
         type=str,
         choices=["active"],
         default="active",
-        help=argparse.SUPPRESS,
+        help="Model scope for this package runtime.",
     )
     args = parser.parse_args()
     if args.search_mode_alias is not None:
@@ -1444,7 +1458,7 @@ def optimize(
         )
         split_root_local = split_root
 
-        if search_repeat == SINGLE_SEARCH_REPEAT:
+        if search_mode == "default":
             best_loss = _train_single_seed(
                 data_name=data_name,
                 missing_rate=missing_rate,
@@ -1463,7 +1477,7 @@ def optimize(
                 dataset_source=dataset_source,
                 dataset_npz=dataset_npz,
             )
-        elif search_repeat == AGGREGATED_SEARCH_REPEAT:
+        elif search_mode == "cv":
             losses = []
             for seed in range(5):
                 losses.append(
@@ -1488,7 +1502,7 @@ def optimize(
                 )
             best_loss = float(np.mean(losses))
         else:
-            raise ValueError(f"Unknown search_repeat: {search_repeat}")
+            raise ValueError(f"Unknown search_mode: {search_mode}")
 
         saved_model_config = _normalize_param_config_for_save(
             model_name,
@@ -1509,6 +1523,7 @@ def optimize(
             model_name,
             search_policy=search_policy,
             search_repeat=search_repeat,
+            task=task,
         )
         param_path = os.path.join(param_root, data_name, out_name)
         with open(param_path, "wb") as f:
@@ -1672,12 +1687,12 @@ def optimize(
     # save params
     os.makedirs(os.path.join(param_root, data_name), exist_ok=True)
 
-    # Distinguish default vs cv params by suffix
     out_name = _build_param_artifact_name(
         data_name,
         model_name,
         search_policy=search_policy,
         search_repeat=search_repeat,
+        task=task,
     )
 
     param_path = os.path.join(param_root, data_name, out_name)
@@ -1780,6 +1795,7 @@ def main():
 
     if args.models is None:
         model_name_list = ["cnn"]
+        np.random.shuffle(model_name_list)
     else:
         model_name_list = args.models
         _validate_requested_scope(model_name_list, scope_variant=scope_override)
@@ -1805,6 +1821,7 @@ def main():
                 model_name,
                 search_policy=args.search_policy,
                 search_repeat=args.search_repeat,
+                task=args.task,
             )
             split_seeds = _fixed_search_seed_set(args.search_repeat, SEED)
             split_paths = [

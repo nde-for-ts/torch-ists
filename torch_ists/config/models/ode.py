@@ -20,7 +20,7 @@ ODE_SOURCE_MODELS: Dict[str, Dict] = {
     },
 }
 
-# Compatibility alias retained for older imports.
+# Historical import name retained for older callers.
 ODE_INTERNAL_EXPERIMENT_CONFIGS = ODE_SOURCE_MODELS
 
 __all__ = ["ODE_MODELS", "ODE_SOURCE_MODELS", "ODE_INTERNAL_EXPERIMENT_CONFIGS"]

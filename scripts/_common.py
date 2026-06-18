@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Shared bootstrap helpers for packaged scripts."""
+"""Shared runtime/bootstrap helpers for script entrypoints."""
 
 from __future__ import annotations
 
@@ -31,31 +31,6 @@ CONSTRAINED_MATCHED_CAPACITY_LABEL = "capacity-controlled"
 DEFAULT_SEARCH_CONTRACT_NAME = "model-specific-default-v1"
 HISTORICAL_SEARCH_CONTRACT_NAME = "historical-reproducibility-v1"
 INTERNAL_SEARCH_PROFILE_VISIBILITY = "internal"
-__all__ = [
-    "configure_runtime_paths",
-    "apply_model_scope_variant",
-    "default_method_for_model",
-    "resolve_dataset_fixed_batch_policy",
-    "resolve_learning_rate_policy",
-    "describe_search_profile",
-    "normalize_search_profile",
-    "infer_param_search_profile",
-    "validate_param_artifact_metadata",
-    "compute_param_config_hash",
-    "build_param_artifact_identity",
-    "validate_param_artifact_identity",
-    "resolve_model_search_space",
-    "resolve_effective_param_config",
-    "build_model_kwargs_from_config",
-    "STANDARD_SEARCH_POLICY",
-    "SINGLE_SEARCH_REPEAT",
-    "DEFAULT_MODEL_NATIVE_HIDDEN_DIM_VALUES",
-    "CONSTRAINED_MATCHED_CAPACITY_HIDDEN_DIM_VALUES",
-    "CONSTRAINED_MATCHED_CAPACITY_DEPTH_LEVEL_VALUES",
-    "CONSTRAINED_MATCHED_CAPACITY_TARGET",
-    "CONSTRAINED_MATCHED_CAPACITY_TARGET_NAME",
-    "CONSTRAINED_MATCHED_CAPACITY_LABEL",
-]
 
 _SEARCH_PROFILE_ALIASES = {
     "default": MODEL_NATIVE_SEARCH_PROFILE,
@@ -178,13 +153,58 @@ _MODEL_NATIVE_EXTRA_PARAM_DEFAULTS = {
 }
 
 
+def _path_is_under(path: Path, roots: list[Path]) -> bool:
+    try:
+        resolved = path.resolve()
+    except (OSError, RuntimeError):
+        return False
+    return any(resolved == root or root in resolved.parents for root in roots)
+
+
+def _module_paths(module: object) -> list[Path]:
+    paths: list[Path] = []
+    module_file = getattr(module, "__file__", None)
+    if module_file:
+        paths.append(Path(module_file))
+
+    module_path = getattr(module, "__path__", None)
+    if module_path:
+        paths.extend(Path(path) for path in module_path)
+
+    spec = getattr(module, "__spec__", None)
+    locations = getattr(spec, "submodule_search_locations", None) if spec else None
+    if locations:
+        paths.extend(Path(path) for path in locations)
+
+    return paths
+
+
+def _module_is_from_runtime(module: object, runtime_roots: list[Path]) -> bool:
+    return any(_path_is_under(path, runtime_roots) for path in _module_paths(module))
+
+
+def _clear_runtime_modules() -> None:
+    for name in list(sys.modules):
+        if name == "torch_ists" or name.startswith("torch_ists."):
+            sys.modules.pop(name, None)
+
+
+def _clear_incompatible_runtime_submodules(runtime_roots: list[Path]) -> None:
+    for name, module in list(sys.modules.items()):
+        if name == "torch_ists" or not name.startswith("torch_ists."):
+            continue
+        if not _module_is_from_runtime(module, runtime_roots):
+            sys.modules.pop(name, None)
+
+
 def configure_runtime_paths(caller_file: str | Path) -> Path:
     """Ensure packaged runtime resolution for script execution."""
     caller_path = Path(caller_file).resolve()
-    scripts_root = caller_path.parent
-    repo_root = scripts_root.parent
+    repo_root = caller_path.parents[2]
+    release_root = repo_root / "release"
+    scripts_root = release_root / "scripts"
     runtime_root = Path(
-        os.environ.get("TORCH_ISTS_RUNTIME_ROOT", str(repo_root))
+        os.environ.get("TORCH_ISTS_RUNTIME_ROOT", str(release_root))
     ).resolve()
 
     for path in (runtime_root, repo_root, scripts_root):
@@ -197,16 +217,19 @@ def configure_runtime_paths(caller_file: str | Path) -> Path:
     if not init_py.exists():
         raise FileNotFoundError(
             f"Runtime package not found: {init_py}. "
-            "Set TORCH_ISTS_RUNTIME_ROOT to a packaged runtime root."
+            "Set TORCH_ISTS_RUNTIME_ROOT to a valid package root."
         )
 
     current = sys.modules.get("torch_ists")
     current_file = Path(getattr(current, "__file__", "")) if current else None
-    if (
-        current is None
-        or not current_file
-        or runtime_pkg.resolve() not in current_file.resolve().parents
-    ):
+    runtime_roots = [runtime_pkg.resolve()]
+    current_matches_runtime = (
+        current is not None
+        and current_file
+        and _path_is_under(current_file, runtime_roots)
+    )
+    if not current_matches_runtime:
+        _clear_runtime_modules()
         spec = importlib.util.spec_from_file_location(
             "torch_ists",
             str(init_py),
@@ -217,6 +240,8 @@ def configure_runtime_paths(caller_file: str | Path) -> Path:
         module = importlib.util.module_from_spec(spec)
         sys.modules["torch_ists"] = module
         spec.loader.exec_module(module)
+    else:
+        _clear_incompatible_runtime_submodules(runtime_roots)
 
     return repo_root
 
@@ -226,7 +251,22 @@ def apply_model_scope_variant(variant: str | None) -> str:
     if normalized in {"", "active"}:
         os.environ.pop(MODEL_SCOPE_VARIANT_ENV, None)
         return "active"
-    raise ValueError("This package supports only the active model scope.")
+    if normalized == "tsde_internal":
+        os.environ[MODEL_SCOPE_VARIANT_ENV] = "tsde_internal"
+        return "tsde_internal"
+    if normalized == "dsde_internal":
+        os.environ[MODEL_SCOPE_VARIANT_ENV] = "dsde_internal"
+        return "dsde_internal"
+    if normalized == "physgsde_internal":
+        os.environ[MODEL_SCOPE_VARIANT_ENV] = "physgsde_internal"
+        return "physgsde_internal"
+    if normalized == "ode_source_internal":
+        os.environ[MODEL_SCOPE_VARIANT_ENV] = "ode_source_internal"
+        return "ode_source_internal"
+    raise ValueError(
+        "Unsupported model scope variant. "
+        "Expected one of {'active','tsde_internal','dsde_internal','physgsde_internal','ode_source_internal'}."
+    )
 
 
 def normalize_search_profile(raw: str | None) -> str:
@@ -425,9 +465,9 @@ def _resolve_config_search_profile(config: dict, search_profile: str | None) -> 
 def _canonical_model_name(model_name: str) -> str:
     normalized = str(model_name).strip().lower()
     try:
-        from torch_ists.config.alias_policy import normalize_flow_alias
+        from torch_ists.config.alias_policy import normalize_flow_alias, normalize_tsde_method_alias
 
-        normalized = normalize_flow_alias(normalized)
+        normalized = normalize_tsde_method_alias(normalize_flow_alias(normalized))
     except Exception:
         pass
     return normalized
@@ -861,8 +901,8 @@ def resolve_learning_rate_policy(
     if config_lr is None:
         if require_config:
             raise ValueError(
-                "learning rate is missing from the parameter artifact; refusing "
-                "silent fallback. Regenerate params with scripts/param_search.py."
+                "Saved param artifact is missing required field 'lr'. "
+                "Refusing silent learning-rate fallback for model execution."
             )
         lr = float(default_lr)
         source = "fixed_fallback"
@@ -892,6 +932,8 @@ def default_method_for_model(model_name: str) -> str:
         return runtime_default_method_for_model(model_name)
     except Exception:
         normalized = str(model_name).strip().lower()
+        if normalized == "latentsde":
+            return "srk"
         if normalized in {
             "naive_cde",
             "neural_ode",
@@ -901,6 +943,7 @@ def default_method_for_model(model_name: str) -> str:
             "neural_lsde",
             "neural_lnsde",
             "neural_gsde",
+            "neural_physgsde",
         }:
             return "srk"
         if normalized == "ode-rnn-spline":
@@ -913,6 +956,17 @@ def default_method_for_model(model_name: str) -> str:
             return "euler"
         if normalized == "ode-lstm":
             return "dopri5"
-        if normalized in {"neuralcde", "neuralcde-l", "neuralcde-r", "neuralcde-c", "neuralcde-h"}:
+        if normalized in {
+            "neuralcde",
+            "neuralcde-l",
+            "neuralcde-r",
+            "neuralcde-c",
+            "neuralcde-h",
+            "ancde",
+            "exit",
+            "leap",
+        }:
             return "rk4"
+        if normalized.startswith("neuraltsde_") or normalized.startswith("neuraldsde_"):
+            return "srk"
         return "euler"

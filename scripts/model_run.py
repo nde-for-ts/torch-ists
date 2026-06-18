@@ -76,6 +76,22 @@ def _normalize_dataset_source_arg(raw: str) -> str:
         raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
+def _normalize_param_mode(raw: str) -> str:
+    normalized = str(raw).strip().lower()
+    if normalized in {"default", "legacy"}:
+        return "default"
+    if normalized in {"cv", "improved"}:
+        return "cv"
+    raise argparse.ArgumentTypeError("parameter mode must be one of {'default', 'cv'}.")
+
+
+def _normalize_search_profile_arg(raw: str) -> str:
+    try:
+        return normalize_search_profile(raw)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+
+
 CONSTRAINED_SEARCH_POLICY = "constrained"
 AGGREGATED_SEARCH_REPEAT = "aggregated"
 
@@ -114,6 +130,7 @@ def _build_param_artifact_name(
     *,
     param_policy: str,
     param_repeat: str,
+    task: str,
     param_target: str | None = None,
 ) -> str:
     parts = [data_name, model_name]
@@ -121,15 +138,26 @@ def _build_param_artifact_name(
         parts.append(str(param_target) if param_target else CONSTRAINED_MATCHED_CAPACITY_TARGET_NAME)
     if param_repeat == AGGREGATED_SEARCH_REPEAT:
         parts.append(AGGREGATED_SEARCH_REPEAT)
-    return "_".join(parts)
+    out_name = "_".join(parts)
+    task_name = str(task).strip().lower()
+    if task_name != "classification":
+        out_name = f"{out_name}__task_{task_name}"
+    return out_name
 
 
 def _artifact_repeat_suffix_stem(artifact_name: str) -> str:
     return str(artifact_name).split("__task_", 1)[0]
 
 
-def _legacy_aggregated_param_artifact_name(data_name: str, model_name: str) -> str:
-    return "_".join([data_name, model_name, "cv"])
+def _legacy_aggregated_param_artifact_names(data_name: str, model_name: str, *, task: str) -> list[str]:
+    task_name = str(task).strip().lower()
+    names = []
+    for suffix in ("cv", "improved"):
+        out_name = "_".join([data_name, model_name, suffix])
+        if task_name != "classification":
+            out_name = f"{out_name}__task_{task_name}"
+        names.append(out_name)
+    return names
 
 
 def _resolve_param_artifact_path(
@@ -139,6 +167,7 @@ def _resolve_param_artifact_path(
     *,
     param_policy: str,
     param_repeat: str,
+    task: str,
     param_target: str | None = None,
 ) -> tuple[str, str]:
     param_name = _build_param_artifact_name(
@@ -146,6 +175,7 @@ def _resolve_param_artifact_path(
         model_name,
         param_policy=param_policy,
         param_repeat=param_repeat,
+        task=task,
         param_target=param_target,
     )
     param_path = os.path.join(param_root, data_name, param_name)
@@ -153,10 +183,10 @@ def _resolve_param_artifact_path(
         return param_name, param_path
 
     if param_policy == STANDARD_SEARCH_POLICY and param_repeat == AGGREGATED_SEARCH_REPEAT:
-        legacy_name = _legacy_aggregated_param_artifact_name(data_name, model_name)
-        legacy_path = os.path.join(param_root, data_name, legacy_name)
-        if os.path.exists(legacy_path):
-            return legacy_name, legacy_path
+        for legacy_name in _legacy_aggregated_param_artifact_names(data_name, model_name, task=task):
+            legacy_path = os.path.join(param_root, data_name, legacy_name)
+            if os.path.exists(legacy_path):
+                return legacy_name, legacy_path
 
     return param_name, param_path
 
@@ -176,16 +206,9 @@ def _infer_cli_search_repeat(model_config: dict, artifact_name: str | None = Non
         return raw
     if artifact_name:
         stem = _artifact_repeat_suffix_stem(artifact_name)
-        if stem.endswith("_aggregated") or stem.endswith("_cv"):
+        if stem.endswith("_aggregated") or stem.endswith("_cv") or stem.endswith("_improved"):
             return AGGREGATED_SEARCH_REPEAT
     return SINGLE_SEARCH_REPEAT
-
-
-def _normalize_search_profile_arg(raw: str) -> str:
-    try:
-        return normalize_search_profile(raw)
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
 def _resolve_model_scope_variant(requested_variant: str) -> str:
@@ -423,7 +446,7 @@ def _build_robustness_axis_suffix(
 
 def parse_cli_args():
     parser = argparse.ArgumentParser(
-        description="Run evaluation loop. Defaults to one dataset-model-missingness configuration; comma-separated inputs expand the run grid."
+        description="Run evaluation loop. Defaults to one BasicMotions-cnn standard configuration; comma-separated inputs expand the run grid."
     )
     parser.add_argument("seed_positional", nargs="?", type=int, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--seed", type=int, default=None, help="Random seed override.")
@@ -631,7 +654,7 @@ def parse_cli_args():
         type=str,
         choices=["active"],
         default="active",
-        help=argparse.SUPPRESS,
+        help="Model scope for this package runtime.",
     )
     args = parser.parse_args()
     if args.param_mode_alias is not None:
@@ -1234,7 +1257,7 @@ def run_model(
         robustness_channel_sync_options = _parse_robustness_channel_sync_options(robustness_channel_sync_options)
     if robustness_mode:
         LOGGER.info(
-            "Robustness run start dataset=%s model=%s (train missing=0.0, test rates=%s, types=%s, sync=%s, seed=%s)",
+            "Robustness run start dataset=%s model=%s (train missing=0.0, test rates=%s, types=%s, sync=%s, missing_seed=%s)",
             data_name,
             model_name,
             robustness_test_rates,
@@ -1691,7 +1714,7 @@ def run_model(
             **param_search_contract,
             "seed": int(SEED),
             "missing_rate": 0.0,
-            "robustness_test_rates": [float(rate) for rate in effective_robustness_test_rates],
+            "robustness_test_rates": [float(rate) for rate in robustness_test_rates],
             "robustness_test_mechanisms": list(robustness_test_mechanisms),
             "robustness_channel_sync_options": list(robustness_channel_sync_options),
             "robustness_evaluations": int(len(evaluations)),
@@ -1968,7 +1991,6 @@ def _evaluate_robustness(
             channel_sync_values = resolved_channel_sync_options
         for test_mechanism in mechanism_options:
             for test_channel_sync in channel_sync_values:
-                for missing_seed in (missing_seed,):
                     LOGGER.info(
                         "Robustness eval dataset=%s model=%s test_missing=%.1f type=%s channel_sync=%s missing_seed=%d",
                         data_name,
@@ -2144,6 +2166,7 @@ def main():
 
     if args.models is None:
         model_name_list = ["cnn"]
+        np.random.shuffle(model_name_list)
     else:
         model_name_list = args.models
         _validate_requested_scope(model_name_list, scope_variant=scope_override)
@@ -2160,7 +2183,7 @@ def main():
     # Robustness mode: train on missing=0, test on multiple rates
     if args.robustness_mode:
         LOGGER.info(
-            "Robustness mode enabled: train on missing=0.0, test rates=%s, test types=%s, channel_sync=%s, seed=%s",
+            "Robustness mode enabled: train on missing=0.0, test rates=%s, test types=%s, channel_sync=%s, missing_seed=%s",
             args.robustness_test_rates,
             args.robustness_test_mechanisms,
             args.robustness_channel_sync_options,
@@ -2179,12 +2202,13 @@ def main():
                         model_name,
                         param_policy=args.param_policy,
                         param_repeat=args.param_repeat,
+                        task=args.task,
                     )
 
                     if not os.path.exists(param_path):
                         raise FileNotFoundError(
                             f"Params file not found: {param_path}. "
-                            "Run scripts/param_search.py with "
+                            "Run release/scripts/param_search.py with "
                             f"--search-policy {args.param_policy} --search-repeat {args.param_repeat} first."
                         )
 
@@ -2324,12 +2348,13 @@ def main():
                             model_name,
                             param_policy=args.param_policy,
                             param_repeat=args.param_repeat,
+                            task=args.task,
                         )
 
                         if not os.path.exists(param_path):
                             raise FileNotFoundError(
                                 f"Params file not found: {param_path}. "
-                                "Run scripts/param_search.py with "
+                                "Run release/scripts/param_search.py with "
                                 f"--search-policy {args.param_policy} --search-repeat {args.param_repeat} first."
                             )
 

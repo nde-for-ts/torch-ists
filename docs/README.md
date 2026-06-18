@@ -10,13 +10,13 @@ Docs are grouped by type: **References** (authoritative lookup), **Guides** (tas
 
 ### References
 
-- [API Reference](api_reference.md) — exported runtime API and script behavior
+- [API Reference](api_reference.md) — exported runtime API
 - [Model Reference](model_reference.md) — per-model origin paper and reference repo
 - [Scripts Reference](scripts_reference.md) — source-checkout CLI scripts
 
 ### Guides
 
-- [Custom Data Guide](custom_data_guide.md) — bringing user-provided datasets and NPZ inputs into the pipeline
+- [Custom Data Guide](custom_data_guide.md) — bringing user-provided datasets into the Python API
 - [Custom Model Guide](custom_model_guide.md) — using user-owned models alongside the package
 
 ### Notices

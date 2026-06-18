@@ -7,7 +7,7 @@ Base structure adapted from the Neural CDE metamodel:
         Author: Patrick Kidger — License: Apache License 2.0
 
 Ported from torch_ists_refactoring/diff_module/NCDE/nrde_model.py (the refactoring SoT) for the
-release runtime. Only the theory-consistent depth variants (neuralrde-{1,2,3}, interpolation=True)
+packaged runtime. Only the theory-consistent depth variants (neuralrde-{1,2,3}, interpolation=True)
 are exercised by CDEHandler; the interpolation=False (mean-impute / `_m`) path is retained for SoT
 fidelity but is out of scope for promotion and is not registered.
 '''

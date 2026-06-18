@@ -78,12 +78,22 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def parse_cli_args():
+    parser = build_parser()
+    args = parser.parse_args()
+    if args.dataset_source == "npz":
+        if not args.dataset_npz:
+            parser.error("--dataset-npz is required when --dataset-source=npz")
+        if "," in str(args.dataset_name):
+            parser.error("--dataset-source=npz requires exactly one dataset")
+    return args
+
+
 def main() -> int:
     _ensure_repo_on_path()
     from script_chain_contracts import generate_run_id, write_manifest
 
-    parser = build_parser()
-    args = parser.parse_args()
+    args = parse_cli_args()
     run_id = args.run_id or generate_run_id("run")
 
     try:

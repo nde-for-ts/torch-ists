@@ -24,7 +24,12 @@ def normalize_dataset_source(dataset_source: str) -> str:
 
 
 def load_dataset_npz(path: str | Path) -> Tuple[np.ndarray, np.ndarray]:
-    loaded = np.load(Path(path))
+    path = Path(path)
+    if path.suffix.lower() != ".npz":
+        raise ValueError(f"--dataset-npz must point to a .npz file, got: {path}")
+    if not path.exists():
+        raise FileNotFoundError(f"dataset npz not found: {path}")
+    loaded = np.load(path)
     keys = set(loaded.files)
     x_key = "X" if "X" in keys else "x" if "x" in keys else None
     y_key = "y" if "y" in keys else "Y" if "Y" in keys else None

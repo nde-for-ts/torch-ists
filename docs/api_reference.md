@@ -1,8 +1,8 @@
 # torch-ists API Reference
 
 > **Type**: Reference
-> **Scope**: Exported runtime APIs and source-checkout scripts for the current package
-> **Note**: Built wheels install the `torch_ists` runtime package only; top-level `docs/`, `scripts/`, and `PACKAGE_STATUS.json` are source-checkout assets.
+> **Scope**: Exported runtime APIs for the current package
+> **Note**: Built wheels install the `torch_ists` runtime package only; top-level `docs/` and `PACKAGE_STATUS.json` are source-checkout assets.
 
 ---
 
@@ -30,7 +30,6 @@
 | Built-in benchmark archive | `benchmark_loader` | — | [Custom Data Guide](custom_data_guide.md) |
 | Direct sequence / attention baseline | build `seq`, `coeffs=None` | none | [Model Reference](model_reference.md) |
 | Continuous-time method (Neural CDE/ODE/SDE) | `preprocess(...)` then pass `coeffs` | from `preprocess` | [Model Reference](model_reference.md) |
-| Source-checkout benchmark pipeline | `scripts/` | — | [Scripts Reference](scripts_reference.md) |
 | Custom model outside `torch_ists` | wrapper pattern | model-defined | [Custom Model Guide](custom_model_guide.md) |
 
 ---
@@ -45,16 +44,9 @@ cd torch-ists
 PYTHONNOUSERSITE=1 python -m pip install -e .
 ```
 
-For the source-checkout command-line pipeline, including `scripts/param_search.py`:
-
-```bash
-cd torch-ists
-PYTHONNOUSERSITE=1 python -m pip install -e .[tune]
-```
-
 Environment:
 
-- `PYTHONNOUSERSITE=1` is required for source-checkout script commands
+- `PYTHONNOUSERSITE=1` is recommended for isolated runtime commands
 - `Python >= 3.10`
 - `.[tune]` is required for Ray Tune-backed parameter search
 - `.[data]` installs `pandas` and `sktime` for `torch_ists.benchmark_loader`
@@ -63,7 +55,6 @@ Environment:
 - `.[sde]` installs the packaged SDE backend requirements (`torchsde`, `torchcde`)
 - `.[all]` installs the optional data and model backend dependencies
 - `.[signatory]` installs `signatory` from source for signature-based CDE / Neural RDE paths
-- `TORCH_ISTS_RUNTIME_ROOT` is optional when running the source-checkout scripts from outside the package directory
 - `signatory` is intentionally not included in `.[all]` because the PyPI wheel is torch-version-pinned
 
 ```bash
@@ -272,7 +263,7 @@ The Data Loading API provides:
 
 **Exported**: `DataLoader`, `DatasetBundle`, `benchmark_loader`
 
-`DataLoader` is for user-provided arrays, data frames, and files. The `benchmark_loader` submodule is the built-in archive loader used by the source-checkout benchmark scripts. For the end-to-end user-provided dataset workflow, see [Custom Data Guide](custom_data_guide.md).
+`DataLoader` is for user-provided arrays, data frames, and files. The `benchmark_loader` submodule is the built-in archive loader for UCR/UEA-style datasets. For the end-to-end user-provided dataset workflow, see [Custom Data Guide](custom_data_guide.md).
 
 ```python
 from torch_ists import benchmark_loader
@@ -282,7 +273,7 @@ X, y = benchmark_loader.get_data("BasicMotions")
 
 Install `.[data]` for the optional `pandas` and `sktime` dependencies. The loader stores and searches UCR/UEA archives under `TORCH_ISTS_DATA_ROOT` when set, otherwise under `<package checkout>/data`. Fallback search checks `Univariate_ts/<dataset>/<dataset>_{TRAIN,TEST}.ts` and `Multivariate_ts/<dataset>/<dataset>_{TRAIN,TEST}.ts`.
 
-Benchmark loader behavior: source-checkout scripts pool the original UCR/UEA train and test partitions before creating project split files. Variable-length resampling uses the pooled train+test maximum length, labels default to pooled train+test encoding, and ragged padding uses `NaN`. Use `get_data(..., label_policy="train", padding="last")` only to reproduce older benchmark preprocessing.
+Benchmark loader behavior: the packaged benchmark loader pools the original UCR/UEA train and test partitions before project splits are applied. Variable-length resampling uses the pooled train+test maximum length, labels default to pooled train+test encoding, and ragged padding uses `NaN`. Use `get_data(..., label_policy="train", padding="last")` only to reproduce older benchmark preprocessing.
 
 #### Legacy-mode caveats
 
@@ -290,7 +281,7 @@ Benchmark loader behavior: source-checkout scripts pool the original UCR/UEA tra
 
 #### Train/test split behavior
 
-The loader concatenates the original UCR/UEA train and test partitions before the project split (`set_splits.py`, stratified) is applied. The source-checkout scripts do not preserve the original UCR/UEA partition; to evaluate on the original split, load via `sktime.datasets.load_UCR_UEA_dataset` outside the script chain.
+The loader concatenates the original UCR/UEA train and test partitions before a project split is applied. To evaluate on the original split, load via `sktime.datasets.load_UCR_UEA_dataset` outside the package loader.
 
 ---
 
@@ -397,7 +388,7 @@ print(bundle.X.shape)  # (2, 2, 3)
 
 ### 3.3 `DataLoader.from_file()`
 
-Load user-provided data from file (npz, csv, parquet). The Python API accepts CSV and parquet through `DataLoader.from_file`; the source-checkout scripts accept built-in benchmark data and local NPZ files only.
+Load user-provided data from file (npz, csv, parquet). The Python API accepts all three formats through `DataLoader.from_file`.
 
 #### Signature
 
@@ -675,10 +666,9 @@ print(path)  # split/BasicMotions/BasicMotions_42
 
 ### Overview
 
-The model API has two Python entry points and a source-checkout benchmark workflow:
+The model API has two Python entry points:
 1. `ists_classifier`
 2. `ists_model`
-3. `scripts/set_splits.py`, `scripts/param_search.py`, and `scripts/model_run.py`
 
 Canonical model construction lives in `torch_ists.model`.
 
@@ -734,7 +724,6 @@ Behavior notes:
 - For sequence baselines, `transformer`, and `sand`, the packaged runtime applies `torch.nan_to_num(..., nan=0.0)` before the backbone call and does not pass a padding mask into the attention backbone.
 - `transformer-mask` uses the same zero-filled values, but it also applies `src_key_padding_mask` derived from the packaged observation mask.
 - `mtan` and `miam` consume zero-filled values together with the original sequence stack and normalized timestamps; they do not use interpolation coefficients.
-- Under the source-checkout scripts' train-only z-score normalization, the zero-fill path becomes per-channel mean imputation in raw value space.
 - `imputation_strategy` selects how missing entries are filled for direct value-channel backbones: `"zero"` (default), `"last_observed"`, and `"channel_mean"`. Strict raw-missing rows (`neuralflow-*`, `flowpath-*`) keep raw `NaN` until their mask-aware internal fill; coefficient-driven rows consume the `coeffs` built by `preprocess(...)`.
 - Non-finite backbone outputs, hidden states, or logits raise `RuntimeError`; the package does not silently zero-fill them.
 
@@ -786,7 +775,7 @@ Broader task surface:
 Behavior notes:
 - If `use_intensity` is omitted (`None`), runtime resolves it from `get_data_config(model_name)` inside `ists_layer`.
 - `method` is accepted for continuous-time backbones, but effective `dt/step_size/rtol/atol/adjoint` behavior remains model-specific.
-- Sequence/attention backbone behavior (zero-fill, `transformer-mask` padding mask, `mtan`/`miam` timestamp consumption, source-checkout script z-score normalization) is the same as for `ists_classifier`; see §6.1 behavior notes above.
+- Sequence/attention backbone behavior (zero-fill, `transformer-mask` padding mask, `mtan`/`miam` timestamp consumption) is the same as for `ists_classifier`; see §6.1 behavior notes above.
 - Some continuous-time rows honor `method` only at model creation.
 - Some compatibility models accept solver-shaped inputs only for backward compatibility and may emit a runtime warning.
 - Unsupported solver knobs raise `ValueError` instead of silently changing model behavior.
@@ -796,7 +785,7 @@ Behavior notes:
 
 ### 6.3 Using Custom Models
 
-Use custom models from user-owned training code. The source-checkout CLI accepts only packaged model names. Reuse the packaged data loading, split utilities, and preprocessing; treat the packaged model-name list as fixed.
+Use custom models from user-owned training code. Reuse the packaged data loading, split utilities, and preprocessing; treat the packaged model-name list as fixed.
 
 See [Custom Model Guide](custom_model_guide.md) for the wrapper pattern.
 
@@ -819,10 +808,6 @@ Current defaults:
 Compatibility mapping:
 - legacy `num_hidden_layers` is interpreted as `head_depth`.
 - legacy `flow_num_layers` is interpreted as `flow_depth`.
-
-### 6.5 Command-Line Scripts
-
-The source-checkout scripts `scripts/set_splits.py`, `scripts/param_search.py`, and `scripts/model_run.py` are CLI entry points for the benchmark workflow. Helper modules under `scripts/` support those entry points and are documented in the scripts reference. They are not installed as wheel console commands.
 
 ## 7. Config API
 

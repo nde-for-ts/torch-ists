@@ -3,9 +3,9 @@
 > **Type**: Guide
 > **Scope**: Custom model wrapper guide for user-owned PyTorch models.
 
-**Related docs**: [Package overview](../README.md) · [Docs index](README.md) · [API Reference](api_reference.md) · [Model Reference](model_reference.md) · [Scripts Reference](scripts_reference.md) · [Custom Data Guide](custom_data_guide.md) · [Third-Party Notices](third_party_notices.md) · [CIKM 2025 Tutorial site](https://nde-for-ts.github.io/)
+**Related docs**: [Package overview](../README.md) · [Docs index](README.md) · [API Reference](api_reference.md) · [Model Reference](model_reference.md) · [Custom Data Guide](custom_data_guide.md) · [Third-Party Notices](third_party_notices.md) · [CIKM 2025 Tutorial site](https://nde-for-ts.github.io/)
 
-This reference shows how to use `torch-ists` data utilities with your own PyTorch model. Custom models run in your project code; the source-checkout CLI runs packaged models only.
+This reference shows how to use `torch-ists` data utilities with your own PyTorch model. Custom models run in your project code.
 
 ---
 
@@ -21,7 +21,7 @@ This reference shows how to use `torch-ists` data utilities with your own PyTorc
 
 ## 1. What This Reference Covers
 
-You can compose a user-owned `torch.nn.Module` (outside `torch_ists`) with the package's data loading, split utilities, preprocessing, and seed helpers. Training and any command-line entry points stay in your own code; the source-checkout CLI and packaged constructors accept only packaged model names. The rest of this doc shows the pattern.
+You can compose a user-owned `torch.nn.Module` (outside `torch_ists`) with the package's data loading, split utilities, preprocessing, and seed helpers. Training and any command-line entry points stay in your own code; packaged constructors accept only packaged model names. The rest of this doc shows the pattern.
 
 ## 2. Sequence Wrapper Pattern
 
@@ -139,19 +139,7 @@ from torch_ists import load_splits
 train_idx, valid_idx, test_idx = load_splits(Path("split/BasicMotions/BasicMotions_0"))
 ```
 
-For user-provided NPZ datasets, generate the split artifact with the source-checkout script, then train the custom model from a user-owned script:
-
-```bash
-PYTHONPATH=. python scripts/set_splits.py \
-  --dataset-name ToyDataset \
-  --dataset-source npz \
-  --dataset-npz data/ToyDataset.npz \
-  --seed 42
-```
-
-Repeat with `--seed 0..4` to generate the evaluation splits as well; the hyperparameter-search seed (`42`) is disjoint from the evaluation seeds.
-
-Use the source-checkout CLI only for packaged models; run custom models from your own training script.
+For user-provided datasets, store split artifacts with `save_splits(...)` and train the custom model from a user-owned script.
 
 Keep custom model code under a project namespace such as `my_project.models` or `experiments.custom_models`. Avoid placing project-specific modules inside `torch_ists`.
 

@@ -3,7 +3,7 @@
 > **Type**: Notices
 > **Scope**: Upstream sources and licenses for third-party code included in the runtime.
 
-**Related docs**: [Package overview](../README.md) · [Docs index](README.md) · [API Reference](api_reference.md) · [Model Reference](model_reference.md) · [Scripts Reference](scripts_reference.md) · [Custom Data Guide](custom_data_guide.md) · [Custom Model Guide](custom_model_guide.md) · [CIKM 2025 Tutorial site](https://nde-for-ts.github.io/)
+**Related docs**: [Package overview](../README.md) · [Docs index](README.md) · [API Reference](api_reference.md) · [Model Reference](model_reference.md) · [Custom Data Guide](custom_data_guide.md) · [Custom Model Guide](custom_model_guide.md) · [CIKM 2025 Tutorial site](https://nde-for-ts.github.io/)
 
 `torch-ists` is MIT-licensed (Copyright (c) 2024-2026 YongKyung Oh; see [LICENSE](../LICENSE)). It also includes third-party code copied or adapted from the upstreams below; each retains its own license. Per-model papers and repositories are in the [Model Reference](model_reference.md). Paths are relative to `torch_ists/module/`.
 
