@@ -117,11 +117,12 @@ This is a bounded smoke run; the full defaults (`--num-samples 20 --max-num-epoc
 | `--dataset-source` | `{default,npz}` | `default` | Dataset source backend. `default` loads benchmark archive data by dataset name through `torch_ists.benchmark_loader.get_data`; `npz` loads one local file through `--dataset-npz`. |
 | `--dataset-npz` | `str` | `None` | Required when `--dataset-source npz`; `--datasets` must contain exactly one dataset name. |
 | `--models` | `str` | `cnn` | Comma-separated model list. Pass a comma-separated list to run additional models. |
-| `--num-samples` | `int` | `20` | Ray Tune `num_samples` — hyperparameter trial budget. |
+| `--num-samples` | `int` | `20` | Ray Tune `num_samples` — hyperparameter trial budget. Saved parameter artifacts record this value and mark `--num-samples 1` artifacts as smoke/local artifacts. |
 | `--max-num-epochs` | `int` | `10` | Per-trial training budget. |
 | `--max-runs` | `int` | `None` | Stop after this many runs across the dataset × model grid. |
 | `--max-runs-mode` | `{completed, new}` | `completed` | What counts toward `--max-runs`: `completed` (executed + reused) or `new` (executed only). |
 | `--existing-policy` | `{reuse, fail}` | `reuse` | Behavior when a param artifact already exists. **Note**: the artifact filename (`<dataset>_<model>[_aggregated]`) does not encode the search seed; the search seed is held at `42` by policy. If you override `--seed`, delete or back up the existing `params/` directory and pass `--existing-policy fail` to surface any silently-reused artifact. |
+| `--skip-policy` | `{allow, fail}` | `allow` | Whether skipped dataset/model cells keep exit status zero or fail the run. Use `fail` for CI or benchmark completeness gates. |
 | `--search-policy` | `{default, constrained}` | `default` | Search policy. `default` is the package search. `constrained` is an experimental matched-capacity (`~200k`) search. |
 | `--search-repeat` | `{single, aggregated}` | `single` | Repeat policy. `single` uses search seed `42`; `aggregated` averages the fixed seed set `0-4` and uses about 5x compute. |
 | `--ray-cpu` | `float` | `16.0` | CPU per Ray trial. |
@@ -193,6 +194,7 @@ PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/model_run.py \
 | `--max-runs` | `int` | `None` | Stop after this many runs across the run grid. |
 | `--max-runs-mode` | `{completed, new}` | `completed` | What counts toward `--max-runs`. |
 | `--existing-policy` | `{reuse, fail}` | `reuse` | Behavior when `--check` finds an output artifact: reuse validates the stored run contract; fail treats it as a policy violation. |
+| `--skip-policy` | `{allow, fail}` | `allow` | Whether skipped dataset/model cells keep exit status zero or fail the run. Use `fail` for CI or benchmark completeness gates. |
 | `--check` / `--no-check` | flag | `True` | Validate and reuse an existing output file when present; `--existing-policy` controls reuse vs fail behavior. |
 | `--param-policy` | `{default, constrained}` | `default` | Parameter artifact policy to consume. Must match `param_search.py --search-policy`; constrained loads `_matched200k` params. |
 | `--param-repeat` | `{single, aggregated}` | `single` | Parameter artifact repeat policy to consume. Must match `param_search.py --search-repeat`. |

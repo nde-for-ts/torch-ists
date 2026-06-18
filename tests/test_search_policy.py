@@ -16,12 +16,15 @@ from _common import (
     CONSTRAINED_MATCHED_CAPACITY_TARGET,
     CONSTRAINED_MATCHED_CAPACITY_TARGET_NAME,
     DEFAULT_MODEL_NATIVE_HIDDEN_DIM_VALUES,
+    build_param_artifact_identity,
     build_model_kwargs_from_config,
+    compute_param_config_hash,
     describe_search_profile,
     infer_param_search_profile,
     normalize_search_profile,
     resolve_effective_param_config,
     resolve_model_search_space,
+    validate_param_artifact_identity,
     validate_param_artifact_metadata,
 )
 from param_search import (
@@ -29,6 +32,7 @@ from param_search import (
     _apply_constrained_capacity_to_search_space,
     _resolve_constrained_capacity_config,
     _derive_trial_seed,
+    _validate_existing_param_artifact_for_reuse,
     tune_model,
 )
 from model_run import (
@@ -42,6 +46,11 @@ from torch_ists.config import get_active_model_list
 
 def _complete_param_config(**overrides):
     cfg = {
+        "artifact_identity": build_param_artifact_identity(
+            data_name="BasicMotions",
+            model_name="cnn",
+            task="classification",
+        ),
         "search_profile": "model-native-v1",
         "search_contract": "model-specific-default-v1",
         "search_family": "default",
@@ -50,11 +59,18 @@ def _complete_param_config(**overrides):
         "search_policy": "default",
         "search_repeat": "single",
         "search_algorithm_policy": "model-native-effective-params-v1",
+        "search_algorithm": "BasicVariantGenerator",
+        "search_algorithm_seed": 42,
+        "search_num_samples": 20,
+        "search_max_num_epochs": 10,
+        "search_execution_backend": "ray-tune",
+        "search_budget_class": "production",
         "architecture_axes": {"candidate_axes": ["lr", "hidden_dim", "num_layers"]},
         "effective_params": {"hidden_dim": 64, "num_layers": 2},
         "lr": 1e-3,
     }
     cfg.update(overrides)
+    cfg["param_hash"] = compute_param_config_hash(cfg)
     return cfg
 
 
@@ -185,6 +201,93 @@ def test_param_artifact_metadata_requires_contract_fields_and_lr():
     with pytest.raises(ValueError, match="'lr'"):
         validate_param_artifact_metadata(_complete_param_config(lr=None))
     assert validate_param_artifact_metadata(_complete_param_config()) == "model-native-v1"
+
+
+def test_param_artifact_identity_and_hash_fail_fast():
+    cfg = _complete_param_config()
+    validate_param_artifact_identity(
+        cfg,
+        data_name="BasicMotions",
+        model_name="cnn",
+        task="classification",
+    )
+
+    wrong_identity = _complete_param_config(
+        artifact_identity=build_param_artifact_identity(
+            data_name="GunPoint",
+            model_name="cnn",
+            task="classification",
+        )
+    )
+    with pytest.raises(ValueError, match="identity mismatch"):
+        validate_param_artifact_identity(
+            wrong_identity,
+            data_name="BasicMotions",
+            model_name="cnn",
+            task="classification",
+        )
+
+    stale = _complete_param_config()
+    stale["hidden_dim"] = 128
+    with pytest.raises(ValueError, match="param_hash mismatch"):
+        validate_param_artifact_metadata(stale)
+
+
+def test_existing_param_reuse_contract_validator_surfaces_stale_artifacts():
+    cfg = _complete_param_config()
+    assert (
+        _validate_existing_param_artifact_for_reuse(
+            cfg,
+            existing_param_path="params/BasicMotions/BasicMotions_cnn",
+            data_name="BasicMotions",
+            model_name="cnn",
+            task="classification",
+            allow_legacy_search_profile=False,
+        )
+        == "model-native-v1"
+    )
+
+    stale = _complete_param_config()
+    stale["hidden_dim"] = 128
+    with pytest.raises(ValueError, match="param_hash mismatch"):
+        _validate_existing_param_artifact_for_reuse(
+            stale,
+            existing_param_path="params/BasicMotions/BasicMotions_cnn",
+            data_name="BasicMotions",
+            model_name="cnn",
+            task="classification",
+            allow_legacy_search_profile=False,
+        )
+
+    wrong_identity = _complete_param_config(
+        artifact_identity=build_param_artifact_identity(
+            data_name="GunPoint",
+            model_name="cnn",
+            task="classification",
+        )
+    )
+    with pytest.raises(ValueError, match="identity mismatch"):
+        _validate_existing_param_artifact_for_reuse(
+            wrong_identity,
+            existing_param_path="params/BasicMotions/BasicMotions_cnn",
+            data_name="BasicMotions",
+            model_name="cnn",
+            task="classification",
+            allow_legacy_search_profile=False,
+        )
+
+
+def test_param_search_reuse_contract_violations_are_manifest_policy_failures():
+    source = (SCRIPTS_ROOT / "param_search.py").read_text()
+    assert "def _validate_existing_param_artifact_for_reuse" in source
+    assert "param artifact reuse contract violation" in source
+    assert 'policy_violations.append(f"{data_name}/{model_name}: {reason}")' in source
+
+
+def test_param_search_uses_seeded_ray_sampler():
+    source = (SCRIPTS_ROOT / "param_search.py").read_text()
+    assert "BasicVariantGenerator(random_state=SEED)" in source
+    assert "search_alg=search_alg" in source
 
 
 def test_ray_trial_init_seed_is_trial_specific_but_stable():

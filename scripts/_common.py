@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
+import json
 import math
 import os
 import sys
@@ -39,6 +41,9 @@ __all__ = [
     "normalize_search_profile",
     "infer_param_search_profile",
     "validate_param_artifact_metadata",
+    "compute_param_config_hash",
+    "build_param_artifact_identity",
+    "validate_param_artifact_identity",
     "resolve_model_search_space",
     "resolve_effective_param_config",
     "build_model_kwargs_from_config",
@@ -279,6 +284,64 @@ def _metadata_value_missing(value) -> bool:
     return value is None or (isinstance(value, str) and value == "")
 
 
+def compute_param_config_hash(model_config: dict) -> str:
+    """Hash a saved parameter config, excluding the stored hash field itself."""
+    if not isinstance(model_config, dict):
+        raise ValueError("param config must be a metadata dictionary.")
+    payload = {key: value for key, value in model_config.items() if key != "param_hash"}
+    encoded = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def build_param_artifact_identity(
+    *,
+    data_name: str,
+    model_name: str,
+    task: str,
+) -> dict:
+    return {
+        "data_name": str(data_name),
+        "model_name": _canonical_model_name(model_name),
+        "task": str(task).strip().lower(),
+    }
+
+
+def validate_param_artifact_identity(
+    model_config: dict,
+    *,
+    data_name: str,
+    model_name: str,
+    task: str,
+    context: str = "param artifact",
+) -> None:
+    identity = model_config.get("artifact_identity") if isinstance(model_config, dict) else None
+    if not isinstance(identity, dict):
+        raise ValueError(f"{context} is missing required artifact_identity metadata.")
+
+    expected = build_param_artifact_identity(data_name=data_name, model_name=model_name, task=task)
+    actual = {
+        "data_name": str(identity.get("data_name", "")),
+        "model_name": _canonical_model_name(str(identity.get("model_name", ""))),
+        "task": str(identity.get("task", "")).strip().lower(),
+    }
+    mismatches = [
+        key
+        for key, expected_value in expected.items()
+        if str(actual.get(key)) != str(expected_value)
+    ]
+    if mismatches:
+        details = ", ".join(
+            f"{key}: found={actual.get(key)!r}, expected={expected[key]!r}"
+            for key in mismatches
+        )
+        raise ValueError(f"{context} artifact identity mismatch ({details}).")
+
+
 def validate_param_artifact_metadata(
     model_config: dict | None,
     *,
@@ -304,6 +367,8 @@ def validate_param_artifact_metadata(
         profile = normalize_search_profile(raw_profile)
 
     required_fields = [
+        "artifact_identity",
+        "param_hash",
         "search_contract",
         "search_family",
         "public_search_name",
@@ -311,6 +376,12 @@ def validate_param_artifact_metadata(
         "search_policy",
         "search_repeat",
         "search_algorithm_policy",
+        "search_algorithm",
+        "search_algorithm_seed",
+        "search_budget_class",
+        "search_execution_backend",
+        "search_max_num_epochs",
+        "search_num_samples",
         "architecture_axes",
         "effective_params",
     ]
@@ -332,6 +403,13 @@ def validate_param_artifact_metadata(
             "Refusing silent learning-rate fallback for saved params; regenerate "
             "the artifact with scripts/param_search.py."
         )
+    if not (allow_legacy_search_profile and profile == LEGACY_ICLR2024_SEARCH_PROFILE):
+        expected_hash = compute_param_config_hash(model_config)
+        if str(model_config.get("param_hash")) != expected_hash:
+            raise ValueError(
+                f"{context} param_hash mismatch. "
+                "The saved parameter artifact may be stale or corrupted; regenerate it with scripts/param_search.py."
+            )
     return profile
 
 

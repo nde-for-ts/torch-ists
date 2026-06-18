@@ -46,6 +46,7 @@ from _common import (
     resolve_learning_rate_policy,
     SINGLE_SEARCH_REPEAT,
     STANDARD_SEARCH_POLICY,
+    validate_param_artifact_identity,
     validate_param_artifact_metadata,
 )
 from dataset_source_contracts import load_dataset, normalize_dataset_source
@@ -211,6 +212,9 @@ def _validate_param_search_profile(
     expected_search_profile: str,
     expected_param_policy: str,
     expected_param_repeat: str,
+    expected_data_name: str,
+    expected_model_name: str,
+    expected_task: str,
     param_path: str,
     allow_legacy_search_profile: bool = False,
 ) -> str:
@@ -235,6 +239,14 @@ def _validate_param_search_profile(
             "Param artifact search axes mismatch: "
             f"{param_path} has policy={actual_policy!r}, repeat={actual_repeat!r}; "
             f"expected policy={expected_param_policy!r}, repeat={expected_param_repeat!r}."
+        )
+    if not (allow_legacy_search_profile and actual == "legacy-iclr2024-v0"):
+        validate_param_artifact_identity(
+            model_config,
+            data_name=expected_data_name,
+            model_name=expected_model_name,
+            task=expected_task,
+            context=f"Param artifact {param_path}",
         )
     return actual
 
@@ -273,6 +285,13 @@ def _param_search_contract_metadata(model_config: dict, search_profile: str) -> 
         "params_at_max_carrier",
         "candidate_count",
         "matched_capacity_config",
+        "param_hash",
+        "search_algorithm",
+        "search_algorithm_seed",
+        "search_num_samples",
+        "search_max_num_epochs",
+        "search_execution_backend",
+        "search_budget_class",
     ):
         if key in model_config:
             metadata[key] = model_config.get(key)
@@ -459,6 +478,13 @@ def parse_cli_args():
         choices=["reuse", "fail"],
         default="reuse",
         help="Behavior when --check finds an output artifact: reuse verifies the stored run contract; fail treats it as a policy violation.",
+    )
+    parser.add_argument(
+        "--skip-policy",
+        type=str,
+        choices=["allow", "fail"],
+        default="allow",
+        help="Whether skipped dataset/model cells keep exit status zero or fail the run.",
     )
     parser.add_argument(
         "--check",
@@ -2169,6 +2195,9 @@ def main():
                         expected_search_profile=args.search_profile,
                         expected_param_policy=args.param_policy,
                         expected_param_repeat=args.param_repeat,
+                        expected_data_name=data_name,
+                        expected_model_name=model_name,
+                        expected_task=args.task,
                         param_path=str(param_path),
                         allow_legacy_search_profile=args.allow_legacy_search_profile,
                     )
@@ -2311,6 +2340,9 @@ def main():
                             expected_search_profile=args.search_profile,
                             expected_param_policy=args.param_policy,
                             expected_param_repeat=args.param_repeat,
+                            expected_data_name=data_name,
+                            expected_model_name=model_name,
+                            expected_task=args.task,
                             param_path=str(param_path),
                             allow_legacy_search_profile=args.allow_legacy_search_profile,
                         )
@@ -2419,6 +2451,9 @@ def main():
             policy_violations[0],
         )
         exit_code = 2
+    elif args.skip_policy == "fail" and skipped:
+        LOGGER.error("Skipped runs=%d and --skip-policy=fail.", len(skipped))
+        exit_code = 2
     elif max_runs is not None and completed_runs < max_runs:
         LOGGER.warning(
             "Completed runs=%d but requested max-runs=%d (mode=%s). "
@@ -2458,12 +2493,14 @@ def main():
             "reused_records": reused_records,
             "skipped": skipped,
             "existing_policy": args.existing_policy,
+            "skip_policy": args.skip_policy,
             "max_runs_mode": args.max_runs_mode,
             "summary": {
                 "completed_run_calls": run_count,
                 "executed_runs": run_count,
                 "reused_runs": len(reused_records),
                 "completed_runs": completed_runs,
+                "skipped_runs": len(skipped),
                 "requested_max_runs": max_runs,
                 "stopped_early": bool(stop_early),
                 "policy_violation_count": len(policy_violations),

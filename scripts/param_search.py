@@ -39,7 +39,9 @@ from _common import (
     CONSTRAINED_MATCHED_CAPACITY_TARGET_NAME,
     DEFAULT_SEARCH_PROFILE,
     apply_model_scope_variant,
+    build_param_artifact_identity,
     build_model_kwargs_from_config,
+    compute_param_config_hash,
     configure_runtime_paths,
     default_method_for_model,
     describe_search_profile,
@@ -51,6 +53,7 @@ from _common import (
     resolve_model_search_space,
     SINGLE_SEARCH_REPEAT,
     STANDARD_SEARCH_POLICY,
+    validate_param_artifact_identity,
     validate_param_artifact_metadata,
 )
 from dataset_source_contracts import load_dataset, normalize_dataset_source
@@ -160,6 +163,32 @@ def _infer_cli_search_repeat(model_config: dict, artifact_name: str | None = Non
     return SINGLE_SEARCH_REPEAT
 
 
+def _validate_existing_param_artifact_for_reuse(
+    model_config: dict,
+    *,
+    existing_param_path: str,
+    data_name: str,
+    model_name: str,
+    task: str,
+    allow_legacy_search_profile: bool,
+) -> str:
+    existing_profile = validate_param_artifact_metadata(
+        model_config,
+        context=f"Param artifact {existing_param_path}",
+        allow_legacy_search_profile=allow_legacy_search_profile,
+        require_lr=True,
+    )
+    if not (allow_legacy_search_profile and existing_profile == "legacy-iclr2024-v0"):
+        validate_param_artifact_identity(
+            model_config,
+            data_name=data_name,
+            model_name=model_name,
+            task=task,
+            context=f"Param artifact {existing_param_path}",
+        )
+    return existing_profile
+
+
 def _normalize_search_profile_arg(raw: str) -> str:
     try:
         return normalize_search_profile(raw)
@@ -237,6 +266,13 @@ def parse_cli_args():
         choices=["reuse", "fail"],
         default="reuse",
         help="Behavior when a param artifact already exists. The artifact filename does NOT encode the search seed; by policy the default search seed is 42. If you override --seed, delete or back up params/ and pass --existing-policy fail to surface any silently reused artifact.",
+    )
+    parser.add_argument(
+        "--skip-policy",
+        type=str,
+        choices=["allow", "fail"],
+        default="allow",
+        help="Whether skipped dataset/model cells keep exit status zero or fail the run.",
     )
     parser.add_argument("--ray-cpu", type=float, default=16.0, help="CPU per Ray trial.")
     parser.add_argument("--ray-gpu", type=float, default=0.5, help="GPU per Ray trial.")
@@ -426,15 +462,17 @@ from torch_ists.config import (
 ray = None
 tune = None
 ASHAScheduler = None
+BasicVariantGenerator = None
 
 
 def _load_ray_tune():
-    global ray, tune, ASHAScheduler
-    if ray is not None and tune is not None and ASHAScheduler is not None:
-        return ray, tune, ASHAScheduler
+    global ray, tune, ASHAScheduler, BasicVariantGenerator
+    if ray is not None and tune is not None and ASHAScheduler is not None and BasicVariantGenerator is not None:
+        return ray, tune, ASHAScheduler, BasicVariantGenerator
     try:
         import ray as _ray
         from ray import tune as _tune
+        from ray.tune.search.basic_variant import BasicVariantGenerator as _BasicVariantGenerator
         from ray.tune.schedulers import ASHAScheduler as _ASHAScheduler
     except ModuleNotFoundError as exc:
         missing_name = getattr(exc, "name", "") or "ray"
@@ -447,7 +485,8 @@ def _load_ray_tune():
     ray = _ray
     tune = _tune
     ASHAScheduler = _ASHAScheduler
-    return ray, tune, ASHAScheduler
+    BasicVariantGenerator = _BasicVariantGenerator
+    return ray, tune, ASHAScheduler, BasicVariantGenerator
 
 
 logging.basicConfig(
@@ -568,12 +607,39 @@ def _normalize_param_config_for_save(
     model_config: dict,
     *,
     search_profile: str | None = None,
+    artifact_identity: dict | None = None,
+    search_provenance: dict | None = None,
 ) -> dict:
-    return resolve_effective_param_config(
+    saved = resolve_effective_param_config(
         model_name,
         model_config,
         search_profile=search_profile,
     )
+    if artifact_identity is not None:
+        saved["artifact_identity"] = dict(artifact_identity)
+    if search_provenance is not None:
+        saved.update(search_provenance)
+    if artifact_identity is not None or search_provenance is not None:
+        saved["param_hash"] = compute_param_config_hash(saved)
+    return saved
+
+
+def _build_search_provenance(
+    *,
+    num_samples: int,
+    max_num_epochs: int,
+    execution_backend: str,
+    search_algorithm: str,
+    search_algorithm_seed: int,
+) -> dict:
+    return {
+        "search_num_samples": int(num_samples),
+        "search_max_num_epochs": int(max_num_epochs),
+        "search_execution_backend": str(execution_backend),
+        "search_budget_class": "smoke" if int(num_samples) <= 1 else "production",
+        "search_algorithm": str(search_algorithm),
+        "search_algorithm_seed": int(search_algorithm_seed),
+    }
 
 
 def _count_model_params_for_config(
@@ -1342,6 +1408,11 @@ def optimize(
             constrained_capacity_config["metadata"]["matched_capacity_target"],
         )
     metadata_seed = _fixed_search_seed_set(search_repeat, SEED)[0]
+    artifact_identity = build_param_artifact_identity(
+        data_name=data_name,
+        model_name=model_name,
+        task=task,
+    )
     if num_samples <= 1:
         LOGGER.info(
             "Using local single-sample optimization path (Ray bypass) for dataset=%s model=%s",
@@ -1423,6 +1494,14 @@ def optimize(
             model_name,
             model_config,
             search_profile=search_profile,
+            artifact_identity=artifact_identity,
+            search_provenance=_build_search_provenance(
+                num_samples=num_samples,
+                max_num_epochs=max_num_epochs,
+                execution_backend="local-single",
+                search_algorithm="local-single",
+                search_algorithm_seed=SEED,
+            ),
         )
         os.makedirs(os.path.join(param_root, data_name), exist_ok=True)
         out_name = _build_param_artifact_name(
@@ -1453,7 +1532,7 @@ def optimize(
             "best_trial": None,
             "best_loss": float(best_loss),
             "param_config": saved_model_config,
-            "param_hash": stable_hash(saved_model_config),
+            "param_hash": saved_model_config["param_hash"],
             "param_path": str(param_path),
             "split_path": str(split_path),
             "batch_policy": metadata["batch_policy"],
@@ -1466,6 +1545,12 @@ def optimize(
             "search_policy": saved_model_config["search_policy"],
             "search_repeat": saved_model_config["search_repeat"],
             "search_algorithm_policy": saved_model_config["search_algorithm_policy"],
+            "search_algorithm": saved_model_config["search_algorithm"],
+            "search_algorithm_seed": saved_model_config["search_algorithm_seed"],
+            "search_num_samples": saved_model_config["search_num_samples"],
+            "search_max_num_epochs": saved_model_config["search_max_num_epochs"],
+            "search_execution_backend": saved_model_config["search_execution_backend"],
+            "search_budget_class": saved_model_config["search_budget_class"],
             "legacy_grid_version": saved_model_config["legacy_grid_version"],
             "architecture_axes": saved_model_config["architecture_axes"],
             "effective_params": saved_model_config["effective_params"],
@@ -1540,6 +1625,7 @@ def optimize(
         max_t=max_num_epochs,
         grace_period=1,
         reduction_factor=2)
+    search_alg = BasicVariantGenerator(random_state=SEED)
 
     def optimize_model(model_config):
         trial_seed = _derive_trial_seed(SEED, _current_tune_trial_token(model_config))
@@ -1559,6 +1645,7 @@ def optimize(
         mode="min",
         num_samples=num_samples,
         scheduler=scheduler,
+        search_alg=search_alg,
         stop={"training_iteration": max_num_epochs, "loss": np.nan},
         raise_on_failed_trial=False,
     )
@@ -1598,6 +1685,14 @@ def optimize(
         model_name,
         best_trial.config,
         search_profile=search_profile,
+        artifact_identity=artifact_identity,
+        search_provenance=_build_search_provenance(
+            num_samples=num_samples,
+            max_num_epochs=max_num_epochs,
+            execution_backend="ray-tune",
+            search_algorithm="BasicVariantGenerator",
+            search_algorithm_seed=SEED,
+        ),
     )
     with open(param_path, 'wb') as f:
         pickle.dump(saved_param_config, f)
@@ -1622,7 +1717,7 @@ def optimize(
         "best_trial": best_trial,
         "best_loss": float(best_trial.last_result["loss"]),
         "param_config": saved_param_config,
-        "param_hash": stable_hash(saved_param_config),
+        "param_hash": saved_param_config["param_hash"],
         "param_path": str(param_path),
         "split_path": str(split_path),
         "batch_policy": metadata["batch_policy"],
@@ -1635,6 +1730,12 @@ def optimize(
         "search_policy": saved_param_config["search_policy"],
         "search_repeat": saved_param_config["search_repeat"],
         "search_algorithm_policy": saved_param_config["search_algorithm_policy"],
+        "search_algorithm": saved_param_config["search_algorithm"],
+        "search_algorithm_seed": saved_param_config["search_algorithm_seed"],
+        "search_num_samples": saved_param_config["search_num_samples"],
+        "search_max_num_epochs": saved_param_config["search_max_num_epochs"],
+        "search_execution_backend": saved_param_config["search_execution_backend"],
+        "search_budget_class": saved_param_config["search_budget_class"],
         "legacy_grid_version": saved_param_config["legacy_grid_version"],
         "architecture_axes": saved_param_config["architecture_axes"],
         "effective_params": saved_param_config["effective_params"],
@@ -1650,7 +1751,13 @@ def optimize(
 def main():
     global SEED
     args = parse_cli_args()
-    if int(args.num_samples) > 1:
+    if int(args.num_samples) <= 1:
+        LOGGER.warning(
+            "param_search is using --num-samples=%d. This creates a smoke/local artifact, "
+            "not a production hyperparameter-search artifact.",
+            int(args.num_samples),
+        )
+    else:
         LOGGER.warning(
             "param_search is using --num-samples=%d. This is a production search budget; "
             "use --num-samples 1 --max-num-epochs 1 for a smoke run.",
@@ -1724,19 +1831,28 @@ def main():
                     try:
                         with open(existing_param_path, "rb") as f:
                             existing_cfg = pickle.load(f)
-                        param_hash = stable_hash(existing_cfg)
+                        param_hash = existing_cfg.get("param_hash")
                     except Exception as exc:
                         reason = f"failed to load existing params for reuse contract: {exc}"
                         LOGGER.error("[FAIL] %s/%s: %s", data_name, model_name, reason)
                         skipped.append({"dataset": data_name, "model": model_name, "task": args.task, "reason": reason})
                         policy_violations.append(f"{data_name}/{model_name}: {reason}")
                         continue
-                    existing_profile = validate_param_artifact_metadata(
-                        existing_cfg,
-                        context=f"Param artifact {existing_param_path}",
-                        allow_legacy_search_profile=args.allow_legacy_search_profile,
-                        require_lr=True,
-                    )
+                    try:
+                        existing_profile = _validate_existing_param_artifact_for_reuse(
+                            existing_cfg,
+                            existing_param_path=existing_param_path,
+                            data_name=data_name,
+                            model_name=model_name,
+                            task=args.task,
+                            allow_legacy_search_profile=args.allow_legacy_search_profile,
+                        )
+                    except ValueError as exc:
+                        reason = f"param artifact reuse contract violation: {exc}"
+                        LOGGER.error("[FAIL] %s/%s: %s", data_name, model_name, reason)
+                        skipped.append({"dataset": data_name, "model": model_name, "task": args.task, "reason": reason})
+                        policy_violations.append(f"{data_name}/{model_name}: {reason}")
+                        continue
                     existing_contract = describe_search_profile(existing_profile)
                     existing_search_policy = _infer_cli_search_policy(existing_cfg)
                     existing_search_repeat = _infer_cli_search_repeat(existing_cfg, out_name)
@@ -1779,6 +1895,12 @@ def main():
                             "search_policy": existing_search_policy,
                             "search_repeat": existing_search_repeat,
                             "search_algorithm_policy": existing_cfg.get("search_algorithm_policy", existing_cfg.get("search_policy")),
+                            "search_algorithm": existing_cfg.get("search_algorithm"),
+                            "search_algorithm_seed": existing_cfg.get("search_algorithm_seed"),
+                            "search_num_samples": existing_cfg.get("search_num_samples"),
+                            "search_max_num_epochs": existing_cfg.get("search_max_num_epochs"),
+                            "search_execution_backend": existing_cfg.get("search_execution_backend"),
+                            "search_budget_class": existing_cfg.get("search_budget_class"),
                             "legacy_grid_version": existing_cfg.get("legacy_grid_version", existing_profile),
                             "architecture_axes": existing_cfg.get("architecture_axes"),
                             "effective_params": existing_cfg.get("effective_params"),
@@ -1857,6 +1979,12 @@ def main():
                         "search_policy": search_result["search_policy"],
                         "search_repeat": search_result["search_repeat"],
                         "search_algorithm_policy": search_result["search_algorithm_policy"],
+                        "search_algorithm": search_result["search_algorithm"],
+                        "search_algorithm_seed": search_result["search_algorithm_seed"],
+                        "search_num_samples": search_result["search_num_samples"],
+                        "search_max_num_epochs": search_result["search_max_num_epochs"],
+                        "search_execution_backend": search_result["search_execution_backend"],
+                        "search_budget_class": search_result["search_budget_class"],
                         "legacy_grid_version": search_result["legacy_grid_version"],
                         "architecture_axes": search_result["architecture_axes"],
                         "effective_params": search_result["effective_params"],
@@ -1886,6 +2014,9 @@ def main():
             len(policy_violations),
             policy_violations[0],
         )
+        exit_code = 2
+    elif args.skip_policy == "fail" and skipped:
+        LOGGER.error("Skipped runs=%d and --skip-policy=fail.", len(skipped))
         exit_code = 2
     elif max_runs is not None and completed_runs < max_runs:
         LOGGER.error(
@@ -1931,12 +2062,14 @@ def main():
             "reused_records": reused_records,
             "skipped": skipped,
             "existing_policy": args.existing_policy,
+            "skip_policy": args.skip_policy,
             "max_runs_mode": args.max_runs_mode,
             "summary": {
                 "completed_optimize_calls": run_count,
                 "executed_runs": run_count,
                 "reused_runs": len(reused_records),
                 "completed_runs": completed_runs,
+                "skipped_runs": len(skipped),
                 "requested_max_runs": max_runs,
                 "stopped_early": bool(stop_early),
                 "policy_violation_count": len(policy_violations),
