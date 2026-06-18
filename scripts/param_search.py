@@ -32,6 +32,9 @@ from torch import nn, Tensor
 from torch.utils.data import Dataset, DataLoader
 
 from _common import (
+    CONSTRAINED_MATCHED_CAPACITY_LABEL,
+    CONSTRAINED_MATCHED_CAPACITY_TARGET,
+    CONSTRAINED_MATCHED_CAPACITY_TARGET_NAME,
     DEFAULT_SEARCH_PROFILE,
     apply_model_scope_variant,
     build_model_kwargs_from_config,
@@ -131,7 +134,7 @@ def _build_param_artifact_name(
 ) -> str:
     parts = [data_name, model_name]
     if search_policy == CONSTRAINED_SEARCH_POLICY:
-        parts.append(str(param_target) if param_target else CONSTRAINED_SEARCH_POLICY)
+        parts.append(str(param_target) if param_target else CONSTRAINED_MATCHED_CAPACITY_TARGET_NAME)
     if search_repeat == AGGREGATED_SEARCH_REPEAT:
         parts.append(AGGREGATED_SEARCH_REPEAT)
     return "_".join(parts)
@@ -247,7 +250,10 @@ def parse_cli_args():
         type=_normalize_search_policy_arg,
         default=None,
         metavar="{default,constrained}",
-        help="Search policy. default=model-specific package search; constrained=capacity-constrained search.",
+        help=(
+            "Search policy. default=model-specific package search; "
+            "constrained=experimental coarse matched-capacity (~300k) search."
+        ),
     )
     parser.add_argument(
         "--search-repeat",
@@ -338,8 +344,6 @@ def parse_cli_args():
         args.search_policy, args.search_repeat = args.search_mode_alias
     args.search_policy = args.search_policy or STANDARD_SEARCH_POLICY
     args.search_repeat = args.search_repeat or SINGLE_SEARCH_REPEAT
-    if args.search_policy == CONSTRAINED_SEARCH_POLICY:
-        parser.error("--search-policy constrained is reserved for the capacity-constrained implementation and is not runnable in this patch.")
     if not math.isclose(float(args.missing_rate), 0.0, abs_tol=1e-12):
         parser.error(
             "param_search.py runs the standard search without synthetic missingness injection. "
@@ -568,6 +572,260 @@ def _normalize_param_config_for_save(
         model_config,
         search_profile=search_profile,
     )
+
+
+def _count_model_params_for_config(
+    *,
+    model_name: str,
+    input_dim: int,
+    seq_len: int,
+    num_class: int,
+    task: str,
+    forecast_horizon,
+    model_config: dict,
+) -> int:
+    effective = _normalize_param_config_for_save(
+        model_name,
+        model_config,
+        search_profile=model_config.get("search_profile", DEFAULT_SEARCH_PROFILE),
+    )
+    kwargs = build_model_kwargs_from_config(model_name, effective)
+    data_config = get_data_config(model_name)
+    common_kwargs = {
+        "model_name": model_name,
+        "input_dim": int(input_dim),
+        "seq_len": int(seq_len),
+        "dropout": 0.1,
+        "use_intensity": data_config["use_intensity"],
+        "method": default_method_for_model(model_name),
+        "device": "cpu",
+        **kwargs,
+    }
+    if str(task).strip().lower() == "classification":
+        model = ists_classifier(num_class=int(num_class), **common_kwargs)
+    else:
+        model = ists_model(
+            num_class=int(num_class),
+            task=task,
+            output_dim=max(1, int(input_dim)),
+            forecast_horizon=forecast_horizon,
+            **common_kwargs,
+        )
+    return int(sum(param.numel() for param in model.parameters()))
+
+
+def _candidate_capacity_config(
+    *,
+    data_name: str,
+    missing_rate: float,
+    model_name: str,
+    task: str,
+    search_profile: str,
+    search_space: dict,
+    hidden_dim: int,
+    depth_level: int,
+    extra_params: dict,
+) -> dict:
+    cfg = {
+        "data_name": data_name,
+        "missing_rate": float(missing_rate),
+        "model_name": model_name,
+        "task": task,
+        "search_profile": search_profile,
+        "search_contract": search_space["search_contract"],
+        "search_family": search_space["search_family"],
+        "public_search_name": search_space["public_search_name"],
+        "search_profile_visibility": search_space["search_profile_visibility"],
+        "search_policy": CONSTRAINED_SEARCH_POLICY,
+        "search_repeat": SINGLE_SEARCH_REPEAT,
+        "search_algorithm_policy": search_space["policy"],
+        "lr": 1e-3,
+        "hidden_dim": int(hidden_dim),
+        "depth_level": int(depth_level),
+    }
+    cfg.update(extra_params)
+    return cfg
+
+
+def _resolve_constrained_capacity_config(
+    *,
+    data_name: str,
+    missing_rate: float,
+    model_name: str,
+    input_dim: int,
+    seq_len: int,
+    num_class: int,
+    task: str,
+    forecast_horizon,
+    search_profile: str,
+    search_space: dict,
+) -> dict:
+    target = int(CONSTRAINED_MATCHED_CAPACITY_TARGET)
+    lower = int(target * 0.5)
+    upper = int(target * 1.5)
+    extra_defaults = dict(search_space.get("default_extra_params", {}))
+    extra_values = {
+        key: list(values)
+        for key, values in search_space.get("extra_param_values", {}).items()
+    }
+    flow_values = extra_values.get("flow_depth") or (
+        [int(extra_defaults["flow_depth"])] if "flow_depth" in extra_defaults else [None]
+    )
+    if "flow_depth" not in extra_defaults:
+        flow_values = [None]
+
+    candidates = []
+    for hidden_dim in search_space["hidden_dim_values"]:
+        for depth_level in search_space["depth_level_values"]:
+            for flow_depth in flow_values:
+                extra_params = dict(extra_defaults)
+                if flow_depth is not None:
+                    extra_params["flow_depth"] = int(flow_depth)
+                cfg = _candidate_capacity_config(
+                    data_name=data_name,
+                    missing_rate=missing_rate,
+                    model_name=model_name,
+                    task=task,
+                    search_profile=search_profile,
+                    search_space=search_space,
+                    hidden_dim=int(hidden_dim),
+                    depth_level=int(depth_level),
+                    extra_params=extra_params,
+                )
+                param_count = _count_model_params_for_config(
+                    model_name=model_name,
+                    input_dim=input_dim,
+                    seq_len=seq_len,
+                    num_class=num_class,
+                    task=task,
+                    forecast_horizon=forecast_horizon,
+                    model_config=cfg,
+                )
+                candidates.append(
+                    {
+                        "hidden_dim": int(hidden_dim),
+                        "depth_level": int(depth_level),
+                        "flow_depth": None if flow_depth is None else int(flow_depth),
+                        "param_count": int(param_count),
+                        "distance": abs(int(param_count) - target),
+                    }
+                )
+
+    if not candidates:
+        raise ValueError(f"No constrained capacity candidates generated for model {model_name!r}.")
+
+    selected = min(
+        candidates,
+        key=lambda row: (
+            row["distance"],
+            row["param_count"],
+            row["hidden_dim"],
+            row["depth_level"],
+            -1 if row["flow_depth"] is None else row["flow_depth"],
+        ),
+    )
+    min_candidate = min(candidates, key=lambda row: row["param_count"])
+    max_candidate = max(candidates, key=lambda row: row["param_count"])
+    in_band = lower <= selected["param_count"] <= upper
+    metadata = {
+        "search_policy_axis": CONSTRAINED_SEARCH_POLICY,
+        "matched_capacity_policy": "coarse-matched-capacity-v1",
+        "matched_capacity_target": target,
+        "matched_capacity_target_name": CONSTRAINED_MATCHED_CAPACITY_TARGET_NAME,
+        "matched_capacity_label": CONSTRAINED_MATCHED_CAPACITY_LABEL,
+        "matched_capacity_tolerance": 0.5,
+        "matched_capacity_lower": lower,
+        "matched_capacity_upper": upper,
+        "matched_capacity": int(selected["param_count"]),
+        "matched_capacity_distance": int(selected["distance"]),
+        "matched_capacity_in_band": bool(in_band),
+        "matched_capacity_overshoot": bool(min_candidate["param_count"] > upper),
+        "matched_capacity_undershoot": bool(max_candidate["param_count"] < lower),
+        "matched_hidden_dim": int(selected["hidden_dim"]),
+        "matched_depth_level": int(selected["depth_level"]),
+        "matched_flow_depth": selected["flow_depth"],
+        "params_at_min_carrier": int(min_candidate["param_count"]),
+        "params_at_max_carrier": int(max_candidate["param_count"]),
+        "candidate_count": int(len(candidates)),
+        "input_dim": int(input_dim),
+        "seq_len": int(seq_len),
+    }
+    return {
+        "selected": selected,
+        "extra_params": {
+            key: value
+            for key, value in {
+                **extra_defaults,
+                "flow_depth": selected["flow_depth"],
+            }.items()
+            if value is not None and (key in extra_defaults or key == "flow_depth")
+        },
+        "metadata": metadata,
+    }
+
+
+def _apply_constrained_capacity_to_search_space(search_space: dict, capacity_config: dict) -> dict:
+    selected = capacity_config["selected"]
+    constrained = copy.deepcopy(search_space)
+    constrained["default_hidden_dim"] = int(selected["hidden_dim"])
+    constrained["default_depth_level"] = int(selected["depth_level"])
+    constrained["hidden_dim_values"] = [int(selected["hidden_dim"])]
+    constrained["depth_level_values"] = [int(selected["depth_level"])]
+    constrained["sampled_axes"] = ["lr"]
+    constrained["candidate_axes"] = ["lr"]
+    fixed_extra = dict(capacity_config["extra_params"])
+    constrained["default_extra_params"] = fixed_extra
+    constrained["extra_param_values"] = {
+        key: [value]
+        for key, value in fixed_extra.items()
+        if key in search_space.get("extra_param_values", {})
+    }
+    if selected["flow_depth"] is not None:
+        constrained["default_flow_depth"] = int(selected["flow_depth"])
+        constrained["flow_depth_values"] = [int(selected["flow_depth"])]
+    return constrained
+
+
+def _attach_constrained_capacity_metadata(model_config: dict, capacity_config: dict | None) -> dict:
+    if capacity_config is None:
+        return model_config
+    updated = dict(model_config)
+    updated.update(capacity_config["metadata"])
+    updated["search_policy_axis"] = CONSTRAINED_SEARCH_POLICY
+    updated["matched_capacity_config"] = dict(capacity_config["selected"])
+    return updated
+
+
+_CONSTRAINED_CAPACITY_METADATA_KEYS = (
+    "search_policy_axis",
+    "matched_capacity_policy",
+    "matched_capacity_target",
+    "matched_capacity_target_name",
+    "matched_capacity_label",
+    "matched_capacity_tolerance",
+    "matched_capacity_lower",
+    "matched_capacity_upper",
+    "matched_capacity",
+    "matched_capacity_distance",
+    "matched_capacity_in_band",
+    "matched_capacity_overshoot",
+    "matched_capacity_undershoot",
+    "matched_hidden_dim",
+    "matched_depth_level",
+    "matched_flow_depth",
+    "params_at_min_carrier",
+    "params_at_max_carrier",
+    "candidate_count",
+    "matched_capacity_config",
+)
+
+
+def _capacity_metadata_from_config(model_config: dict) -> dict:
+    return {
+        key: model_config.get(key)
+        for key in _CONSTRAINED_CAPACITY_METADATA_KEYS
+        if key in model_config
+    }
 
 
 def _build_task_targets(task, x_missing_norm, y, forecast_horizon=None):
@@ -1025,6 +1283,47 @@ def optimize(
 ):
     search_space = resolve_model_search_space(model_name, search_profile)
     search_profile = search_space["search_profile"]
+    constrained_capacity_config = None
+    if search_policy == CONSTRAINED_SEARCH_POLICY:
+        X_capacity, Y_capacity = load_dataset(
+            dataset_name=data_name,
+            dataset_source=dataset_source,
+            dataset_npz=dataset_npz,
+        )
+        input_dim = int(X_capacity.shape[1])
+        seq_len = int(X_capacity.shape[2])
+        if str(task).strip().lower() == "classification":
+            num_class = int(len(np.unique(Y_capacity)))
+        else:
+            num_class = 1
+        constrained_capacity_config = _resolve_constrained_capacity_config(
+            data_name=data_name,
+            missing_rate=missing_rate,
+            model_name=model_name,
+            input_dim=input_dim,
+            seq_len=seq_len,
+            num_class=num_class,
+            task=task,
+            forecast_horizon=forecast_horizon,
+            search_profile=search_profile,
+            search_space=search_space,
+        )
+        search_space = _apply_constrained_capacity_to_search_space(
+            search_space,
+            constrained_capacity_config,
+        )
+        LOGGER.info(
+            "Constrained search selected %s for %s/%s: hidden_dim=%s depth_level=%s "
+            "flow_depth=%s params=%s target=%s",
+            CONSTRAINED_MATCHED_CAPACITY_TARGET_NAME,
+            data_name,
+            model_name,
+            constrained_capacity_config["metadata"]["matched_hidden_dim"],
+            constrained_capacity_config["metadata"]["matched_depth_level"],
+            constrained_capacity_config["metadata"]["matched_flow_depth"],
+            constrained_capacity_config["metadata"]["matched_capacity"],
+            constrained_capacity_config["metadata"]["matched_capacity_target"],
+        )
     metadata_seed = _fixed_search_seed_set(search_repeat, SEED)[0]
     if num_samples <= 1:
         LOGGER.info(
@@ -1051,6 +1350,10 @@ def optimize(
             "depth_level": int(search_space["default_depth_level"]),
         }
         model_config.update(search_space.get("default_extra_params", {}))
+        model_config = _attach_constrained_capacity_metadata(
+            model_config,
+            constrained_capacity_config,
+        )
         split_root_local = split_root
 
         if search_repeat == SINGLE_SEARCH_REPEAT:
@@ -1149,6 +1452,7 @@ def optimize(
             "legacy_grid_version": saved_model_config["legacy_grid_version"],
             "architecture_axes": saved_model_config["architecture_axes"],
             "effective_params": saved_model_config["effective_params"],
+            "capacity_metadata": _capacity_metadata_from_config(saved_model_config),
             "train_missing_summary": metadata["train_missing_summary"],
             "target_spec": metadata["target_spec"],
             "target_source": metadata["target_source"],
@@ -1200,11 +1504,20 @@ def optimize(
         "search_algorithm_policy": search_space["policy"],
         # "batch_size": None, # determine by the number of the data
         "lr": tune.loguniform(*search_space["lr_bounds"]),
-        "hidden_dim": tune.choice(search_space["hidden_dim_values"]),
-        "depth_level": tune.choice(search_space["depth_level_values"]),
     }
-    for param_name, param_values in search_space.get("extra_param_values", {}).items():
-        model_config[param_name] = tune.choice(param_values)
+    if constrained_capacity_config is None:
+        model_config["hidden_dim"] = tune.choice(search_space["hidden_dim_values"])
+        model_config["depth_level"] = tune.choice(search_space["depth_level_values"])
+        for param_name, param_values in search_space.get("extra_param_values", {}).items():
+            model_config[param_name] = tune.choice(param_values)
+    else:
+        model_config["hidden_dim"] = int(search_space["default_hidden_dim"])
+        model_config["depth_level"] = int(search_space["default_depth_level"])
+        model_config.update(search_space.get("default_extra_params", {}))
+        model_config = _attach_constrained_capacity_metadata(
+            model_config,
+            constrained_capacity_config,
+        )
 
     scheduler = ASHAScheduler(
         max_t=max_num_epochs,
@@ -1308,6 +1621,7 @@ def optimize(
         "legacy_grid_version": saved_param_config["legacy_grid_version"],
         "architecture_axes": saved_param_config["architecture_axes"],
         "effective_params": saved_param_config["effective_params"],
+        "capacity_metadata": _capacity_metadata_from_config(saved_param_config),
         "train_missing_summary": metadata["train_missing_summary"],
         "target_spec": metadata["target_spec"],
         "target_source": metadata["target_source"],
@@ -1451,6 +1765,7 @@ def main():
                             "legacy_grid_version": existing_cfg.get("legacy_grid_version", existing_profile),
                             "architecture_axes": existing_cfg.get("architecture_axes"),
                             "effective_params": existing_cfg.get("effective_params"),
+                            "capacity_metadata": _capacity_metadata_from_config(existing_cfg),
                             "split_path": str(split_path),
                             "param_path": str(existing_param_path),
                             "param_hash": str(param_hash),
@@ -1528,6 +1843,7 @@ def main():
                         "legacy_grid_version": search_result["legacy_grid_version"],
                         "architecture_axes": search_result["architecture_axes"],
                         "effective_params": search_result["effective_params"],
+                        "capacity_metadata": search_result["capacity_metadata"],
                         "best_loss": float(search_result["best_loss"]),
                     }
                 )
@@ -1577,7 +1893,18 @@ def main():
             "dataset_npz": None if args.dataset_npz is None else str(args.dataset_npz),
             "target_source": args.target_source if args.task != "classification" else "label",
             "search_policy": args.search_policy,
+            "search_policy_axis": args.search_policy,
             "search_repeat": args.search_repeat,
+            "matched_capacity_target": (
+                int(CONSTRAINED_MATCHED_CAPACITY_TARGET)
+                if args.search_policy == CONSTRAINED_SEARCH_POLICY
+                else None
+            ),
+            "matched_capacity_target_name": (
+                CONSTRAINED_MATCHED_CAPACITY_TARGET_NAME
+                if args.search_policy == CONSTRAINED_SEARCH_POLICY
+                else None
+            ),
             "search_seed_set": _fixed_search_seed_set(args.search_repeat, SEED),
             "search_profile": args.search_profile,
             **describe_search_profile(args.search_profile),

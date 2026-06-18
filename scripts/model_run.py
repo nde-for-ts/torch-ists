@@ -33,6 +33,7 @@ from torch import nn, Tensor
 from torch.utils.data import Dataset, DataLoader
 
 from _common import (
+    CONSTRAINED_MATCHED_CAPACITY_TARGET_NAME,
     DEFAULT_SEARCH_PROFILE,
     apply_model_scope_variant,
     build_model_kwargs_from_config,
@@ -116,7 +117,7 @@ def _build_param_artifact_name(
 ) -> str:
     parts = [data_name, model_name]
     if param_policy == CONSTRAINED_SEARCH_POLICY:
-        parts.append(str(param_target) if param_target else CONSTRAINED_SEARCH_POLICY)
+        parts.append(str(param_target) if param_target else CONSTRAINED_MATCHED_CAPACITY_TARGET_NAME)
     if param_repeat == AGGREGATED_SEARCH_REPEAT:
         parts.append(AGGREGATED_SEARCH_REPEAT)
     return "_".join(parts)
@@ -240,7 +241,7 @@ def _validate_param_search_profile(
 
 def _param_search_contract_metadata(model_config: dict, search_profile: str) -> dict:
     contract = describe_search_profile(search_profile)
-    return {
+    metadata = {
         "search_policy": _infer_cli_search_policy(model_config),
         "search_repeat": _infer_cli_search_repeat(model_config),
         "search_contract": model_config.get("search_contract", contract["search_contract"]),
@@ -251,6 +252,31 @@ def _param_search_contract_metadata(model_config: dict, search_profile: str) -> 
             contract["search_profile_visibility"],
         ),
     }
+    for key in (
+        "search_policy_axis",
+        "matched_capacity_policy",
+        "matched_capacity_target",
+        "matched_capacity_target_name",
+        "matched_capacity_label",
+        "matched_capacity_tolerance",
+        "matched_capacity_lower",
+        "matched_capacity_upper",
+        "matched_capacity",
+        "matched_capacity_distance",
+        "matched_capacity_in_band",
+        "matched_capacity_overshoot",
+        "matched_capacity_undershoot",
+        "matched_hidden_dim",
+        "matched_depth_level",
+        "matched_flow_depth",
+        "params_at_min_carrier",
+        "params_at_max_carrier",
+        "candidate_count",
+        "matched_capacity_config",
+    ):
+        if key in model_config:
+            metadata[key] = model_config.get(key)
+    return metadata
 
 
 def _parse_missing_rates(raw):
@@ -432,14 +458,14 @@ def parse_cli_args():
         type=str,
         choices=["reuse", "fail"],
         default="reuse",
-        help="Behavior when output artifact already exists with --check.",
+        help="Behavior when --check finds an output artifact: reuse verifies the stored run contract; fail treats it as a policy violation.",
     )
     parser.add_argument(
         "--check",
         dest="check",
         action="store_true",
         default=True,
-        help="Skip run if output file already exists (default: enabled).",
+        help="Validate and reuse an existing output file when present (default); see --existing-policy for reuse vs fail behavior.",
     )
     parser.add_argument(
         "--no-check",
@@ -452,7 +478,10 @@ def parse_cli_args():
         type=_normalize_param_policy_arg,
         default=None,
         metavar="{default,constrained}",
-        help="Parameter search policy to load. default=model-specific package search; constrained=capacity-constrained search.",
+        help=(
+            "Parameter search policy to load. default=model-specific package search; "
+            "constrained=experimental coarse matched-capacity (~300k) params."
+        ),
     )
     parser.add_argument(
         "--param-repeat",
@@ -503,7 +532,10 @@ def parse_cli_args():
         "--robustness-channel-sync-options",
         type=str,
         default="false",
-        help="Comma-separated channel_sync options for robustness mode: false,true",
+        help=(
+            "Comma-separated channel_sync options for robustness mode: false,true. "
+            "false masks each channel independently; true shares missing time indices across channels."
+        ),
     )
     parser.add_argument(
         "--split-root",
@@ -582,8 +614,6 @@ def parse_cli_args():
         args.param_policy, args.param_repeat = args.param_mode_alias
     args.param_policy = args.param_policy or STANDARD_SEARCH_POLICY
     args.param_repeat = args.param_repeat or SINGLE_SEARCH_REPEAT
-    if args.param_policy == CONSTRAINED_SEARCH_POLICY:
-        parser.error("--param-policy constrained is reserved for the capacity-constrained implementation and is not runnable in this patch.")
     if args.seed is None:
         args.seed = args.seed_positional if args.seed_positional is not None else 0
     args.datasets = _parse_csv_list(args.datasets)

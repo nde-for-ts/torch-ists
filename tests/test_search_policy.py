@@ -11,6 +11,8 @@ sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(SCRIPTS_ROOT))
 
 from _common import (
+    CONSTRAINED_MATCHED_CAPACITY_TARGET,
+    CONSTRAINED_MATCHED_CAPACITY_TARGET_NAME,
     build_model_kwargs_from_config,
     describe_search_profile,
     infer_param_search_profile,
@@ -21,6 +23,8 @@ from _common import (
 )
 from param_search import (
     _build_param_artifact_name as _build_search_param_artifact_name,
+    _apply_constrained_capacity_to_search_space,
+    _resolve_constrained_capacity_config,
     _derive_trial_seed,
     tune_model,
 )
@@ -208,13 +212,13 @@ def test_cli_search_axes_artifact_names():
         "cnn",
         search_policy="constrained",
         search_repeat="single",
-    ) == "BasicMotions_cnn_constrained"
+    ) == "BasicMotions_cnn_matched300k"
     assert _build_search_param_artifact_name(
         "BasicMotions",
         "cnn",
         search_policy="constrained",
         search_repeat="aggregated",
-    ) == "BasicMotions_cnn_constrained_aggregated"
+    ) == "BasicMotions_cnn_matched300k_aggregated"
     assert _build_run_param_artifact_name(
         "BasicMotions",
         "cnn",
@@ -354,7 +358,35 @@ def test_public_docs_track_cli_policy_repeat_surface():
         stderr=subprocess.PIPE,
     )
     assert bad_param_search.returncode == 2
-    assert "clean regular data only" in bad_param_search.stderr
+    assert "standard search without synthetic missingness injection" in bad_param_search.stderr
+
+
+def test_constrained_capacity_resolver_fixes_capacity_carrier():
+    space = resolve_model_search_space("cnn", "default")
+    resolved = _resolve_constrained_capacity_config(
+        data_name="Toy",
+        missing_rate=0.0,
+        model_name="cnn",
+        input_dim=6,
+        seq_len=12,
+        num_class=3,
+        task="classification",
+        forecast_horizon=None,
+        search_profile="model-native-v1",
+        search_space=space,
+    )
+    metadata = resolved["metadata"]
+    assert metadata["search_policy_axis"] == "constrained"
+    assert metadata["matched_capacity_target"] == CONSTRAINED_MATCHED_CAPACITY_TARGET
+    assert metadata["matched_capacity_target_name"] == CONSTRAINED_MATCHED_CAPACITY_TARGET_NAME
+    assert metadata["matched_hidden_dim"] in space["hidden_dim_values"]
+    assert metadata["matched_depth_level"] in space["depth_level_values"]
+    assert metadata["matched_capacity"] > 0
+
+    constrained_space = _apply_constrained_capacity_to_search_space(space, resolved)
+    assert constrained_space["hidden_dim_values"] == [metadata["matched_hidden_dim"]]
+    assert constrained_space["depth_level_values"] == [metadata["matched_depth_level"]]
+    assert constrained_space["sampled_axes"] == ["lr"]
 
 
 def test_depth_collapsed_models_do_not_search_noop_depth():
