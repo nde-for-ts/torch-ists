@@ -635,6 +635,10 @@ os.makedirs('out', exist_ok=True)
 
 def _expand_mask_or_delta(feature, x_missing):
     if feature.dim() == 3:
+        if feature.shape == x_missing.shape:
+            return feature
+        if feature.shape[:2] == x_missing.shape[:2] and feature.shape[-1] == 1:
+            return feature.repeat((1, 1, x_missing.shape[-1]))
         feature = feature[..., 0]
     return feature.unsqueeze(-1).repeat((1, 1, x_missing.shape[-1]))
 

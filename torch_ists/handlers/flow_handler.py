@@ -55,7 +55,23 @@ class FlowHandler(BaseHandler):
         If mask indicates missing points and any corresponding x value is finite,
         input is out of contract (raw missing must remain NaN at missing positions).
         """
-        missing_positions = seq_mask == 0
+        if seq_mask.dim() == 2:
+            seq_mask = seq_mask.unsqueeze(-1)
+        if seq_mask.dim() != 3:
+            raise ValueError(
+                "seq_mask must be [N,L] or [N,L,D] for strict flow raw input, "
+                f"got shape={tuple(seq_mask.shape)}"
+            )
+        if seq_mask.shape != x.shape:
+            if seq_mask.shape[:2] == x.shape[:2] and seq_mask.shape[-1] == 1:
+                seq_mask = seq_mask.expand_as(x)
+            else:
+                raise ValueError(
+                    "seq_mask must match x batch/time/channel dimensions for strict flow raw input. "
+                    f"got seq_mask={tuple(seq_mask.shape)}, x={tuple(x.shape)}"
+                )
+
+        missing_positions = seq_mask <= 0
         if not bool(missing_positions.any()):
             return
 
@@ -69,6 +85,11 @@ class FlowHandler(BaseHandler):
                 "Detected one or more finite values at missing positions in seq_mask "
                 "(likely pre-filled input such as x_filled/nan_to_num)."
             )
+
+    @staticmethod
+    def _full_channel_mask(seq: torch.Tensor) -> torch.Tensor:
+        """Return the full [N,L,D] mask channel from ists_layer's [N,3,D,L] layout."""
+        return seq[:, 1, :, :].permute(0, 2, 1)
 
     def _build_solver_call_kwargs(self, model: nn.Module, kwargs: Dict[str, Any]) -> Dict[str, Any]:
         model_params = self._coerce_mapping(kwargs.get("model_params"))
@@ -242,8 +263,10 @@ class FlowHandler(BaseHandler):
         data = self.preprocess_input(seq, times)
         runtime_model_name = str(getattr(model, "model_name", kwargs.get("model_name", "")))
         strict_raw_models = self._NEURALFLOW_MODELS | self._FLOWPATH_MODELS
+        seq_mask = data["seq_mask"]
         if runtime_model_name in strict_raw_models:
-            self._validate_raw_missing_contract(data["x"], data["seq_mask"])
+            seq_mask = self._full_channel_mask(seq)
+            self._validate_raw_missing_contract(data["x"], seq_mask)
 
         call_kwargs: Dict[str, Any] = {}
         solver_runtime_models = self._FLOWPATH_MODELS | self._DUALDYNAMICS_MODELS
@@ -253,7 +276,7 @@ class FlowHandler(BaseHandler):
         out, hn = model(
             data["x"],
             data["seq_ts"],
-            data["seq_mask"],
+            seq_mask,
             coeffs,
             times,
             **call_kwargs,
