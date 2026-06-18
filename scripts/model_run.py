@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import sys
 import copy
+import hashlib
 import math
 import time
 import datetime
@@ -487,7 +488,10 @@ def parse_cli_args():
         "--robustness-test-rates",
         type=str,
         default="0.0",
-        help="Comma-separated test missing rates for robustness mode. Default: 0.0; expanded grids are explicit opt-in.",
+        help=(
+            "Comma-separated positive test missing rates for robustness mode. "
+            "The clean 0.0 STANDARD anchor is always included and de-duplicated."
+        ),
     )
     parser.add_argument(
         "--robustness-test-mechanisms",
@@ -662,6 +666,165 @@ def _validate_bounded_metric(name, value):
     if value < 0.0 or value > 1.0:
         raise ValueError(f"metric {name} must be in [0, 1], got {value}")
     return value
+
+
+class OutputArtifactContractError(RuntimeError):
+    """Raised when --check finds an output artifact from a different run contract."""
+
+
+def _stable_contract_hash(payload):
+    encoded = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _output_contract_hash(output_contract):
+    return _stable_contract_hash(output_contract)
+
+
+def _build_robustness_axes_metadata(
+    *,
+    robustness_test_rates,
+    robustness_test_mechanisms,
+    robustness_channel_sync_options,
+    use_raw_flow_input,
+    seed,
+):
+    effective_rates = _effective_robustness_test_rates(robustness_test_rates)
+    resolved_sync_options = _resolve_channel_sync_options(
+        robustness_channel_sync_options,
+        use_raw_flow_input,
+    )
+    return {
+        "missing_seed": int(seed),
+        "test_missing_rates": [float(rate) for rate in effective_rates],
+        "test_missing_types": list(robustness_test_mechanisms),
+        "test_channel_sync_options": resolved_sync_options,
+        "anchor_policy": "singleton_standard",
+        "perturbation_missing_rates": [
+            float(rate) for rate in effective_rates if not _is_zero_missing_rate(rate)
+        ],
+    }
+
+
+def _build_output_contract(
+    *,
+    data_name,
+    model_name,
+    model_config,
+    seed,
+    task,
+    target_source,
+    forecast_horizon,
+    dataset_source,
+    dataset_npz,
+    data_shape,
+    num_class,
+    missing_rate,
+    evaluation_regime,
+    train_missing_type,
+    train_channel_sync,
+    split_path,
+    epochs,
+    save_predictions,
+    interpolate,
+    use_intensity,
+    batch_policy,
+    lr_policy,
+    param_search_contract,
+    robustness_axes=None,
+):
+    return {
+        "contract_version": "model_run_output_contract_v1",
+        "dataset": str(data_name),
+        "dataset_source": str(dataset_source),
+        "dataset_npz": None if dataset_npz is None else str(dataset_npz),
+        "data_shape": [int(value) for value in data_shape],
+        "num_class": int(num_class),
+        "model": str(model_name),
+        "model_config_hash": _stable_contract_hash(model_config),
+        "seed": int(seed),
+        "task": str(task),
+        "target_source": str(target_source if task != "classification" else "label"),
+        "forecast_horizon": None if forecast_horizon is None else int(forecast_horizon),
+        "train_missing_rate": float(missing_rate),
+        "train_missing_type": str(train_missing_type).upper(),
+        "train_channel_sync": None if train_channel_sync is None else bool(train_channel_sync),
+        "evaluation_regime": str(evaluation_regime),
+        "split_path": str(split_path),
+        "epochs": int(epochs),
+        "save_predictions": str(save_predictions),
+        "interpolate": str(interpolate),
+        "use_intensity": bool(use_intensity),
+        "batch_policy": batch_policy,
+        "lr_policy": lr_policy,
+        "param_search_contract": dict(param_search_contract),
+        "robustness_axes": robustness_axes,
+    }
+
+
+def _read_output_payload(output_path):
+    with open(output_path, "rb") as f:
+        payload = pickle.load(f)
+    if not isinstance(payload, dict):
+        raise OutputArtifactContractError(
+            f"Output artifact {output_path} must contain a dict payload, got {type(payload).__name__}."
+        )
+    return payload
+
+
+def _read_output_contract_hash(output_path):
+    payload = _read_output_payload(output_path)
+    meta = payload.get("meta", {})
+    if not isinstance(meta, dict):
+        return None
+    value = meta.get("output_contract_hash")
+    return None if value is None else str(value)
+
+
+def _validate_existing_output_contract(output_path, expected_contract):
+    expected_hash = _output_contract_hash(expected_contract)
+    try:
+        payload = _read_output_payload(output_path)
+    except OutputArtifactContractError:
+        raise
+    except Exception as exc:
+        raise OutputArtifactContractError(
+            f"Output artifact {output_path} cannot be reused: failed to read pickle payload ({exc}). "
+            "Remove the artifact or rerun with --no-check to overwrite."
+        ) from exc
+
+    meta = payload.get("meta", {})
+    if not isinstance(meta, dict):
+        raise OutputArtifactContractError(
+            f"Output artifact {output_path} cannot be reused: missing meta object. "
+            "Remove the artifact or rerun with --no-check to overwrite."
+        )
+    actual_contract = meta.get("output_contract")
+    actual_hash = meta.get("output_contract_hash")
+    if not isinstance(actual_contract, dict) or not actual_hash:
+        raise OutputArtifactContractError(
+            f"Output artifact {output_path} cannot be reused: missing output contract metadata. "
+            "Remove the artifact or rerun with --no-check to overwrite."
+        )
+    recomputed_hash = _output_contract_hash(actual_contract)
+    if str(actual_hash) != recomputed_hash:
+        raise OutputArtifactContractError(
+            f"Output artifact {output_path} cannot be reused: stored output contract hash is invalid "
+            f"(stored={actual_hash}, recomputed={recomputed_hash}). "
+            "Remove the artifact or rerun with --no-check to overwrite."
+        )
+    if str(actual_hash) != expected_hash:
+        raise OutputArtifactContractError(
+            f"Output artifact {output_path} cannot be reused: run contract mismatch "
+            f"(stored={actual_hash}, expected={expected_hash}). "
+            "Remove the artifact or rerun with --no-check to overwrite."
+        )
+    return str(actual_hash)
 
 
 def _build_output_path(
@@ -948,9 +1111,28 @@ def _build_result_payload(
     batch_policy=None,
     lr_policy=None,
     robustness_axes=None,
+    output_contract=None,
 ):
     resolved_regime = str(evaluation_regime or mode)
     resolved_mode = resolved_regime if str(mode).strip().lower() == "standard" else str(mode)
+    meta = {
+        "task": str(task),
+        "task_support_tier": "stable" if str(task) == "classification" else "experimental",
+        "epochs": int(epochs),
+        "interpolate": str(interpolate),
+        "use_intensity": bool(use_intensity),
+        "device": str(device),
+        "created_at": datetime.datetime.utcnow().isoformat() + "Z",
+        "run_id": run_id,
+        "save_predictions": str(save_predictions),
+        "evaluation_regime": resolved_regime,
+        "batch_policy": batch_policy,
+        "lr_policy": lr_policy,
+        "robustness_axes": robustness_axes,
+    }
+    if output_contract is not None:
+        meta["output_contract"] = output_contract
+        meta["output_contract_hash"] = _output_contract_hash(output_contract)
     return {
         "mode": resolved_mode,
         "evaluation_regime": resolved_regime,
@@ -962,21 +1144,7 @@ def _build_result_payload(
         "train_missing_type": str(train_missing_type).upper(),
         "train_channel_sync": None if train_channel_sync is None else bool(train_channel_sync),
         "evaluations": evaluations,
-        "meta": {
-            "task": str(task),
-            "task_support_tier": "stable" if str(task) == "classification" else "experimental",
-            "epochs": int(epochs),
-            "interpolate": str(interpolate),
-            "use_intensity": bool(use_intensity),
-            "device": str(device),
-            "created_at": datetime.datetime.utcnow().isoformat() + "Z",
-            "run_id": run_id,
-            "save_predictions": str(save_predictions),
-            "evaluation_regime": resolved_regime,
-            "batch_policy": batch_policy,
-            "lr_policy": lr_policy,
-            "robustness_axes": robustness_axes,
-        },
+        "meta": meta,
     }
 
 
@@ -1034,9 +1202,6 @@ def run_model(
         robustness_channel_sync_options=robustness_channel_sync_options,
     )
 
-    if CHECK and os.path.exists(out_path):
-        return None
-    
     # setup out path
     os.makedirs(os.path.join(out_root, data_name), exist_ok=True)
     
@@ -1085,6 +1250,47 @@ def run_model(
         model_config,
         infer_param_search_profile(model_config),
     )
+    robustness_axes = (
+        _build_robustness_axes_metadata(
+            robustness_test_rates=robustness_test_rates,
+            robustness_test_mechanisms=robustness_test_mechanisms,
+            robustness_channel_sync_options=robustness_channel_sync_options,
+            use_raw_flow_input=use_raw_flow_input,
+            seed=SEED,
+        )
+        if robustness_mode
+        else None
+    )
+    output_contract = _build_output_contract(
+        data_name=data_name,
+        model_name=model_name,
+        model_config=model_config,
+        seed=SEED,
+        task=task,
+        target_source=target_source,
+        forecast_horizon=forecast_horizon,
+        dataset_source=dataset_source,
+        dataset_npz=dataset_npz,
+        data_shape=X.shape,
+        num_class=num_class,
+        missing_rate=0.0 if robustness_mode else missing_rate,
+        evaluation_regime=evaluation_regime,
+        train_missing_type=train_missing_type,
+        train_channel_sync=train_channel_sync,
+        split_path=split_path,
+        epochs=EPOCHS,
+        save_predictions=save_predictions,
+        interpolate=interpolate,
+        use_intensity=use_intensity,
+        batch_policy=batch_policy,
+        lr_policy=lr_policy,
+        param_search_contract=param_search_contract,
+        robustness_axes=robustness_axes,
+    )
+    output_contract_hash = _output_contract_hash(output_contract)
+    if CHECK and os.path.exists(out_path):
+        _validate_existing_output_contract(out_path, output_contract)
+        return None
     lr = float(lr_policy["lr"])
     weight_decay = float(lr_policy["weight_decay"])
     LOGGER.info(
@@ -1327,11 +1533,7 @@ def run_model(
 
     # Robustness mode: evaluate on multiple test rates
     if robustness_mode:
-        effective_robustness_test_rates = _effective_robustness_test_rates(robustness_test_rates)
-        resolved_robustness_channel_sync_options = _resolve_channel_sync_options(
-            robustness_channel_sync_options,
-            use_raw_flow_input,
-        )
+        effective_robustness_test_rates = list(robustness_axes["test_missing_rates"])
         evaluations = _evaluate_robustness(
             model=model,
             data_name=data_name,
@@ -1375,16 +1577,8 @@ def run_model(
             train_channel_sync=False,
             batch_policy=batch_policy,
             lr_policy=lr_policy,
-            robustness_axes={
-                "missing_seed": int(SEED),
-                "test_missing_rates": [float(rate) for rate in effective_robustness_test_rates],
-                "test_missing_types": list(robustness_test_mechanisms),
-                "test_channel_sync_options": resolved_robustness_channel_sync_options,
-                "anchor_policy": "singleton_standard",
-                "perturbation_missing_rates": [
-                    float(rate) for rate in effective_robustness_test_rates if not _is_zero_missing_rate(rate)
-                ],
-            },
+            robustness_axes=robustness_axes,
+            output_contract=output_contract,
         )
         payload.update(param_search_contract)
 
@@ -1454,6 +1648,7 @@ def run_model(
             "target_spec": None if task == "classification" else target_spec,
             "mode": "robustness",
             "evaluation_regime": "robustness",
+            "output_contract_hash": output_contract_hash,
         }
 
     # Normal mode: single test evaluation
@@ -1603,6 +1798,7 @@ def run_model(
         train_channel_sync=train_channel_sync,
         batch_policy=batch_policy,
         lr_policy=lr_policy,
+        output_contract=output_contract,
     )
     payload.update(param_search_contract)
     with open(output_path, 'wb') as f:
@@ -1629,6 +1825,7 @@ def run_model(
         "evaluation_regime": evaluation_regime,
         "train_missing_type": train_missing_type,
         "train_channel_sync": train_channel_sync,
+        "output_contract_hash": output_contract_hash,
     }
 
 
@@ -2022,6 +2219,7 @@ def main():
                                     "split_path": str(split_path),
                                     "param_path": str(param_path),
                                     "output_path": str(output_path),
+                                    "output_contract_hash": _read_output_contract_hash(output_path),
                                     "reason": "output artifact already exists (--check)",
                                 }
                             )
@@ -2045,6 +2243,8 @@ def main():
                             "reason": str(e),
                         }
                     )
+                    if isinstance(e, OutputArtifactContractError):
+                        policy_violations.append(f"{data_name}/{model_name}/robustness: {e}")
                     continue
             if stop_early:
                 break
@@ -2148,6 +2348,7 @@ def main():
                                         "split_path": str(split_path),
                                         "param_path": str(param_path),
                                         "output_path": str(output_path),
+                                        "output_contract_hash": _read_output_contract_hash(output_path),
                                         "reason": "output artifact already exists (--check)",
                                     }
                                 )
@@ -2171,6 +2372,8 @@ def main():
                                 "reason": str(e),
                             }
                         )
+                        if isinstance(e, OutputArtifactContractError):
+                            policy_violations.append(f"{data_name}/{model_name}/{missing_rate}: {e}")
                         continue
                 if stop_early:
                     break

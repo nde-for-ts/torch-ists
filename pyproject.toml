@@ -97,6 +97,9 @@ Homepage = "https://github.com/nde-for-ts/torch-ists"
 Repository = "https://github.com/nde-for-ts/torch-ists"
 Issues = "https://github.com/nde-for-ts/torch-ists/issues"
 
+[tool.setuptools]
+license-files = ["LICENSE"]
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["torch_ists*"]

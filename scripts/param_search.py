@@ -1319,6 +1319,12 @@ def optimize(
 def main():
     global SEED
     args = parse_cli_args()
+    if int(args.num_samples) > 1:
+        LOGGER.warning(
+            "param_search is using --num-samples=%d. This is a production search budget; "
+            "use --num-samples 1 --max-num-epochs 1 for a smoke run.",
+            int(args.num_samples),
+        )
     scope_override = _resolve_model_scope_variant(args.model_scope_variant)
     apply_model_scope_variant(scope_override)
     SEED = int(args.seed)

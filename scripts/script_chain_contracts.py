@@ -6,6 +6,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import hashlib
 import json
+import pickle
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
@@ -109,6 +110,162 @@ def _validate_target_source(record: Dict[str, Any], path: str, errors: List[str]
         return
     if task == "change_detection" and target_source != "dataset":
         errors.append(f"{path}.target_source must be 'dataset' for task=change_detection")
+
+
+def _validate_metric_values(metrics: Dict[str, Any], *, task: str, path: str, errors: List[str]) -> None:
+    if task == "classification":
+        has_v2 = all(metric in metrics for metric in ("accuracy", "f1", "wf1"))
+        has_v1 = all(metric in metrics for metric in ("accuracy", "f1_weighted"))
+        if not (has_v2 or has_v1):
+            errors.append(
+                f"{path}.metrics missing required keys: "
+                "expect (accuracy,f1,wf1) or compatibility tuple (accuracy,f1_weighted)"
+            )
+            return
+
+        required_metrics = ("accuracy", "f1", "wf1") if has_v2 else ("accuracy", "f1_weighted")
+        for metric in required_metrics:
+            if not _is_finite_number(metrics.get(metric)):
+                errors.append(f"{path}.metrics.{metric} must be finite")
+                continue
+            value = float(metrics[metric])
+            if value < 0.0 or value > 1.0:
+                errors.append(f"{path}.metrics.{metric} out of range [0, 1]")
+
+        if has_v2 and "f1_weighted" in metrics:
+            if not _is_finite_number(metrics["f1_weighted"]):
+                errors.append(f"{path}.metrics.f1_weighted must be finite")
+            else:
+                wf1 = float(metrics["wf1"])
+                f1w = float(metrics["f1_weighted"])
+                if abs(wf1 - f1w) > 1e-12:
+                    errors.append(f"{path}.metrics alias mismatch: wf1={wf1} != f1_weighted={f1w}")
+        return
+
+    if task == "outlier_detection":
+        required_noncls = ("bce", "outlier_acc")
+    elif task == "change_detection":
+        required_noncls = ("bce", "change_acc")
+    else:
+        required_noncls = ("mse", "mae")
+
+    for metric in required_noncls:
+        if metric not in metrics:
+            errors.append(f"{path}.metrics missing field for task={task}: {metric}")
+            continue
+        if not _is_finite_number(metrics[metric]):
+            errors.append(f"{path}.metrics.{metric} must be finite")
+            continue
+        value = float(metrics[metric])
+        if metric in {"outlier_acc", "change_acc"}:
+            if value < 0.0 or value > 1.0:
+                errors.append(f"{path}.metrics.{metric} out of range [0, 1]")
+        elif value < 0.0:
+            errors.append(f"{path}.metrics.{metric} must be >= 0")
+
+
+def _validate_output_payload(record: Dict[str, Any], *, path: str, errors: List[str]) -> None:
+    output_path = record.get("output_path")
+    if not output_path:
+        errors.append(f"{path}.output_path missing")
+        return
+    artifact = Path(str(output_path))
+    if not artifact.exists() or artifact.stat().st_size <= 0:
+        errors.append(f"{path} output artifact missing/empty: {artifact}")
+        return
+    try:
+        with artifact.open("rb") as f:
+            payload = pickle.load(f)
+    except Exception as exc:
+        errors.append(f"{path} output artifact is not a readable pickle payload: {artifact} ({exc})")
+        return
+    if not isinstance(payload, dict):
+        errors.append(f"{path} output payload must be an object")
+        return
+
+    for key in ("dataset", "model", "seed", "task"):
+        if key in record and str(payload.get(key)) != str(record.get(key)):
+            errors.append(f"{path} output payload mismatch for {key}: {payload.get(key)!r} != {record.get(key)!r}")
+    if "missing_rate" in record and "train_missing_rate" in payload:
+        if abs(float(payload["train_missing_rate"]) - float(record["missing_rate"])) > 1e-12:
+            errors.append(
+                f"{path} output payload train_missing_rate mismatch: "
+                f"{payload['train_missing_rate']!r} != {record['missing_rate']!r}"
+            )
+
+    meta = payload.get("meta")
+    if not isinstance(meta, dict):
+        errors.append(f"{path} output payload meta must be an object")
+        return
+    output_contract = meta.get("output_contract")
+    output_contract_hash = meta.get("output_contract_hash")
+    if not isinstance(output_contract, dict) or not output_contract_hash:
+        errors.append(f"{path} output payload missing output_contract/output_contract_hash")
+        return
+    recomputed_hash = stable_hash(output_contract)
+    if str(output_contract_hash) != recomputed_hash:
+        errors.append(
+            f"{path} output payload contract hash mismatch: "
+            f"stored={output_contract_hash}, recomputed={recomputed_hash}"
+        )
+    if record.get("output_contract_hash") and str(record["output_contract_hash"]) != str(output_contract_hash):
+        errors.append(
+            f"{path}.output_contract_hash mismatch: "
+            f"{record['output_contract_hash']} != {output_contract_hash}"
+        )
+
+    evaluations = payload.get("evaluations")
+    if not isinstance(evaluations, list) or not evaluations:
+        errors.append(f"{path} output payload evaluations must be a non-empty array")
+        return
+    task = str(record.get("task", payload.get("task", "classification"))).strip().lower()
+    for eval_idx, evaluation in enumerate(evaluations):
+        if not isinstance(evaluation, dict):
+            errors.append(f"{path}.evaluations[{eval_idx}] must be an object")
+            continue
+        metrics = evaluation.get("metrics")
+        if not isinstance(metrics, dict):
+            errors.append(f"{path}.evaluations[{eval_idx}].metrics must be an object")
+            continue
+        _validate_metric_values(metrics, task=task, path=f"{path}.evaluations[{eval_idx}]", errors=errors)
+
+    record_metrics = record.get("metrics")
+    if isinstance(record_metrics, dict):
+        reference_evaluation = evaluations[0]
+        if str(record.get("mode", record.get("evaluation_regime", ""))) == "robustness":
+            reference_evaluation = next(
+                (
+                    evaluation
+                    for evaluation in evaluations
+                    if abs(float(evaluation.get("test_missing_rate", 1.0))) < 1e-12
+                    and str(evaluation.get("test_missing_type", "")).upper() == "STANDARD"
+                ),
+                evaluations[0],
+            )
+        payload_metrics = reference_evaluation.get("metrics", {})
+        if isinstance(payload_metrics, dict):
+            for metric, record_value in record_metrics.items():
+                if metric not in payload_metrics:
+                    continue
+                if not (_is_finite_number(record_value) and _is_finite_number(payload_metrics[metric])):
+                    continue
+                if abs(float(record_value) - float(payload_metrics[metric])) > 1e-12:
+                    errors.append(
+                        f"{path}.metrics.{metric} mismatch with output payload: "
+                        f"{record_value} != {payload_metrics[metric]}"
+                    )
+
+    if str(record.get("mode", record.get("evaluation_regime", ""))) == "robustness":
+        anchors = [
+            evaluation
+            for evaluation in evaluations
+            if abs(float(evaluation.get("test_missing_rate", 1.0))) < 1e-12
+            and str(evaluation.get("test_missing_type", "")).upper() == "STANDARD"
+        ]
+        if len(anchors) != 1:
+            errors.append(f"{path} robustness output must contain exactly one STANDARD clean anchor")
+    elif len(evaluations) != 1:
+        errors.append(f"{path} non-robustness output must contain exactly one evaluation")
 
 
 def validate_split_manifest(doc: Dict[str, Any]) -> List[str]:
@@ -330,6 +487,7 @@ def validate_run_manifest(doc: Dict[str, Any]) -> List[str]:
                     for metric in required_noncls:
                         if metric in task_metrics and not _is_finite_number(task_metrics[metric]):
                             errors.append(f"records[{idx}].task_metrics.{metric} must be finite")
+        _validate_output_payload(record, path=f"records[{idx}]", errors=errors)
 
     reused_records = doc.get("reused_records", [])
     if reused_records is None:
@@ -356,4 +514,5 @@ def validate_run_manifest(doc: Dict[str, Any]) -> List[str]:
         task = str(record.get("task", doc.get("task", "classification"))).strip().lower()
         if task in SUPPORTED_TASKS:
             _validate_target_source(record, f"reused_records[{idx}]", errors, task)
+        _validate_output_payload(record, path=f"reused_records[{idx}]", errors=errors)
     return errors

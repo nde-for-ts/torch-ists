@@ -9,6 +9,20 @@ SUPPORTED_MISSINGNESS_MECHANISMS = {"MCAR", "MAR", "MNAR", "BLOCK", "BURST"}
 SUPPORTED_IMPUTATION_STRATEGIES = ("zero", "last_observed", "channel_mean")
 
 
+def _require_torchcde():
+    try:
+        import torchcde
+    except ModuleNotFoundError as exc:
+        if getattr(exc, "name", None) != "torchcde":
+            raise
+        raise ImportError(
+            "preprocess() requires optional dependency 'torchcde' to build interpolation "
+            "coefficients. Install `torchcde` directly or use `pip install \"torch-ists[cde]\"` "
+            "or `pip install \"torch-ists[all]\"`."
+        ) from exc
+    return torchcde
+
+
 def _impute_last_observed(x, time_dim: int = -2):
     """Last-observation-carried-forward along ``time_dim``.
 
@@ -167,8 +181,8 @@ def _finalize_preprocess_outputs(
     use_intensity: bool,
 ):
     import torch
-    import torchcde
 
+    torchcde = _require_torchcde()
     from .module.cde import controldiffeq
 
     X_missing = torch.from_numpy(X_missing_np).to(torch.float32).permute(0, 2, 1)  # [N, L, D]

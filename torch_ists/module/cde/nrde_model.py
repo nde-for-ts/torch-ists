@@ -114,7 +114,7 @@ class NeuralRDE(torch.nn.Module):
         return pred_y, hn
 
 
-# Note that this relies on the first channel being time
+# The first channel is expected to be time.
 class ContinuousRNNConverter(torch.nn.Module):
     def __init__(self, input_channels, hidden_channels, model):
         super(ContinuousRNNConverter, self).__init__()

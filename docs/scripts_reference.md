@@ -196,7 +196,7 @@ PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/model_run.py \
 | `--param-policy` | `{default, constrained}` | `default` | Parameter artifact policy to consume. Must match `param_search.py --search-policy`. |
 | `--param-repeat` | `{single, aggregated}` | `single` | Parameter artifact repeat policy to consume. Must match `param_search.py --search-repeat`. |
 | `--robustness-mode` | flag | `False` | Robustness evaluation: train on `missing=0.0`, evaluate on configured test rates. |
-| `--robustness-test-rates` | `str` | `0.0` | Test missing rates for robustness mode. Pass a comma-separated list for a robustness sweep. |
+| `--robustness-test-rates` | `str` | `0.0` | Positive test missing rates for robustness mode; the clean `0.0` `STANDARD` anchor is always included. |
 | `--robustness-test-mechanisms` | `str` | `MCAR` | Test missingness mechanisms for robustness mode: `MCAR`, `MAR`, `MNAR`, `BLOCK`, `BURST`. |
 | `--robustness-channel-sync-options` | `str` | `false` | Test channel synchronization options for robustness mode. Default `false`; pass `false,true` only for an explicit sync sweep. |
 | `--save-predictions` | `{full, summary}` | `full` | `full` stores prediction arrays; `summary` stores only shape/dtype metadata. |
@@ -218,7 +218,7 @@ PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/model_run.py \
    "evaluations": [...], "meta": {...}}
   ```
 - **Missingness** — selected by a positive `--missing-rates` value. The default missingness mechanism is `MCAR`, `missing_seed` is the run seed, and `channel_sync=False`.
-- **Robustness** (`--robustness-mode`) — runs `(dataset × model)`. With defaults this emits one clean anchor evaluation. Additional test rates create an explicit robustness sweep. Trains once on `missing=0.0`; evaluates on every rate in `--robustness-test-rates` using the **train-time normalization statistics** (test-time rate changes do not re-fit normalization). Output schema:
+- **Robustness** (`--robustness-mode`) — runs `(dataset × model)`. With defaults this emits one clean anchor evaluation. Additional positive test rates create an explicit robustness sweep; `0.0` is always included once. Trains once on `missing=0.0`; evaluates on every effective rate using the **train-time normalization statistics** (test-time rate changes do not re-fit normalization). Output schema:
   ```json
   {"mode": "robustness", "task": "classification",
    "train_missing_rate": 0.0, "train_missing_type": "STANDARD",
