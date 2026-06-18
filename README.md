@@ -200,7 +200,7 @@ Tutorial: <https://nde-for-ts.github.io/> (CIKM 2025).
 This is a **preview** release:
 
 - Classification is the primary supported workflow.
-- Source-checkout scripts default to model-specific search; constrained search is experimental and writes `_matched200k` params.
+- Source-checkout scripts default to model-specific search; constrained search is experimental and auxiliary.
 - Synthetic missingness (`MCAR`/`MAR`/`MNAR`/`BLOCK`/`BURST`) and robustness result schemas are experimental.
 - Stable and parity-verified claims remain future work (`1.0.0` is the stable target).
 

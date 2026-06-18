@@ -21,7 +21,7 @@ This reference shows how to use `torch-ists` data utilities with your own PyTorc
 
 ## 1. What This Reference Covers
 
-You can compose a user-owned `torch.nn.Module` (outside `torch_ists`) with the package's data loading, split utilities, preprocessing, and seed helpers. Training and any command-line entry points stay in your own code; the source-checkout CLI only accepts packaged model names. The rest of this doc shows the pattern.
+You can compose a user-owned `torch.nn.Module` (outside `torch_ists`) with the package's data loading, split utilities, preprocessing, and seed helpers. Training and any command-line entry points stay in your own code; the source-checkout CLI and packaged constructors accept only packaged model names. The rest of this doc shows the pattern.
 
 ## 2. Sequence Wrapper Pattern
 
