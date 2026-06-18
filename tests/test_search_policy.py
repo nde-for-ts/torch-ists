@@ -1,4 +1,5 @@
 from pathlib import Path
+import inspect
 import subprocess
 import sys
 
@@ -168,6 +169,46 @@ def test_cli_search_axes_artifact_names():
     ) == "BasicMotions_cnn_aggregated"
 
 
+def test_param_artifact_names_are_missingness_independent():
+    search_params = inspect.signature(_build_search_param_artifact_name).parameters
+    run_params = inspect.signature(_build_run_param_artifact_name).parameters
+    assert "missing_rate" not in search_params
+    assert "missing_rates" not in search_params
+    assert "missing_rate" not in run_params
+    assert "missing_rates" not in run_params
+
+    names = [
+        _build_search_param_artifact_name(
+            "BasicMotions",
+            "cnn",
+            search_policy="default",
+            search_repeat="single",
+        ),
+        _build_search_param_artifact_name(
+            "BasicMotions",
+            "cnn",
+            search_policy="default",
+            search_repeat="aggregated",
+        ),
+        _build_search_param_artifact_name(
+            "BasicMotions",
+            "cnn",
+            search_policy="constrained",
+            search_repeat="single",
+        ),
+        _build_run_param_artifact_name(
+            "BasicMotions",
+            "cnn",
+            param_policy="default",
+            param_repeat="single",
+        ),
+    ]
+    for artifact_name in names:
+        assert "missing" not in artifact_name.lower()
+        assert "_0.0" not in artifact_name
+        assert "_0.3" not in artifact_name
+
+
 def test_aggregated_param_artifact_compatibility_fallback(tmp_path):
     param_root = tmp_path / "params"
     dataset_dir = param_root / "BasicMotions"
@@ -210,6 +251,10 @@ def test_public_docs_track_cli_policy_repeat_surface():
     assert "| `--missing-rate` |" not in docs
     assert "--search-mode" not in docs
     assert "--param-mode" not in docs
+    param_doc_lines = [line for line in docs.splitlines() if "param-root" in line or "Params" in line or "Param file" in line]
+    assert param_doc_lines
+    assert all("<missing_rate>" not in line for line in param_doc_lines)
+    assert all("missing-rate suffix" not in line.lower() for line in param_doc_lines)
 
     param_help = subprocess.run(
         [sys.executable, str(SCRIPTS_ROOT / "param_search.py"), "--help"],
