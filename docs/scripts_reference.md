@@ -47,6 +47,10 @@ All three scripts also append a JSON manifest to `evidence/` for run tracking.
 - The hyperparameter search seed (`42`) is disjoint from the evaluation seeds (`0-4`), so every reported number is out-of-sample with respect to hyperparameter selection.
 - Reproducing the ICLR 2024 evaluation seed: after generating the fixed search split at seed `42`, pass `--seed 0` to `set_splits.py` and `model_run.py`. Keep `param_search.py --seed` at its default `42` — the search seed is fixed by policy (see above).
 
+**Batch size**:
+- `param_search.py` and `model_run.py` do not search `batch_size`; they determine it automatically from the loaded training split and sample footprint.
+- The resolved batch-size metadata is recorded in search/run manifests and run payload metadata.
+
 **Environment variable**:
 - `TORCH_ISTS_RUNTIME_ROOT` (optional) — override the runtime root when running the scripts from outside the package directory.
 - `TORCH_ISTS_DATA_ROOT` (optional) — override the built-in UCR/UEA archive root used by `--dataset-source default`.
@@ -137,7 +141,7 @@ This is a bounded smoke run; the full defaults (`--num-samples 20 --max-num-epoc
 ### Output
 
 - **Param file** (pickle): `<param-root>/<dataset>/<dataset>_<model>[_cv]` containing the best hyperparameter dict.
-- **Run manifest**: `<contract-dir>/search_<run-id>.json` (records, reused records, skipped, summary).
+- **Run manifest**: `<contract-dir>/search_<run-id>.json` (records, reused records, skipped, summary). Executed records include resolved batch-size metadata.
 
 ### Workflow Dependencies
 
@@ -236,7 +240,7 @@ The task and metric tables in this document describe `ists_model` API outputs. T
 ### Output
 
 - **Prediction file** (pickle): `<out-root>/<dataset>[/robustness]/<missing_rate>/<dataset>_[robustness_]<model>_<seed>`.
-- **Run manifest**: `<contract-dir>/run_<run-id>.json`.
+- **Run manifest**: `<contract-dir>/run_<run-id>.json`. Executed records include resolved batch-size metadata.
 
 ### Workflow Dependencies
 

@@ -141,6 +141,8 @@ PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/model_run.py \
 
 These are bounded smoke-safe runs; the full defaults (`param_search.py --num-samples 20`, `model_run.py --epochs 100`) and all flags are documented in `docs/scripts_reference.md`. The hyperparameter search seed (default `42`) is disjoint from the standard evaluation seeds (`0..4`), so reported numbers are out-of-sample with respect to hyperparameter selection. To reproduce the ICLR 2024 protocol pass `--seed 0` to step 1 (`set_splits.py`); step 2 (`param_search.py`) keeps its default `--seed 42` because the search seed is held fixed by policy (the param artifact filename does not encode the seed); steps 3 and 4 already run at seed `0`.
 
+The script workflow resolves `batch_size` automatically from the dataset instead of searching it; the resolved value is recorded with the run metadata. See [Scripts Reference](docs/scripts_reference.md).
+
 See [Model Reference](docs/model_reference.md) for which models need `preprocess(X, model_name=...)` versus the direct sequence stack.
 
 Imputation strategy:

@@ -31,7 +31,13 @@ import torch.optim as optim
 from torch import nn, Tensor
 from torch.utils.data import Dataset, DataLoader
 
-from _common import apply_model_scope_variant, configure_runtime_paths, default_method_for_model
+from _common import (
+    apply_model_scope_variant,
+    configure_runtime_paths,
+    default_method_for_model,
+    resolve_dataset_fixed_batch_policy,
+    resolve_learning_rate_policy,
+)
 from dataset_source_contracts import load_dataset, normalize_dataset_source
 from script_chain_contracts import (
     generate_run_id,
@@ -357,6 +363,11 @@ def _collect_task_metadata(
     with open(split_path, "rb") as f:
         train_idx, valid_idx, test_idx = pickle.load(f)
     del valid_idx, test_idx
+    batch_policy = resolve_dataset_fixed_batch_policy(
+        train_n=len(train_idx),
+        input_dim=num_dim,
+        seq_len=seq_len,
+    )
 
     data_config = get_data_config(model_name)
     X_missing, _, _, _ = preprocess(
@@ -421,6 +432,7 @@ def _collect_task_metadata(
     )
 
     return {
+        "batch_policy": batch_policy,
         "train_missing_summary": train_missing_summary,
         "target_spec": target_spec,
         "target_source": str(target_source if task != "classification" else "label"),
@@ -529,18 +541,6 @@ def _train_single_seed(
     seq_len = X.shape[2]
     num_class = len(np.unique(Y))
 
-    # Set batch_size
-    for i in range(4, 8):
-        batch_size = 2**i
-        if batch_size > num_data / 16:
-            break
-
-    # Set learning rate
-    if model_config['lr'] is None:
-        lr = 1e-3 * (batch_size / 2**4)
-    else:
-        lr = model_config['lr']
-
     # Load split file
     split_path = os.path.join(split_root, data_name, f'{data_name}_{seed}')
     if not os.path.exists(split_path):
@@ -550,6 +550,39 @@ def _train_single_seed(
         )
     with open(split_path, 'rb') as f:
         train_idx, valid_idx, test_idx = pickle.load(f)
+    batch_policy = resolve_dataset_fixed_batch_policy(
+        train_n=len(train_idx),
+        input_dim=num_dim,
+        seq_len=seq_len,
+    )
+    batch_size = int(batch_policy["batch_size"])
+
+    # Set learning rate
+    lr_policy = resolve_learning_rate_policy(model_config.get("lr"))
+    lr = float(lr_policy["lr"])
+    weight_decay = float(lr_policy["weight_decay"])
+    LOGGER.info(
+        "Batch policy dataset=%s model=%s seed=%s policy=%s batch=%d train_n=%d steps=%d drop=%d sample_elements=%d",
+        data_name,
+        model_name,
+        seed,
+        batch_policy["policy"],
+        batch_size,
+        batch_policy["train_n"],
+        batch_policy["train_steps_per_epoch"],
+        batch_policy["dropped_train_samples_per_epoch"],
+        batch_policy["sample_elements"],
+    )
+    LOGGER.info(
+        "Learning-rate policy dataset=%s model=%s seed=%s policy=%s source=%s lr=%g weight_decay=%g",
+        data_name,
+        model_name,
+        seed,
+        lr_policy["policy"],
+        lr_policy["source"],
+        lr,
+        weight_decay,
+    )
 
     # Preprocess data
     X_missing, X_mask, X_delta, coeffs = preprocess(
@@ -645,7 +678,12 @@ def _train_single_seed(
         targets=task_targets,
         target_masks=target_masks,
     )
-    train_batch = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, drop_last=True)
+    train_batch = DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        drop_last=False,
+    )
     valid_batch = DataLoader(valid_dataset, batch_size=batch_size, shuffle=True, drop_last=False)
 
     # Set model params
@@ -706,7 +744,7 @@ def _train_single_seed(
         criterion = nn.BCEWithLogitsLoss()
     else:
         criterion = nn.MSELoss()
-    optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=lr * 0.01)
+    optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.5)
 
     best_loss = np.inf
@@ -963,6 +1001,8 @@ def optimize(
             "param_hash": stable_hash(saved_model_config),
             "param_path": str(param_path),
             "split_path": str(split_path),
+            "batch_policy": metadata["batch_policy"],
+            "lr_policy": resolve_learning_rate_policy(saved_model_config.get("lr")),
             "train_missing_summary": metadata["train_missing_summary"],
             "target_spec": metadata["target_spec"],
             "target_source": metadata["target_source"],
@@ -1091,6 +1131,8 @@ def optimize(
         "param_hash": stable_hash(saved_param_config),
         "param_path": str(param_path),
         "split_path": str(split_path),
+        "batch_policy": metadata["batch_policy"],
+        "lr_policy": resolve_learning_rate_policy(saved_param_config.get("lr")),
         "train_missing_summary": metadata["train_missing_summary"],
         "target_spec": metadata["target_spec"],
         "target_source": metadata["target_source"],
@@ -1245,6 +1287,8 @@ def main():
                         "split_path": str(search_result["split_path"]),
                         "param_path": str(search_result["param_path"]),
                         "param_hash": str(search_result["param_hash"]),
+                        "batch_policy": search_result["batch_policy"],
+                        "lr_policy": search_result["lr_policy"],
                         "best_loss": float(search_result["best_loss"]),
                     }
                 )
