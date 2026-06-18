@@ -136,7 +136,7 @@ from pathlib import Path
 from torch_ists import load_splits
 
 
-train_idx, valid_idx, test_idx = load_splits(Path("split/ECG200/ECG200_0"))
+train_idx, valid_idx, test_idx = load_splits(Path("split/BasicMotions/BasicMotions_0"))
 ```
 
 For user-provided NPZ datasets, generate the split artifact with the source-checkout script, then train the custom model from a user-owned script:

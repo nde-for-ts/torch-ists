@@ -8,6 +8,7 @@ sys.path.insert(0, str(SCRIPTS_ROOT))
 
 from _common import (
     build_model_kwargs_from_config,
+    describe_search_profile,
     infer_param_search_profile,
     normalize_search_profile,
     resolve_effective_param_config,
@@ -20,6 +21,18 @@ from torch_ists.config import get_active_model_list
 def test_search_profile_aliases_and_grids():
     assert normalize_search_profile("default") == "legacy-expanded-v1"
     assert normalize_search_profile("iclr2024") == "legacy-iclr2024-v0"
+    assert describe_search_profile("default") == {
+        "search_contract": "model-specific-default-v1",
+        "search_family": "default",
+        "search_profile_visibility": "internal",
+        "public_search_name": "default model-specific search",
+    }
+    assert describe_search_profile("iclr2024") == {
+        "search_contract": "historical-reproducibility-v1",
+        "search_family": "historical_reproducibility",
+        "search_profile_visibility": "internal",
+        "public_search_name": "historical reproducibility",
+    }
 
     expanded = resolve_model_search_space("rnn", "legacy-expanded-v1")
     assert expanded["hidden_dim_values"] == [32, 64, 96, 128, 192, 256]
@@ -32,7 +45,7 @@ def test_search_profile_aliases_and_grids():
 
 def test_public_active_models_resolve_effective_config():
     models = get_active_model_list()
-    assert len(models) == 47
+    assert len(models) == 50
     for model_name in models:
         space = resolve_model_search_space(model_name, "legacy-expanded-v1")
         assert space["search_profile"] == "legacy-expanded-v1"
@@ -50,6 +63,9 @@ def test_public_active_models_resolve_effective_config():
             search_profile="legacy-expanded-v1",
         )
         assert cfg["search_policy"] == "model-specific-effective-params-v1"
+        assert cfg["search_contract"] == "model-specific-default-v1"
+        assert cfg["search_family"] == "default"
+        assert cfg["search_profile_visibility"] == "internal"
         assert cfg["legacy_grid_version"] == "legacy-expanded-v1"
         assert cfg["architecture_axes"]["width_axis"] == "hidden_dim"
         assert cfg["architecture_axes"]["depth_axis"] == "depth_level"

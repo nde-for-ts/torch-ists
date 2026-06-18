@@ -37,6 +37,7 @@ from _common import (
     build_model_kwargs_from_config,
     configure_runtime_paths,
     default_method_for_model,
+    describe_search_profile,
     infer_param_search_profile,
     normalize_search_profile,
     resolve_dataset_fixed_batch_policy,
@@ -111,14 +112,14 @@ def _requires_flow_raw_input(model_name: str) -> bool:
 
 def parse_cli_args():
     parser = argparse.ArgumentParser(
-        description="Run parameter search loop (default full loop, optional subset mode)."
+        description="Run parameter search loop. Defaults to one dataset-model configuration; comma-separated inputs expand the run grid."
     )
     parser.add_argument("--seed", type=int, default=42, help="Search seed (default 42, held fixed by policy; eval seeds 0-4 are disjoint). The param artifact filename does not encode the seed, so overriding silently reuses the seed-42 artifact unless you back up params/ and pass --existing-policy fail.")
     parser.add_argument(
         "--datasets",
         type=str,
-        required=True,
-        help="Comma-separated dataset list.",
+        default="BasicMotions",
+        help="Comma-separated dataset list. Default: BasicMotions.",
     )
     parser.add_argument(
         "--dataset-source",
@@ -182,8 +183,7 @@ def parse_cli_args():
         "--search-profile",
         type=_normalize_search_profile_arg,
         default=DEFAULT_SEARCH_PROFILE,
-        metavar="{legacy-expanded-v1,legacy-iclr2024-v0}",
-        help="Parameter search profile. Default legacy-expanded-v1 searches model-specific effective depth over the expanded legacy grid; legacy-iclr2024-v0 keeps the historical 4x4 grid.",
+        help=argparse.SUPPRESS,
     )
     parser.add_argument(
         "--split-root",
@@ -901,6 +901,10 @@ def optimize(
             "model_name": model_name,
             "task": task,
             "search_profile": search_profile,
+            "search_contract": search_space["search_contract"],
+            "search_family": search_space["search_family"],
+            "public_search_name": search_space["public_search_name"],
+            "search_profile_visibility": search_space["search_profile_visibility"],
             "search_policy": search_space["policy"],
             "lr": 1e-3,
             "hidden_dim": int(search_space["default_hidden_dim"]),
@@ -992,6 +996,10 @@ def optimize(
             "batch_policy": metadata["batch_policy"],
             "lr_policy": resolve_learning_rate_policy(saved_model_config.get("lr")),
             "search_profile": search_profile,
+            "search_contract": saved_model_config["search_contract"],
+            "search_family": saved_model_config["search_family"],
+            "public_search_name": saved_model_config["public_search_name"],
+            "search_profile_visibility": saved_model_config["search_profile_visibility"],
             "search_policy": search_space["policy"],
             "legacy_grid_version": saved_model_config["legacy_grid_version"],
             "architecture_axes": saved_model_config["architecture_axes"],
@@ -1038,6 +1046,10 @@ def optimize(
         "model_name": model_name,
         "task": task,
         "search_profile": search_profile,
+        "search_contract": search_space["search_contract"],
+        "search_family": search_space["search_family"],
+        "public_search_name": search_space["public_search_name"],
+        "search_profile_visibility": search_space["search_profile_visibility"],
         "search_policy": search_space["policy"],
         # "batch_size": None, # determine by the number of the data
         "lr": tune.loguniform(*search_space["lr_bounds"]),
@@ -1133,6 +1145,10 @@ def optimize(
         "batch_policy": metadata["batch_policy"],
         "lr_policy": resolve_learning_rate_policy(saved_param_config.get("lr")),
         "search_profile": search_profile,
+        "search_contract": saved_param_config["search_contract"],
+        "search_family": saved_param_config["search_family"],
+        "public_search_name": saved_param_config["public_search_name"],
+        "search_profile_visibility": saved_param_config["search_profile_visibility"],
         "search_policy": search_space["policy"],
         "legacy_grid_version": saved_param_config["legacy_grid_version"],
         "architecture_axes": saved_param_config["architecture_axes"],
@@ -1159,8 +1175,7 @@ def main():
     policy_violations = []
 
     if args.datasets is None:
-        data_selected = get_default_selected_datasets()
-        np.random.shuffle(data_selected)
+        data_selected = ["BasicMotions"]
     else:
         data_selected = args.datasets
 
@@ -1219,6 +1234,7 @@ def main():
                         policy_violations.append(f"{data_name}/{model_name}: {reason}")
                         continue
                     existing_profile = infer_param_search_profile(existing_cfg)
+                    existing_contract = describe_search_profile(existing_profile)
                     if existing_profile != args.search_profile:
                         reason = (
                             "param artifact search_profile mismatch "
@@ -1240,6 +1256,10 @@ def main():
                             "task": args.task,
                             "target_source": args.target_source,
                             "search_profile": existing_profile,
+                            "search_contract": existing_cfg.get("search_contract", existing_contract["search_contract"]),
+                            "search_family": existing_cfg.get("search_family", existing_contract["search_family"]),
+                            "public_search_name": existing_cfg.get("public_search_name", existing_contract["public_search_name"]),
+                            "search_profile_visibility": existing_cfg.get("search_profile_visibility", existing_contract["search_profile_visibility"]),
                             "search_policy": existing_cfg.get("search_policy"),
                             "legacy_grid_version": existing_cfg.get("legacy_grid_version", existing_profile),
                             "architecture_axes": existing_cfg.get("architecture_axes"),
@@ -1308,6 +1328,10 @@ def main():
                         "batch_policy": search_result["batch_policy"],
                         "lr_policy": search_result["lr_policy"],
                         "search_profile": search_result["search_profile"],
+                        "search_contract": search_result["search_contract"],
+                        "search_family": search_result["search_family"],
+                        "public_search_name": search_result["public_search_name"],
+                        "search_profile_visibility": search_result["search_profile_visibility"],
                         "search_policy": search_result["search_policy"],
                         "legacy_grid_version": search_result["legacy_grid_version"],
                         "architecture_axes": search_result["architecture_axes"],
@@ -1361,6 +1385,7 @@ def main():
             "dataset_npz": None if args.dataset_npz is None else str(args.dataset_npz),
             "target_source": args.target_source if args.task != "classification" else "label",
             "search_profile": args.search_profile,
+            **describe_search_profile(args.search_profile),
             "split_root": str(args.split_root),
             "param_root": str(args.param_root),
             "records": records,

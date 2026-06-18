@@ -17,12 +17,16 @@ LEGACY_ICLR2024_SEARCH_PROFILE = "legacy-iclr2024-v0"
 LEGACY_EXPANDED_SEARCH_PROFILE = "legacy-expanded-v1"
 DEFAULT_SEARCH_PROFILE = LEGACY_EXPANDED_SEARCH_PROFILE
 MODEL_SPECIFIC_SEARCH_POLICY_NAME = "model-specific-effective-params-v1"
+DEFAULT_SEARCH_CONTRACT_NAME = "model-specific-default-v1"
+HISTORICAL_SEARCH_CONTRACT_NAME = "historical-reproducibility-v1"
+INTERNAL_SEARCH_PROFILE_VISIBILITY = "internal"
 __all__ = [
     "configure_runtime_paths",
     "apply_model_scope_variant",
     "default_method_for_model",
     "resolve_dataset_fixed_batch_policy",
     "resolve_learning_rate_policy",
+    "describe_search_profile",
     "normalize_search_profile",
     "infer_param_search_profile",
     "resolve_model_search_space",
@@ -132,6 +136,24 @@ def normalize_search_profile(raw: str | None) -> str:
         raise ValueError(f"Unknown search profile: {raw!r}. Allowed: {allowed}.") from exc
 
 
+def describe_search_profile(raw: str | None) -> dict:
+    """Return public contract metadata for an internal artifact profile."""
+    profile = normalize_search_profile(raw)
+    if profile == LEGACY_ICLR2024_SEARCH_PROFILE:
+        return {
+            "search_contract": HISTORICAL_SEARCH_CONTRACT_NAME,
+            "search_family": "historical_reproducibility",
+            "search_profile_visibility": INTERNAL_SEARCH_PROFILE_VISIBILITY,
+            "public_search_name": "historical reproducibility",
+        }
+    return {
+        "search_contract": DEFAULT_SEARCH_CONTRACT_NAME,
+        "search_family": "default",
+        "search_profile_visibility": INTERNAL_SEARCH_PROFILE_VISIBILITY,
+        "public_search_name": "default model-specific search",
+    }
+
+
 def infer_param_search_profile(model_config: dict | None) -> str:
     """Infer profile for saved params; missing profile means historical ICLR grid."""
     if not model_config:
@@ -198,6 +220,7 @@ def _resolve_layer_depth(model_name: str, depth_level: int) -> tuple[int, int]:
 def resolve_model_search_space(model_name: str, search_profile: str | None = None) -> dict:
     """Return the meaningful sampled axes for a model under a search profile."""
     profile = normalize_search_profile(search_profile)
+    contract = describe_search_profile(profile)
     grid = _SEARCH_PROFILE_GRIDS[profile]
     normalized_model = _canonical_model_name(model_name)
     depth_values = list(grid["depth_level_values"])
@@ -206,6 +229,7 @@ def resolve_model_search_space(model_name: str, search_profile: str | None = Non
     return {
         "policy": MODEL_SPECIFIC_SEARCH_POLICY_NAME,
         "search_profile": profile,
+        **contract,
         "model_name": normalized_model,
         "hidden_dim_values": list(grid["hidden_dim_values"]),
         "depth_level_values": depth_values,
@@ -274,6 +298,7 @@ def resolve_effective_param_config(
 
     saved = dict(config)
     saved["search_profile"] = profile
+    saved.update(describe_search_profile(profile))
     saved["search_policy"] = MODEL_SPECIFIC_SEARCH_POLICY_NAME
     saved["legacy_grid_version"] = profile
     saved["hidden_dim"] = int(hidden_dim)

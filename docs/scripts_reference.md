@@ -51,8 +51,9 @@ All three scripts also append a JSON manifest to `evidence/` for run tracking.
 - `param_search.py` and `model_run.py` do not search `batch_size`; they determine it automatically from the loaded training split and sample footprint.
 - The resolved batch-size metadata is recorded in search/run manifests and run payload metadata.
 
-**Parameter grid**:
-- `param_search.py` defaults to `--search-profile legacy-expanded-v1`, which searches model-specific effective width/depth axes while preserving `legacy-iclr2024-v0` as an explicit compatibility profile.
+**Search contract**:
+- `param_search.py` uses the package default search contract and records search metadata in parameter artifacts and manifests.
+- Historical width/depth-only profiles are internal compatibility metadata, not part of the public workflow.
 
 **Environment variable**:
 - `TORCH_ISTS_RUNTIME_ROOT` (optional) — override the runtime root when running the scripts from outside the package directory.
@@ -69,7 +70,7 @@ All three scripts also append a JSON manifest to `evidence/` for run tracking.
 **Usage**:
 
 ```bash
-PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/set_splits.py --dataset-name ECG200 --seed 42
+PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/set_splits.py --dataset-name BasicMotions --seed 42
 ```
 
 ### Flags
@@ -95,14 +96,12 @@ PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/set_splits.py --dataset-name ECG2
 
 ## 3. `param_search.py`
 
-**Purpose**: Run a hyperparameter search for one or more models on one or more datasets, using splits from `set_splits.py`. Multi-sample search uses Ray Tune; single-sample search (`--num-samples 1`) runs locally without Ray.
+**Purpose**: Run a hyperparameter search for one or more models on one or more datasets, using splits from `set_splits.py`. The default is a single `BasicMotions × cnn` configuration. Multi-sample search uses Ray Tune; single-sample search (`--num-samples 1`) runs locally without Ray.
 
 **Usage** (bounded first-run smoke):
 
 ```bash
 PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/param_search.py \
-    --datasets ECG200,GunPoint \
-    --models neuralcde,neural_lsde \
     --seed 42 \
     --num-samples 1 --max-num-epochs 1
 ```
@@ -114,7 +113,7 @@ This is a bounded smoke run; the full defaults (`--num-samples 20 --max-num-epoc
 | Flag | Type | Default | Description |
 |---|---|---|---|
 | `--seed` | `int` | `42` | Global seed for split selection and reproducibility. Default `42` is the fixed search seed by policy (the param artifact filename does not encode the search seed, so overriding silently reuses or overwrites the seed-42 artifact). Disjoint from evaluation seeds `0-4`, so reported numbers are out-of-sample with respect to hyperparameter selection. |
-| `--datasets` | `str` | (required) | Comma-separated dataset list. |
+| `--datasets` | `str` | `BasicMotions` | Comma-separated dataset list. Pass a comma-separated list to run additional datasets. |
 | `--dataset-source` | `{default,npz}` | `default` | Dataset source backend. `default` loads benchmark archive data by dataset name through `torch_ists.benchmark_loader.get_data`; `npz` loads one local file through `--dataset-npz`. |
 | `--dataset-npz` | `str` | `None` | Required when `--dataset-source npz`; `--datasets` must contain exactly one dataset name. |
 | `--models` | `str` | `cnn` | Comma-separated model list. Pass a comma-separated list to run additional models. |
@@ -125,7 +124,6 @@ This is a bounded smoke run; the full defaults (`--num-samples 20 --max-num-epoc
 | `--max-runs-mode` | `{completed, new}` | `completed` | What counts toward `--max-runs`: `completed` (executed + reused) or `new` (executed only). |
 | `--existing-policy` | `{reuse, fail}` | `reuse` | Behavior when a param artifact already exists. **Note**: the artifact filename (`<dataset>_<model>[_cv]`) does not encode the search seed; the search seed is held at `42` by policy. If you override `--seed`, delete or back up the existing `params/` directory and pass `--existing-policy fail` to surface any silently-reused artifact. |
 | `--search-mode` | `{default, cv}` | `default` | `default` runs the single-seed policy search (default `--seed 42`, fixed by policy); `cv` averages over `SEED=0–4` (≈5× compute; note that `cv` uses the evaluation seeds for hyperparameter selection). |
-| `--search-profile` | `{legacy-expanded-v1, legacy-iclr2024-v0}` | `legacy-expanded-v1` | Parameter grid profile. The default expands the legacy width/depth grid and resolves model-specific effective parameters; `legacy-iclr2024-v0` keeps the historical 4×4 grid. |
 | `--ray-cpu` | `float` | `16.0` | CPU per Ray trial. |
 | `--ray-gpu` | `float` | `0.5` | GPU per Ray trial (`0` for CPU-only). |
 | `--device` | `{auto, cpu, cuda}` | `auto` | Per-trial device selection. |
@@ -144,25 +142,23 @@ This is a bounded smoke run; the full defaults (`--num-samples 20 --max-num-epoc
 
 ### Output
 
-- **Param file** (pickle): `<param-root>/<dataset>/<dataset>_<model>[_cv]` containing the best hyperparameter dict, `search_profile`, and resolved effective model parameters.
-- **Run manifest**: `<contract-dir>/search_<run-id>.json` (records, reused records, skipped, summary). Executed records include resolved batch-size and search-profile metadata.
+- **Param file** (pickle): `<param-root>/<dataset>/<dataset>_<model>[_cv]` containing the best hyperparameter dict, resolved effective model parameters, and machine-readable search-contract provenance.
+- **Run manifest**: `<contract-dir>/search_<run-id>.json` (records, reused records, skipped, summary). Executed records include resolved batch-size and search-contract metadata.
 
 ### Workflow Dependencies
 
-Requires the split file from `set_splits.py` at the configured search seed (default `42`) for every dataset in `--datasets`. For standard evaluation, also generate `set_splits.py --seed 0..4` for the splits consumed by `model_run.py`; for the ICLR 2024 evaluation seed, generate and evaluate seed `0` while keeping `param_search.py --seed` at its default `42`.
+Requires the split file from `set_splits.py` at the configured search seed (default `42`) for every dataset in `--datasets`. For standard evaluation, also generate the evaluation split consumed by `model_run.py` (default seed `0`); generate `set_splits.py --seed 0..4` only when running the full evaluation seed sweep.
 
 ---
 
 ## 4. `model_run.py`
 
-**Purpose**: Train models with the searched hyperparameters and evaluate on the test set, in either standard mode (sweep over missing rates) or robustness mode (train at `missing=0`, test on multiple rates).
+**Purpose**: Train models with the searched hyperparameters and evaluate on the test set. The default is a single `BasicMotions × cnn × missing_rate=0.0` run. Comma-separated arguments expand this into dataset, model, or missing-rate sweeps.
 
 **Usage** (standard mode, bounded first-run smoke):
 
 ```bash
 PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/model_run.py \
-    --datasets ECG200 \
-    --models neural_lsde \
     --seed 0 \
     --epochs 1 --max-runs 1
 ```
@@ -173,11 +169,8 @@ This is a bounded smoke run; the full default (`--epochs 100`) is the production
 
 ```bash
 PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/model_run.py \
-    --datasets ECG200 \
-    --models neural_lsde \
     --seed 0 \
-    --robustness-mode \
-    --robustness-test-rates "0.0,0.3,0.5,0.7"
+    --robustness-mode
 ```
 
 ### Flags
@@ -185,20 +178,19 @@ PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/model_run.py \
 | Flag | Type | Default | Description |
 |---|---|---|---|
 | `--seed` | `int` | `0` | Random seed. |
-| `--datasets` | `str` | (default list) | Comma-separated dataset list. Defaults to the packaged dataset list. |
+| `--datasets` | `str` | `BasicMotions` | Comma-separated dataset list. Pass a comma-separated list to run additional datasets. |
 | `--dataset-source` | `{default,npz}` | `default` | Dataset source backend. `default` loads benchmark archive data by dataset name through `torch_ists.benchmark_loader.get_data`; `npz` loads one local file through `--dataset-npz`. |
 | `--dataset-npz` | `str` | `None` | Required when `--dataset-source npz`; `--datasets` must contain exactly one dataset name. |
 | `--models` | `str` | `cnn` | Comma-separated model list. Pass a comma-separated list to run additional models. |
-| `--missing-rates` | `str` | `0.0,0.3,0.5,0.7` | Comma-separated missing rates for standard mode. Ignored in robustness mode. |
+| `--missing-rates` | `str` | `0.0` | Comma-separated missing rates for standard mode. Ignored in robustness mode. |
 | `--epochs` | `int` | `100` | Epochs per (dataset, missing-rate, model) run. |
 | `--max-runs` | `int` | `None` | Stop after this many runs across the run grid. |
 | `--max-runs-mode` | `{completed, new}` | `completed` | What counts toward `--max-runs`. |
 | `--existing-policy` | `{reuse, fail}` | `reuse` | Behavior when an output artifact already exists. |
 | `--check` / `--no-check` | flag | `True` | Pre-flight existence check; skip the run if the output file already exists. |
 | `--param-mode` | `{default, cv}` | `default` | Which `param_search.py` output to consume. Must match the search mode used. |
-| `--search-profile` | `{legacy-expanded-v1, legacy-iclr2024-v0}` | `legacy-expanded-v1` | Expected search profile of the loaded param artifact. Use `legacy-iclr2024-v0` only when intentionally evaluating historical-grid params. |
-| `--robustness-mode` | flag | `False` | Robustness evaluation: train on `missing=0`, evaluate on multiple test rates. |
-| `--robustness-test-rates` | `str` | `0.0,0.3,0.5,0.7` | Test missing rates for robustness mode. Only used when `--robustness-mode` is set. |
+| `--robustness-mode` | flag | `False` | Robustness evaluation: train on `missing=0.0`, evaluate on configured test rates. |
+| `--robustness-test-rates` | `str` | `0.0` | Test missing rates for robustness mode. Pass a comma-separated list for a robustness sweep. |
 | `--save-predictions` | `{full, summary}` | `full` | `full` stores prediction arrays; `summary` stores only shape/dtype metadata. |
 | `--split-root` | `str` | `split` | Input split artifact root. |
 | `--param-root` | `str` | `params` | Input parameter artifact root. |
@@ -211,12 +203,12 @@ PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/model_run.py \
 
 ### Runtime Modes
 
-- **Standard** (default) — triple loop `(dataset × missing-rate × model)`. Trains once per missing rate and evaluates on the test set at the same rate. Output schema:
+- **Standard** (default) — runs `(dataset × missing-rate × model)`. With defaults this is one `BasicMotions × 0.0 × cnn` configuration. Trains once per missing rate and evaluates on the test set at the same rate. Output schema:
   ```json
   {"mode": "standard", "task": "classification",
    "train_missing_rate": <r>, "evaluations": [...], "meta": {...}}
   ```
-- **Robustness** (`--robustness-mode`) — double loop `(dataset × model)`. Trains once on `missing=0.0`; evaluates on every rate in `--robustness-test-rates` using the **train-time normalization statistics** (test-time rate changes do not re-fit normalization). Output schema:
+- **Robustness** (`--robustness-mode`) — runs `(dataset × model)`. Trains once on `missing=0.0`; evaluates on every rate in `--robustness-test-rates` using the **train-time normalization statistics** (test-time rate changes do not re-fit normalization). Output schema:
   ```json
   {"mode": "robustness", "task": "classification",
    "train_missing_rate": 0.0,
@@ -251,7 +243,7 @@ The task and metric tables in this document describe `ists_model` API outputs. T
 
 Requires:
 - Split files from `set_splits.py` for every dataset at every reported evaluation seed (`--seed 0..4` for the standard evaluation; the `param_search.py` step additionally needs the configured search seed, default `--seed 42`).
-- Param files from `param_search.py --search-mode {default|cv}` and `--search-profile ...` matching `--param-mode` and `--search-profile`.
+- Param files from `param_search.py --search-mode {default|cv}` matching `--param-mode`. The run step validates the parameter artifact search contract before reuse.
 
 ---
 

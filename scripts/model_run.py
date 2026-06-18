@@ -37,6 +37,7 @@ from _common import (
     build_model_kwargs_from_config,
     configure_runtime_paths,
     default_method_for_model,
+    describe_search_profile,
     infer_param_search_profile,
     normalize_search_profile,
     resolve_dataset_fixed_batch_policy,
@@ -115,10 +116,23 @@ def _validate_param_search_profile(
         raise ValueError(
             "Param artifact search_profile mismatch: "
             f"{param_path} has {actual!r}, expected {expected!r}. "
-            "Pass --search-profile legacy-iclr2024-v0 only when intentionally "
-            "evaluating historical-grid params."
+            "Regenerate params with the current default search, or use an "
+            "internal compatibility profile only for intentional migration checks."
         )
     return actual
+
+
+def _param_search_contract_metadata(model_config: dict, search_profile: str) -> dict:
+    contract = describe_search_profile(search_profile)
+    return {
+        "search_contract": model_config.get("search_contract", contract["search_contract"]),
+        "search_family": model_config.get("search_family", contract["search_family"]),
+        "public_search_name": model_config.get("public_search_name", contract["public_search_name"]),
+        "search_profile_visibility": model_config.get(
+            "search_profile_visibility",
+            contract["search_profile_visibility"],
+        ),
+    }
 
 
 def _parse_missing_rates(raw):
@@ -184,18 +198,6 @@ def _parse_robustness_channel_sync_options(raw):
     return list(dict.fromkeys(resolved))
 
 
-def _parse_robustness_test_seeds(raw):
-    if raw is None:
-        raw = "0"
-    if isinstance(raw, str):
-        tokens = [token.strip() for token in raw.split(",") if token.strip()]
-    else:
-        tokens = [str(token).strip() for token in raw if str(token).strip()]
-    if not tokens:
-        raise ValueError("At least one robustness missingness seed must be provided.")
-    return list(dict.fromkeys(int(token) for token in tokens))
-
-
 def _resolve_channel_sync_options(options, use_raw_flow_input):
     resolved = []
     for option in _parse_robustness_channel_sync_options(options):
@@ -210,6 +212,10 @@ def _resolve_channel_sync_options(options, use_raw_flow_input):
     return resolved
 
 
+def _is_zero_missing_rate(rate):
+    return abs(float(rate)) < 1e-12
+
+
 def _axis_token(values):
     return "-".join(
         str(value).strip().lower().replace("_", "-").replace(".", "p").replace("-", "m")
@@ -221,35 +227,34 @@ def _build_robustness_axis_suffix(
     robustness_test_rates=None,
     robustness_test_mechanisms=None,
     robustness_channel_sync_options=None,
-    robustness_test_seeds=None,
 ):
     rates = _parse_missing_rates(robustness_test_rates)
     mechanisms = _parse_robustness_mechanisms(robustness_test_mechanisms)
     sync_options = _parse_robustness_channel_sync_options(robustness_channel_sync_options)
-    seeds = _parse_robustness_test_seeds(robustness_test_seeds)
-    if rates == [0.0, 0.3, 0.5, 0.7] and mechanisms == ["MCAR"] and sync_options == ["auto"] and seeds == [0]:
+    if all(_is_zero_missing_rate(rate) for rate in rates):
+        return ""
+    if rates == [0.0, 0.3, 0.5, 0.7] and mechanisms == ["MCAR"] and sync_options == ["auto"]:
         return ""
     return "__" + "__".join(
         [
             "rates_" + _axis_token(rates),
             "types_" + _axis_token(mechanisms),
             "sync_" + _axis_token(sync_options),
-            "mseeds_" + _axis_token(seeds),
         ]
     )
 
 
 def parse_cli_args():
     parser = argparse.ArgumentParser(
-        description="Run evaluation loop (default full loop, optional subset mode)."
+        description="Run evaluation loop. Defaults to one dataset-model-missingness configuration; comma-separated inputs expand the run grid."
     )
     parser.add_argument("seed_positional", nargs="?", type=int, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--seed", type=int, default=None, help="Random seed override.")
     parser.add_argument(
         "--datasets",
         type=str,
-        default=None,
-        help="Comma-separated dataset list. Default uses get_default_selected_datasets().",
+        default="BasicMotions",
+        help="Comma-separated dataset list. Default: BasicMotions.",
     )
     parser.add_argument(
         "--dataset-source",
@@ -273,8 +278,8 @@ def parse_cli_args():
     parser.add_argument(
         "--missing-rates",
         type=str,
-        default=None,
-        help="Comma-separated missing rates. Default: 0.0,0.3,0.5,0.7",
+        default="0.0",
+        help="Comma-separated missing rates. Default: 0.0.",
     )
     parser.add_argument("--epochs", type=int, default=100, help="Epochs per run.")
     parser.add_argument(
@@ -321,19 +326,18 @@ def parse_cli_args():
         "--search-profile",
         type=_normalize_search_profile_arg,
         default=DEFAULT_SEARCH_PROFILE,
-        metavar="{legacy-expanded-v1,legacy-iclr2024-v0}",
-        help="Expected search profile of the loaded param artifact.",
+        help=argparse.SUPPRESS,
     )
     parser.add_argument(
         "--robustness-mode",
         action="store_true",
-        help="Robustness evaluation: train on missing=0, test on multiple rates",
+        help="Robustness evaluation: train on missing=0.0 and test on configured rates.",
     )
     parser.add_argument(
         "--robustness-test-rates",
         type=str,
-        default="0.0,0.3,0.5,0.7",
-        help="Comma-separated test missing rates for robustness mode",
+        default="0.0",
+        help="Comma-separated test missing rates for robustness mode. Default: 0.0.",
     )
     parser.add_argument(
         "--robustness-test-mechanisms",
@@ -346,12 +350,6 @@ def parse_cli_args():
         type=str,
         default="auto",
         help="Comma-separated channel_sync options for robustness mode: auto,false,true",
-    )
-    parser.add_argument(
-        "--robustness-test-seeds",
-        type=str,
-        default="0",
-        help="Comma-separated missingness RNG seeds for robustness test injections",
     )
     parser.add_argument(
         "--split-root",
@@ -432,7 +430,6 @@ def parse_cli_args():
     args.robustness_test_rates = _parse_missing_rates(args.robustness_test_rates)
     args.robustness_test_mechanisms = _parse_robustness_mechanisms(args.robustness_test_mechanisms)
     args.robustness_channel_sync_options = _parse_robustness_channel_sync_options(args.robustness_channel_sync_options)
-    args.robustness_test_seeds = _parse_robustness_test_seeds(args.robustness_test_seeds)
     args.dataset_source = normalize_dataset_source(args.dataset_source)
     if args.dataset_source == "npz":
         if args.dataset_npz is None:
@@ -515,14 +512,12 @@ def _build_output_path(
     robustness_test_rates=None,
     robustness_test_mechanisms=None,
     robustness_channel_sync_options=None,
-    robustness_test_seeds=None,
 ):
     if robustness_mode:
         suffix = _build_robustness_axis_suffix(
             robustness_test_rates=robustness_test_rates,
             robustness_test_mechanisms=robustness_test_mechanisms,
             robustness_channel_sync_options=robustness_channel_sync_options,
-            robustness_test_seeds=robustness_test_seeds,
         )
         out_name = "_".join([data_name, "robustness", model_name, str(seed)]) + suffix
         return os.path.join(out_root, data_name, "robustness", out_name)
@@ -629,7 +624,7 @@ def _build_evaluation_result(
     task="classification",
     test_missing_type="MCAR",
     test_channel_sync=None,
-    test_missing_seed=0,
+    missing_seed=0,
     save_predictions="full",
 ):
     task = str(task).strip().lower()
@@ -761,10 +756,10 @@ def _build_evaluation_result(
         else:
             raise ValueError(f"save_predictions must be 'full' or 'summary', got {save_predictions!r}")
     return {
+        "missing_seed": int(missing_seed),
         "test_missing_rate": float(test_missing_rate),
         "test_missing_type": str(test_missing_type).upper(),
         "test_channel_sync": None if test_channel_sync is None else bool(test_channel_sync),
-        "test_missing_seed": int(test_missing_seed),
         "metrics": metrics,
         "predictions": predictions,
     }
@@ -830,7 +825,6 @@ def run_model(
     robustness_test_rates=None,
     robustness_test_mechanisms=None,
     robustness_channel_sync_options=None,
-    robustness_test_seeds=None,
     split_root="split",
     out_root="out",
     run_id=None,
@@ -847,16 +841,15 @@ def run_model(
         robustness_test_rates = _parse_missing_rates(robustness_test_rates)
         robustness_test_mechanisms = _parse_robustness_mechanisms(robustness_test_mechanisms)
         robustness_channel_sync_options = _parse_robustness_channel_sync_options(robustness_channel_sync_options)
-        robustness_test_seeds = _parse_robustness_test_seeds(robustness_test_seeds)
     if robustness_mode:
         LOGGER.info(
-            "Robustness run start dataset=%s model=%s (train missing=0.0, test rates=%s, types=%s, sync=%s, missing_seeds=%s)",
+            "Robustness run start dataset=%s model=%s (train missing=0.0, test rates=%s, types=%s, sync=%s, seed=%s)",
             data_name,
             model_name,
             robustness_test_rates,
             robustness_test_mechanisms,
             robustness_channel_sync_options,
-            robustness_test_seeds,
+            SEED,
         )
     else:
         LOGGER.info("Run start dataset=%s missing=%.1f model=%s", data_name, missing_rate, model_name)
@@ -872,7 +865,6 @@ def run_model(
         robustness_test_rates=robustness_test_rates,
         robustness_test_mechanisms=robustness_test_mechanisms,
         robustness_channel_sync_options=robustness_channel_sync_options,
-        robustness_test_seeds=robustness_test_seeds,
     )
 
     if CHECK and os.path.exists(out_path):
@@ -919,6 +911,10 @@ def run_model(
 
     # set learning params
     lr_policy = resolve_learning_rate_policy(model_config.get("lr"))
+    param_search_contract = _param_search_contract_metadata(
+        model_config,
+        infer_param_search_profile(model_config),
+    )
     lr = float(lr_policy["lr"])
     weight_decay = float(lr_policy["weight_decay"])
     LOGGER.info(
@@ -1167,7 +1163,6 @@ def run_model(
             test_missing_rates=robustness_test_rates,
             test_missing_mechanisms=robustness_test_mechanisms,
             channel_sync_options=robustness_channel_sync_options,
-            test_missing_seeds=robustness_test_seeds,
             X=X,
             Y=Y,
             train_idx=train_idx,
@@ -1202,15 +1197,16 @@ def run_model(
             batch_policy=batch_policy,
             lr_policy=lr_policy,
             robustness_axes={
+                "missing_seed": int(SEED),
                 "test_missing_rates": [float(rate) for rate in robustness_test_rates],
                 "test_missing_types": list(robustness_test_mechanisms),
                 "test_channel_sync_options": _resolve_channel_sync_options(
                     robustness_channel_sync_options,
                     use_raw_flow_input,
                 ),
-                "test_missing_seeds": [int(seed) for seed in robustness_test_seeds],
             },
         )
+        payload.update(param_search_contract)
 
         # Save robustness results
         output_path = _build_output_path(
@@ -1223,7 +1219,6 @@ def run_model(
             robustness_test_rates=robustness_test_rates,
             robustness_test_mechanisms=robustness_test_mechanisms,
             robustness_channel_sync_options=robustness_channel_sync_options,
-            robustness_test_seeds=robustness_test_seeds,
         )
         with open(output_path, 'wb') as f:
             pickle.dump(payload, f)
@@ -1263,12 +1258,12 @@ def run_model(
             "dataset_npz": None if dataset_npz is None else str(dataset_npz),
             "task": task,
             "model": model_name,
+            **param_search_contract,
             "seed": int(SEED),
             "missing_rate": 0.0,
             "robustness_test_rates": [float(rate) for rate in robustness_test_rates],
             "robustness_test_mechanisms": list(robustness_test_mechanisms),
             "robustness_channel_sync_options": list(robustness_channel_sync_options),
-            "robustness_test_seeds": [int(seed) for seed in robustness_test_seeds],
             "robustness_evaluations": int(len(evaluations)),
             "split_path": str(split_path),
             "output_path": str(output_path),
@@ -1312,6 +1307,7 @@ def run_model(
             y_true=y_true,
             y_pred=y_pred,
             logit_list=logit_list,
+            missing_seed=SEED,
             save_predictions=save_predictions,
         )
         metrics = eval_result["metrics"]
@@ -1363,6 +1359,7 @@ def run_model(
             test_missing_rate=missing_rate,
             task_pred=task_pred,
             task_target=task_target,
+            missing_seed=SEED,
             save_predictions=save_predictions,
         )
         metrics = eval_result["metrics"]
@@ -1419,6 +1416,7 @@ def run_model(
         batch_policy=batch_policy,
         lr_policy=lr_policy,
     )
+    payload.update(param_search_contract)
     with open(output_path, 'wb') as f:
         pickle.dump(payload, f)
     return {
@@ -1428,6 +1426,7 @@ def run_model(
         "task": task,
         "target_source": target_source if task != "classification" else "label",
         "model": model_name,
+        **param_search_contract,
         "seed": int(SEED),
         "missing_rate": float(missing_rate),
         "split_path": str(split_path),
@@ -1450,7 +1449,6 @@ def _evaluate_robustness(
     test_missing_rates,
     test_missing_mechanisms,
     channel_sync_options,
-    test_missing_seeds,
     X,
     Y,
     train_idx,
@@ -1476,7 +1474,6 @@ def _evaluate_robustness(
         test_missing_rates: List of test missing rates
         test_missing_mechanisms: List of test missingness mechanisms
         channel_sync_options: List of channel_sync tokens ({auto,false,true})
-        test_missing_seeds: List of missingness RNG seeds
         X: Full dataset features
         Y: Full dataset labels
         train_idx: Training indices (for normalization stats)
@@ -1494,8 +1491,10 @@ def _evaluate_robustness(
     evaluations = []
     use_raw_flow_input = _requires_flow_raw_input(model_name)
     test_missing_rates = _parse_missing_rates(test_missing_rates)
+    if not any(_is_zero_missing_rate(rate) for rate in test_missing_rates):
+        test_missing_rates = [0.0] + test_missing_rates
     test_missing_mechanisms = _parse_robustness_mechanisms(test_missing_mechanisms)
-    test_missing_seeds = _parse_robustness_test_seeds(test_missing_seeds)
+    missing_seed = int(SEED)
     resolved_channel_sync_options = _resolve_channel_sync_options(
         channel_sync_options,
         use_raw_flow_input,
@@ -1516,9 +1515,15 @@ def _evaluate_robustness(
         train_stats.append((mean, std))
 
     for test_rate in test_missing_rates:
-        for test_mechanism in test_missing_mechanisms:
-            for test_channel_sync in resolved_channel_sync_options:
-                for test_missing_seed in test_missing_seeds:
+        if _is_zero_missing_rate(test_rate):
+            mechanism_options = ["REGULAR"]
+            channel_sync_values = [None]
+        else:
+            mechanism_options = test_missing_mechanisms
+            channel_sync_values = resolved_channel_sync_options
+        for test_mechanism in mechanism_options:
+            for test_channel_sync in channel_sync_values:
+                for missing_seed in (missing_seed,):
                     LOGGER.info(
                         "Robustness eval dataset=%s model=%s test_missing=%.1f type=%s channel_sync=%s missing_seed=%d",
                         data_name,
@@ -1526,18 +1531,20 @@ def _evaluate_robustness(
                         test_rate,
                         test_mechanism,
                         test_channel_sync,
-                        test_missing_seed,
+                        missing_seed,
                     )
 
                     # Generate missing data for this test axis point.
+                    preprocess_mechanism = "MCAR" if _is_zero_missing_rate(test_rate) else test_mechanism
+                    preprocess_channel_sync = False if test_channel_sync is None else bool(test_channel_sync)
                     X_missing, X_mask, X_delta, coeffs = preprocess(
                         X,
                         missing_rate=test_rate,
                         interpolate=interpolate,
                         use_intensity=use_intensity,
-                        mechanism=test_mechanism,
-                        seed=test_missing_seed,
-                        channel_sync=test_channel_sync,
+                        mechanism=preprocess_mechanism,
+                        seed=missing_seed,
+                        channel_sync=preprocess_channel_sync,
                     )
 
                     # Reuse the training missing=0.0 statistics for all robustness test axes.
@@ -1593,7 +1600,7 @@ def _evaluate_robustness(
                             task="classification",
                             test_missing_type=test_mechanism,
                             test_channel_sync=test_channel_sync,
-                            test_missing_seed=test_missing_seed,
+                            missing_seed=missing_seed,
                             save_predictions=save_predictions,
                         )
                     else:
@@ -1625,7 +1632,7 @@ def _evaluate_robustness(
                             task=task,
                             test_missing_type=test_mechanism,
                             test_channel_sync=test_channel_sync,
-                            test_missing_seed=test_missing_seed,
+                            missing_seed=missing_seed,
                             save_predictions=save_predictions,
                         )
                     evaluations.append(eval_result)
@@ -1639,7 +1646,7 @@ def _evaluate_robustness(
                             test_rate,
                             test_mechanism,
                             test_channel_sync,
-                            test_missing_seed,
+                            missing_seed,
                             metrics["accuracy"],
                             metrics["f1"],
                             metrics["wf1"],
@@ -1653,7 +1660,7 @@ def _evaluate_robustness(
                             test_rate,
                             test_mechanism,
                             test_channel_sync,
-                            test_missing_seed,
+                            missing_seed,
                             task,
                             metrics["mse"],
                             metrics["mae"],
@@ -1686,8 +1693,7 @@ def main():
     policy_violations = []
 
     if args.datasets is None:
-        data_selected = get_default_selected_datasets()
-        np.random.shuffle(data_selected)
+        data_selected = ["BasicMotions"]
     else:
         data_selected = args.datasets
 
@@ -1709,11 +1715,11 @@ def main():
     # Robustness mode: train on missing=0, test on multiple rates
     if args.robustness_mode:
         LOGGER.info(
-            "Robustness mode enabled: train on missing=0.0, test rates=%s, test types=%s, channel_sync=%s, missing_seeds=%s",
+            "Robustness mode enabled: train on missing=0.0, test rates=%s, test types=%s, channel_sync=%s, seed=%s",
             args.robustness_test_rates,
             args.robustness_test_mechanisms,
             args.robustness_channel_sync_options,
-            args.robustness_test_seeds,
+            seed,
         )
         for data_name in data_selected:
             for model_name in model_name_list:
@@ -1742,6 +1748,10 @@ def main():
                         expected_search_profile=args.search_profile,
                         param_path=str(param_path),
                     )
+                    param_search_contract = _param_search_contract_metadata(
+                        model_config,
+                        param_search_profile,
+                    )
 
                     run_result = run_model(
                         data_name,
@@ -1755,7 +1765,6 @@ def main():
                         robustness_test_rates=args.robustness_test_rates,
                         robustness_test_mechanisms=args.robustness_test_mechanisms,
                         robustness_channel_sync_options=args.robustness_channel_sync_options,
-                        robustness_test_seeds=args.robustness_test_seeds,
                         split_root=args.split_root,
                         out_root=args.out_root,
                         run_id=run_id,
@@ -1778,7 +1787,6 @@ def main():
                             robustness_test_rates=args.robustness_test_rates,
                             robustness_test_mechanisms=args.robustness_test_mechanisms,
                             robustness_channel_sync_options=args.robustness_channel_sync_options,
-                            robustness_test_seeds=args.robustness_test_seeds,
                         )
                         split_path = os.path.join(args.split_root, data_name, f"{data_name}_{seed}")
                         if args.existing_policy == "fail":
@@ -1791,7 +1799,6 @@ def main():
                                     "robustness_test_rates": [float(rate) for rate in args.robustness_test_rates],
                                     "robustness_test_mechanisms": list(args.robustness_test_mechanisms),
                                     "robustness_channel_sync_options": list(args.robustness_channel_sync_options),
-                                    "robustness_test_seeds": [int(seed) for seed in args.robustness_test_seeds],
                                     "task": args.task,
                                     "reason": reason,
                                 }
@@ -1809,10 +1816,10 @@ def main():
                                     "robustness_test_rates": [float(rate) for rate in args.robustness_test_rates],
                                     "robustness_test_mechanisms": list(args.robustness_test_mechanisms),
                                     "robustness_channel_sync_options": list(args.robustness_channel_sync_options),
-                                    "robustness_test_seeds": [int(seed) for seed in args.robustness_test_seeds],
                                     "task": args.task,
                                     "target_source": args.target_source,
                                     "search_profile": param_search_profile,
+                                    **param_search_contract,
                                     "split_path": str(split_path),
                                     "param_path": str(param_path),
                                     "output_path": str(output_path),
@@ -1822,6 +1829,7 @@ def main():
                         continue
                     run_result["param_path"] = str(param_path)
                     run_result["search_profile"] = param_search_profile
+                    run_result.update(param_search_contract)
                     records.append(run_result)
                     run_count += 1
 
@@ -1869,6 +1877,10 @@ def main():
                             model_config,
                             expected_search_profile=args.search_profile,
                             param_path=str(param_path),
+                        )
+                        param_search_contract = _param_search_contract_metadata(
+                            model_config,
+                            param_search_profile,
                         )
 
                         run_result = run_model(
@@ -1924,6 +1936,7 @@ def main():
                                         "task": args.task,
                                         "target_source": args.target_source,
                                         "search_profile": param_search_profile,
+                                        **param_search_contract,
                                         "split_path": str(split_path),
                                         "param_path": str(param_path),
                                         "output_path": str(output_path),
@@ -1933,6 +1946,7 @@ def main():
                             continue
                         run_result["param_path"] = str(param_path)
                         run_result["search_profile"] = param_search_profile
+                        run_result.update(param_search_contract)
                         records.append(run_result)
                         run_count += 1
 
@@ -1991,6 +2005,7 @@ def main():
             "dataset_npz": None if args.dataset_npz is None else str(args.dataset_npz),
             "target_source": args.target_source if args.task != "classification" else "label",
             "search_profile": args.search_profile,
+            **describe_search_profile(args.search_profile),
             "split_root": str(args.split_root),
             "param_root": str(args.param_root),
             "out_root": str(args.out_root),

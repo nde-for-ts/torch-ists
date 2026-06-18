@@ -276,7 +276,7 @@ The Data Loading API provides:
 ```python
 from torch_ists import benchmark_loader
 
-X, y = benchmark_loader.get_data("ECG200")
+X, y = benchmark_loader.get_data("BasicMotions")
 ```
 
 Install `.[data]` for the optional `pandas` and `sktime` dependencies. The loader stores and searches UCR/UEA archives under `TORCH_ISTS_DATA_ROOT` when set, otherwise under `<package checkout>/data`. Fallback search checks `Univariate_ts/<dataset>/<dataset>_{TRAIN,TEST}.ts` and `Multivariate_ts/<dataset>/<dataset>_{TRAIN,TEST}.ts`.

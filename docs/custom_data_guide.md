@@ -58,7 +58,7 @@ Missing values should be represented as `NaN`. For variable-length series, pad s
 
 | Use case | API or script path | Expected input |
 |---|---|---|
-| Built-in benchmark archive dataset | `benchmark_loader.get_data("ECG200")` or `--dataset-source default` | Loads UCR/UEA TRAIN+TEST, pools them, then lets project splits define train/valid/test. |
+| Built-in benchmark archive dataset | `benchmark_loader.get_data("BasicMotions")` or `--dataset-source default` | Loads UCR/UEA TRAIN+TEST, pools them, then lets project splits define train/valid/test. |
 | In-memory NumPy arrays | `DataLoader.from_numpy(X, y)` | `X [N,D,L]`, `y [N]`, optional `timestamps [N,L]`. |
 | Long-format pandas data frame | `DataLoader.from_dataframe(...)` | Groups by `series_id` by default, sorts each group by `time_col`, pads with `NaN`. |
 | NPZ file from Python | `DataLoader.from_file("data.npz")` | Accepts `X`/`y` or `x`/`Y`; optional `timestamps`. |
