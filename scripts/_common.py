@@ -15,8 +15,11 @@ LEARNING_RATE_POLICY_NAME = "fixed-lr-fallback-v1"
 WEIGHT_DECAY_POLICY_NAME = "lr-proportional-weight-decay-v1"
 LEGACY_ICLR2024_SEARCH_PROFILE = "legacy-iclr2024-v0"
 LEGACY_EXPANDED_SEARCH_PROFILE = "legacy-expanded-v1"
-DEFAULT_SEARCH_PROFILE = LEGACY_EXPANDED_SEARCH_PROFILE
-MODEL_SPECIFIC_SEARCH_POLICY_NAME = "model-specific-effective-params-v1"
+MODEL_NATIVE_SEARCH_PROFILE = "model-native-v1"
+DEFAULT_SEARCH_PROFILE = MODEL_NATIVE_SEARCH_PROFILE
+MODEL_SPECIFIC_SEARCH_POLICY_NAME = "model-native-effective-params-v1"
+STANDARD_SEARCH_POLICY = "default"
+SINGLE_SEARCH_REPEAT = "single"
 DEFAULT_SEARCH_CONTRACT_NAME = "model-specific-default-v1"
 HISTORICAL_SEARCH_CONTRACT_NAME = "historical-reproducibility-v1"
 INTERNAL_SEARCH_PROFILE_VISIBILITY = "internal"
@@ -32,10 +35,15 @@ __all__ = [
     "resolve_model_search_space",
     "resolve_effective_param_config",
     "build_model_kwargs_from_config",
+    "STANDARD_SEARCH_POLICY",
+    "SINGLE_SEARCH_REPEAT",
 ]
 
 _SEARCH_PROFILE_ALIASES = {
-    "default": LEGACY_EXPANDED_SEARCH_PROFILE,
+    "default": MODEL_NATIVE_SEARCH_PROFILE,
+    "model-native": MODEL_NATIVE_SEARCH_PROFILE,
+    "model-specific": MODEL_NATIVE_SEARCH_PROFILE,
+    MODEL_NATIVE_SEARCH_PROFILE: MODEL_NATIVE_SEARCH_PROFILE,
     "legacy": LEGACY_EXPANDED_SEARCH_PROFILE,
     "expanded": LEGACY_EXPANDED_SEARCH_PROFILE,
     "legacy-expanded": LEGACY_EXPANDED_SEARCH_PROFILE,
@@ -46,6 +54,14 @@ _SEARCH_PROFILE_ALIASES = {
 }
 
 _SEARCH_PROFILE_GRIDS = {
+    MODEL_NATIVE_SEARCH_PROFILE: {
+        "hidden_dim_values": [32, 64, 96, 128, 192, 256],
+        "depth_level_values": [1, 2, 3, 4, 5],
+        "flow_depth_values": [1, 2, 3],
+        "default_hidden_dim": 32,
+        "default_depth_level": 1,
+        "lr_bounds": [1e-4, 1e-2],
+    },
     LEGACY_ICLR2024_SEARCH_PROFILE: {
         "hidden_dim_values": [16, 32, 64, 128],
         "depth_level_values": [1, 2, 3, 4],
@@ -71,9 +87,77 @@ _DEPTH_COLLAPSED_MODELS = frozenset(
         "mtan",
     ]
 )
+_BASIC_SEQUENCE_MODELS = frozenset(
+    [
+        "cnn",
+        "rnn",
+        "lstm",
+        "gru",
+        "gru-simple",
+        "bilstm",
+        "plstm",
+        "tlstm",
+        "tglstm",
+    ]
+)
 _SAND_MODELS = frozenset(["sand"])
 _MIAM_MODELS = frozenset(["miam"])
+_MTAN_MODELS = frozenset(["mtan"])
+_TRANSFORMER_MODELS = frozenset(["transformer", "transformer-mask"])
+_NEURALRDE_DEPTH = {
+    "neuralrde-1": 1,
+    "neuralrde-2": 2,
+    "neuralrde-3": 3,
+}
+_CDE_CONTROL_BY_MODEL = {
+    "neuralcde": "natural",
+    "neuralcde-l": "linear",
+    "neuralcde-r": "rectilinear",
+    "neuralcde-c": "cubic",
+    "neuralcde-h": "hermite",
+    "ancde": "natural",
+    "exit": "natural",
+    "leap": "natural",
+}
+_SDE_MODELS = frozenset(
+    [
+        "naive_cde",
+        "neural_ode",
+        "neural_ode_t",
+        "neural_sde",
+        "neural_sde_t",
+        "neural_lsde",
+        "neural_lnsde",
+        "neural_gsde",
+    ]
+)
+_ODE_SOLVER_MODELS = frozenset(
+    [
+        "ode-rnn-spline",
+        "ode-lstm",
+        "ode-rnn",
+        "latentode",
+        "gru-ode-bayes",
+    ]
+)
+_CDE_SOLVER_MODELS = frozenset(_CDE_CONTROL_BY_MODEL) | frozenset(_NEURALRDE_DEPTH)
 _FLOW_PREFIXES = ("neuralflow-", "dualdynamics-", "flowpath-")
+
+_MODEL_NATIVE_EXTRA_PARAM_CANDIDATES = {
+    "transformer": {"n_heads": [1, 2, 4, 8]},
+    "transformer-mask": {"n_heads": [1, 2, 4, 8]},
+    "sand": {"n_heads": [1, 2, 4], "factor": [8, 16]},
+    "miam": {"n_heads": [1, 2, 4], "n_iter": [1, 2]},
+    "mtan": {"n_heads": [1, 2, 4], "embed_time": [16, 32]},
+}
+
+_MODEL_NATIVE_EXTRA_PARAM_DEFAULTS = {
+    "transformer": {"n_heads": 4},
+    "transformer-mask": {"n_heads": 4},
+    "sand": {"n_heads": 4, "factor": 16},
+    "miam": {"n_heads": 1, "n_iter": 1},
+    "mtan": {"n_heads": 1, "embed_time": 16},
+}
 
 
 def configure_runtime_paths(caller_file: str | Path) -> Path:
@@ -146,6 +230,13 @@ def describe_search_profile(raw: str | None) -> dict:
             "search_profile_visibility": INTERNAL_SEARCH_PROFILE_VISIBILITY,
             "public_search_name": "historical reproducibility",
         }
+    if profile == LEGACY_EXPANDED_SEARCH_PROFILE:
+        return {
+            "search_contract": DEFAULT_SEARCH_CONTRACT_NAME,
+            "search_family": "internal_reproducibility",
+            "search_profile_visibility": INTERNAL_SEARCH_PROFILE_VISIBILITY,
+            "public_search_name": "expanded internal search",
+        }
     return {
         "search_contract": DEFAULT_SEARCH_CONTRACT_NAME,
         "search_family": "default",
@@ -205,6 +296,95 @@ def _default_flow_depth_for_model(model_name: str) -> int:
     return 2
 
 
+def _is_model_native_profile(profile: str) -> bool:
+    return normalize_search_profile(profile) == MODEL_NATIVE_SEARCH_PROFILE
+
+
+def _ordered_unique(items: list[str]) -> list[str]:
+    return list(dict.fromkeys(items))
+
+
+def _default_method_for_axis(model_name: str) -> str | None:
+    try:
+        from torch_ists.config import default_method_for_model
+
+        return str(default_method_for_model(model_name))
+    except Exception:
+        return None
+
+
+def _native_extra_param_space(normalized_model: str, profile: str, grid: dict) -> tuple[dict, dict]:
+    if not _is_model_native_profile(profile):
+        return {}, {}
+    values = {
+        key: list(value)
+        for key, value in _MODEL_NATIVE_EXTRA_PARAM_CANDIDATES.get(normalized_model, {}).items()
+    }
+    defaults = dict(_MODEL_NATIVE_EXTRA_PARAM_DEFAULTS.get(normalized_model, {}))
+    if _is_flow_model_name(normalized_model):
+        values["flow_depth"] = list(grid["flow_depth_values"])
+        defaults["flow_depth"] = int(_default_flow_depth_for_model(normalized_model))
+    return values, defaults
+
+
+def _resolve_native_axis_metadata(normalized_model: str, profile: str) -> dict:
+    native_profile = _is_model_native_profile(profile)
+    width_axis = "hidden_dim"
+    depth_axis = "num_hidden_layers"
+    native_axes = ["hidden_dim"]
+    fixed_axes = []
+    excluded_axes = []
+
+    if normalized_model in _DEPTH_COLLAPSED_MODELS:
+        fixed_axes.append("depth_level")
+        if normalized_model == "mtan":
+            excluded_axes.append("model_params.num_stack")
+    else:
+        native_axes.append("num_hidden_layers")
+
+    if _is_flow_model_name(normalized_model):
+        depth_axis = "head_depth"
+        native_axes = ["hidden_dim", "head_depth"]
+        if native_profile:
+            native_axes.append("flow_depth")
+        else:
+            fixed_axes.append("flow_depth")
+        fixed_axes.append("model_params.flow_backend=native")
+    elif normalized_model in _SAND_MODELS:
+        width_axis = "model_params.d_model"
+        depth_axis = "model_params.n_layers"
+        native_axes = ["model_params.d_model", "model_params.n_layers", "model_params.n_heads", "model_params.factor"]
+    elif normalized_model in _MIAM_MODELS:
+        depth_axis = "model_params.num_stack"
+        native_axes = ["hidden_dim", "model_params.num_stack", "model_params.n_heads", "model_params.n_iter"]
+    elif normalized_model in _MTAN_MODELS:
+        native_axes = ["hidden_dim", "model_params.n_heads", "model_params.embed_time"]
+    elif normalized_model in _TRANSFORMER_MODELS:
+        depth_axis = "num_layers"
+        native_axes = ["hidden_dim", "num_layers", "model_params.n_heads"]
+    elif normalized_model in _BASIC_SEQUENCE_MODELS:
+        depth_axis = "num_layers"
+        native_axes = ["hidden_dim", "num_layers"]
+    elif normalized_model in _NEURALRDE_DEPTH:
+        fixed_axes.append(f"model_params.rde_depth={_NEURALRDE_DEPTH[normalized_model]}")
+    elif normalized_model in _CDE_CONTROL_BY_MODEL:
+        fixed_axes.append(f"model_params.control={_CDE_CONTROL_BY_MODEL[normalized_model]}")
+    elif normalized_model in _SDE_MODELS:
+        fixed_axes.append("model_params.drift_diffusion=model_registry")
+
+    default_method = _default_method_for_axis(normalized_model)
+    if default_method and (normalized_model in _ODE_SOLVER_MODELS or normalized_model in _CDE_SOLVER_MODELS or normalized_model in _SDE_MODELS or _is_flow_model_name(normalized_model)):
+        fixed_axes.append(f"model_params.method={default_method}")
+
+    return {
+        "width_axis": width_axis,
+        "depth_axis": depth_axis,
+        "native_axes": _ordered_unique(native_axes),
+        "fixed_axes": _ordered_unique(fixed_axes),
+        "excluded_axes": _ordered_unique(excluded_axes),
+    }
+
+
 def _resolve_layer_depth(model_name: str, depth_level: int) -> tuple[int, int]:
     try:
         from torch_ists.config import resolve_layer_depth
@@ -224,9 +404,20 @@ def resolve_model_search_space(model_name: str, search_profile: str | None = Non
     grid = _SEARCH_PROFILE_GRIDS[profile]
     normalized_model = _canonical_model_name(model_name)
     depth_values = list(grid["depth_level_values"])
-    if normalized_model in _DEPTH_COLLAPSED_MODELS:
+    depth_collapsed = normalized_model in _DEPTH_COLLAPSED_MODELS
+    if depth_collapsed:
         depth_values = [1]
-    return {
+    sampled_axes = ["lr", "hidden_dim"]
+    if not depth_collapsed or not _is_model_native_profile(profile):
+        sampled_axes.append("depth_level")
+    extra_param_values, default_extra_params = _native_extra_param_space(normalized_model, profile, grid)
+    sampled_axes.extend(extra_param_values)
+    native_meta = _resolve_native_axis_metadata(normalized_model, profile)
+    candidate_axes = ["lr", native_meta["width_axis"]]
+    if not depth_collapsed or not _is_model_native_profile(profile):
+        candidate_axes.append(native_meta["depth_axis"])
+    candidate_axes.extend(f"model_params.{key}" if key not in {"flow_depth"} else key for key in extra_param_values)
+    space = {
         "policy": MODEL_SPECIFIC_SEARCH_POLICY_NAME,
         "search_profile": profile,
         **contract,
@@ -236,9 +427,20 @@ def resolve_model_search_space(model_name: str, search_profile: str | None = Non
         "default_hidden_dim": int(grid["default_hidden_dim"]),
         "default_depth_level": int(depth_values[0] if depth_values else grid["default_depth_level"]),
         "lr_bounds": list(grid["lr_bounds"]),
-        "sampled_axes": ["lr", "hidden_dim", "depth_level"],
-        "depth_collapsed": bool(normalized_model in _DEPTH_COLLAPSED_MODELS),
+        "sampled_axes": _ordered_unique(sampled_axes),
+        "candidate_axes": _ordered_unique(candidate_axes),
+        "extra_param_values": extra_param_values,
+        "default_extra_params": default_extra_params,
+        "depth_collapsed": bool(depth_collapsed),
+        **native_meta,
     }
+    if _is_flow_model_name(normalized_model):
+        space["default_flow_depth"] = int(_default_flow_depth_for_model(normalized_model))
+        if _is_model_native_profile(profile):
+            space["flow_depth_values"] = list(grid["flow_depth_values"])
+            if "flow_depth" not in space["sampled_axes"]:
+                space["sampled_axes"].append("flow_depth")
+    return space
 
 
 def _coerce_positive_int(value, *, default: int) -> int:
@@ -246,6 +448,13 @@ def _coerce_positive_int(value, *, default: int) -> int:
         return max(1, int(value))
     except (TypeError, ValueError):
         return max(1, int(default))
+
+
+def _coerce_int_choice(value, *, default: int, allowed: list[int] | None = None) -> int:
+    coerced = _coerce_positive_int(value, default=default)
+    if allowed and coerced not in allowed:
+        return int(default)
+    return int(coerced)
 
 
 def resolve_effective_param_config(
@@ -273,11 +482,31 @@ def resolve_effective_param_config(
         depth_level = 1
 
     model_params = dict(config.get("model_params") or {})
+    for key, default_value in space.get("default_extra_params", {}).items():
+        if key == "flow_depth":
+            continue
+        allowed = space.get("extra_param_values", {}).get(key)
+        value = config.get(key, model_params.get(key, default_value))
+        if isinstance(default_value, int):
+            value = _coerce_int_choice(value, default=int(default_value), allowed=allowed)
+        model_params[key] = value
+
     if _is_flow_model_name(normalized_model):
-        flow_depth = _default_flow_depth_for_model(normalized_model)
+        if _is_model_native_profile(profile):
+            raw_flow_depth = config.get(
+                "flow_depth",
+                config.get("flow_num_layers", space.get("default_flow_depth", _default_flow_depth_for_model(normalized_model))),
+            )
+            flow_depth = _coerce_positive_int(
+                raw_flow_depth,
+                default=space.get("default_flow_depth", _default_flow_depth_for_model(normalized_model)),
+            )
+        else:
+            flow_depth = _default_flow_depth_for_model(normalized_model)
         num_layers = 1
         num_hidden_layers = depth_level
         head_depth = depth_level
+        model_params.setdefault("flow_backend", "native")
     elif normalized_model in _SAND_MODELS:
         flow_depth = _default_flow_depth_for_model(normalized_model)
         num_layers = 1
@@ -299,8 +528,13 @@ def resolve_effective_param_config(
     saved = dict(config)
     saved["search_profile"] = profile
     saved.update(describe_search_profile(profile))
-    saved["search_policy"] = MODEL_SPECIFIC_SEARCH_POLICY_NAME
-    saved["legacy_grid_version"] = profile
+    saved["search_policy"] = str(config.get("search_policy", STANDARD_SEARCH_POLICY))
+    saved["search_repeat"] = str(config.get("search_repeat", SINGLE_SEARCH_REPEAT))
+    saved["search_algorithm_policy"] = MODEL_SPECIFIC_SEARCH_POLICY_NAME
+    saved["search_grid_version"] = profile
+    saved["legacy_grid_version"] = (
+        profile if profile in {LEGACY_ICLR2024_SEARCH_PROFILE, LEGACY_EXPANDED_SEARCH_PROFILE} else None
+    )
     saved["hidden_dim"] = int(hidden_dim)
     saved["depth_level"] = int(depth_level)
     saved["num_layers"] = int(num_layers)
@@ -309,12 +543,29 @@ def resolve_effective_param_config(
     saved["flow_num_layers"] = int(flow_depth)
     saved["flow_depth"] = int(flow_depth)
     saved["model_params"] = model_params
+    for key, value in space.get("default_extra_params", {}).items():
+        if key != "flow_depth" and key in model_params:
+            saved[key] = model_params[key]
     saved["architecture_axes"] = {
         "policy": MODEL_SPECIFIC_SEARCH_POLICY_NAME,
-        "width_axis": "hidden_dim",
-        "depth_axis": "depth_level",
+        "search_algorithm_policy": MODEL_SPECIFIC_SEARCH_POLICY_NAME,
+        "search_grid_version": profile,
+        "legacy_grid_version": saved["legacy_grid_version"],
+        "width_axis": space["width_axis"],
+        "depth_axis": space["depth_axis"],
         "hidden_dim_values": list(space["hidden_dim_values"]),
         "depth_level_values": list(space["depth_level_values"]),
+        "flow_depth_values": list(space.get("flow_depth_values", [])),
+        "sampled_axes": list(space["sampled_axes"]),
+        "candidate_axes": list(space["candidate_axes"]),
+        "extra_param_values": {
+            key: list(value)
+            for key, value in space.get("extra_param_values", {}).items()
+        },
+        "default_extra_params": dict(space.get("default_extra_params", {})),
+        "native_axes": list(space["native_axes"]),
+        "fixed_axes": list(space["fixed_axes"]),
+        "excluded_axes": list(space["excluded_axes"]),
         "depth_collapsed": bool(space["depth_collapsed"]),
     }
     saved["effective_params"] = {

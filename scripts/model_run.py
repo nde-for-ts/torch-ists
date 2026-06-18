@@ -42,6 +42,8 @@ from _common import (
     normalize_search_profile,
     resolve_dataset_fixed_batch_policy,
     resolve_learning_rate_policy,
+    SINGLE_SEARCH_REPEAT,
+    STANDARD_SEARCH_POLICY,
 )
 from dataset_source_contracts import load_dataset, normalize_dataset_source
 from script_chain_contracts import generate_run_id, write_manifest
@@ -70,13 +72,109 @@ def _normalize_dataset_source_arg(raw: str) -> str:
         raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
-def _normalize_param_mode(raw: str) -> str:
+CONSTRAINED_SEARCH_POLICY = "constrained"
+AGGREGATED_SEARCH_REPEAT = "aggregated"
+
+
+def _normalize_param_policy_arg(raw: str) -> str:
+    normalized = str(raw).strip().lower()
+    if normalized in {STANDARD_SEARCH_POLICY, CONSTRAINED_SEARCH_POLICY}:
+        return normalized
+    if normalized == "standard":
+        return STANDARD_SEARCH_POLICY
+    raise argparse.ArgumentTypeError("param policy must be one of {'default', 'constrained'}.")
+
+
+def _normalize_param_repeat_arg(raw: str) -> str:
+    normalized = str(raw).strip().lower()
+    if normalized in {SINGLE_SEARCH_REPEAT, AGGREGATED_SEARCH_REPEAT}:
+        return normalized
+    raise argparse.ArgumentTypeError("param repeat must be one of {'single', 'aggregated'}.")
+
+
+def _normalize_param_mode_alias(raw: str) -> tuple[str, str]:
     normalized = str(raw).strip().lower()
     if normalized in {"default", "legacy"}:
-        return "default"
+        return STANDARD_SEARCH_POLICY, SINGLE_SEARCH_REPEAT
     if normalized in {"cv", "improved"}:
-        return "cv"
-    raise argparse.ArgumentTypeError("parameter mode must be one of {'default', 'cv'}.")
+        return STANDARD_SEARCH_POLICY, AGGREGATED_SEARCH_REPEAT
+    raise argparse.ArgumentTypeError(
+        "--param-mode is deprecated; use --param-policy {default,constrained} "
+        "and --param-repeat {single,aggregated}."
+    )
+
+
+def _build_param_artifact_name(
+    data_name: str,
+    model_name: str,
+    *,
+    param_policy: str,
+    param_repeat: str,
+    param_target: str | None = None,
+) -> str:
+    parts = [data_name, model_name]
+    if param_policy == CONSTRAINED_SEARCH_POLICY:
+        parts.append(str(param_target) if param_target else CONSTRAINED_SEARCH_POLICY)
+    if param_repeat == AGGREGATED_SEARCH_REPEAT:
+        parts.append(AGGREGATED_SEARCH_REPEAT)
+    return "_".join(parts)
+
+
+def _artifact_repeat_suffix_stem(artifact_name: str) -> str:
+    return str(artifact_name).split("__task_", 1)[0]
+
+
+def _legacy_aggregated_param_artifact_name(data_name: str, model_name: str) -> str:
+    return "_".join([data_name, model_name, "cv"])
+
+
+def _resolve_param_artifact_path(
+    param_root: str,
+    data_name: str,
+    model_name: str,
+    *,
+    param_policy: str,
+    param_repeat: str,
+    param_target: str | None = None,
+) -> tuple[str, str]:
+    param_name = _build_param_artifact_name(
+        data_name,
+        model_name,
+        param_policy=param_policy,
+        param_repeat=param_repeat,
+        param_target=param_target,
+    )
+    param_path = os.path.join(param_root, data_name, param_name)
+    if os.path.exists(param_path):
+        return param_name, param_path
+
+    if param_policy == STANDARD_SEARCH_POLICY and param_repeat == AGGREGATED_SEARCH_REPEAT:
+        legacy_name = _legacy_aggregated_param_artifact_name(data_name, model_name)
+        legacy_path = os.path.join(param_root, data_name, legacy_name)
+        if os.path.exists(legacy_path):
+            return legacy_name, legacy_path
+
+    return param_name, param_path
+
+
+def _infer_cli_search_policy(model_config: dict) -> str:
+    raw = str(model_config.get("search_policy", STANDARD_SEARCH_POLICY)).strip().lower()
+    if raw in {STANDARD_SEARCH_POLICY, CONSTRAINED_SEARCH_POLICY}:
+        return raw
+    if raw == "standard":
+        return STANDARD_SEARCH_POLICY
+    return STANDARD_SEARCH_POLICY
+
+
+def _infer_cli_search_repeat(model_config: dict, artifact_name: str | None = None) -> str:
+    raw = str(model_config.get("search_repeat", "")).strip().lower()
+    if raw in {SINGLE_SEARCH_REPEAT, AGGREGATED_SEARCH_REPEAT}:
+        return raw
+    if artifact_name:
+        stem = _artifact_repeat_suffix_stem(artifact_name)
+        if stem.endswith("_aggregated") or stem.endswith("_cv"):
+            return AGGREGATED_SEARCH_REPEAT
+    return SINGLE_SEARCH_REPEAT
 
 
 def _normalize_search_profile_arg(raw: str) -> str:
@@ -108,6 +206,8 @@ def _validate_param_search_profile(
     model_config: dict,
     *,
     expected_search_profile: str,
+    expected_param_policy: str,
+    expected_param_repeat: str,
     param_path: str,
 ) -> str:
     actual = infer_param_search_profile(model_config)
@@ -119,12 +219,22 @@ def _validate_param_search_profile(
             "Regenerate params with the current default search, or use an "
             "internal compatibility profile only for intentional migration checks."
         )
+    actual_policy = _infer_cli_search_policy(model_config)
+    actual_repeat = _infer_cli_search_repeat(model_config, os.path.basename(param_path))
+    if actual_policy != expected_param_policy or actual_repeat != expected_param_repeat:
+        raise ValueError(
+            "Param artifact search axes mismatch: "
+            f"{param_path} has policy={actual_policy!r}, repeat={actual_repeat!r}; "
+            f"expected policy={expected_param_policy!r}, repeat={expected_param_repeat!r}."
+        )
     return actual
 
 
 def _param_search_contract_metadata(model_config: dict, search_profile: str) -> dict:
     contract = describe_search_profile(search_profile)
     return {
+        "search_policy": _infer_cli_search_policy(model_config),
+        "search_repeat": _infer_cli_search_repeat(model_config),
         "search_contract": model_config.get("search_contract", contract["search_contract"]),
         "search_family": model_config.get("search_family", contract["search_family"]),
         "public_search_name": model_config.get("public_search_name", contract["public_search_name"]),
@@ -137,7 +247,7 @@ def _param_search_contract_metadata(model_config: dict, search_profile: str) -> 
 
 def _parse_missing_rates(raw):
     if raw is None:
-        return [0.0, 0.3, 0.5, 0.7]
+        return [0.0]
     if not isinstance(raw, str):
         values = [float(value) for value in raw]
         if not values:
@@ -172,13 +282,13 @@ def _parse_robustness_mechanisms(raw):
 
 def _parse_robustness_channel_sync_options(raw):
     if raw is None:
-        raw = "auto"
+        raw = "false"
     if isinstance(raw, str):
         tokens = [token.strip().lower() for token in raw.split(",") if token.strip()]
     else:
         tokens = [str(token).strip().lower() for token in raw if str(token).strip()]
     aliases = {
-        "auto": "auto",
+        "auto": "false",
         "true": "true",
         "t": "true",
         "1": "true",
@@ -191,7 +301,7 @@ def _parse_robustness_channel_sync_options(raw):
     resolved = []
     for token in tokens:
         if token not in aliases:
-            raise ValueError("robustness channel sync options must be drawn from {auto,false,true}")
+            raise ValueError("robustness channel sync options must be drawn from {false,true}")
         resolved.append(aliases[token])
     if not resolved:
         raise ValueError("At least one robustness channel_sync option must be provided.")
@@ -199,14 +309,10 @@ def _parse_robustness_channel_sync_options(raw):
 
 
 def _resolve_channel_sync_options(options, use_raw_flow_input):
+    del use_raw_flow_input
     resolved = []
     for option in _parse_robustness_channel_sync_options(options):
-        if option == "auto":
-            value = bool(use_raw_flow_input)
-        elif option == "true":
-            value = True
-        else:
-            value = False
+        value = option == "true"
         if value not in resolved:
             resolved.append(value)
     return resolved
@@ -214,6 +320,14 @@ def _resolve_channel_sync_options(options, use_raw_flow_input):
 
 def _is_zero_missing_rate(rate):
     return abs(float(rate)) < 1e-12
+
+
+def _evaluation_regime_for_missing_rate(rate):
+    return "regular" if _is_zero_missing_rate(rate) else "irregular"
+
+
+def _missing_type_for_missing_rate(rate):
+    return "REGULAR" if _is_zero_missing_rate(rate) else "MCAR"
 
 
 def _axis_token(values):
@@ -232,8 +346,6 @@ def _build_robustness_axis_suffix(
     mechanisms = _parse_robustness_mechanisms(robustness_test_mechanisms)
     sync_options = _parse_robustness_channel_sync_options(robustness_channel_sync_options)
     if all(_is_zero_missing_rate(rate) for rate in rates):
-        return ""
-    if rates == [0.0, 0.3, 0.5, 0.7] and mechanisms == ["MCAR"] and sync_options == ["auto"]:
         return ""
     return "__" + "__".join(
         [
@@ -316,11 +428,25 @@ def parse_cli_args():
         help="Disable output existence check.",
     )
     parser.add_argument(
+        "--param-policy",
+        type=_normalize_param_policy_arg,
+        default=None,
+        metavar="{default,constrained}",
+        help="Parameter search policy to load. default=model-specific package search; constrained=capacity-constrained search.",
+    )
+    parser.add_argument(
+        "--param-repeat",
+        type=_normalize_param_repeat_arg,
+        default=None,
+        metavar="{single,aggregated}",
+        help="Parameter repeat policy to load. single uses the single-seed params; aggregated uses fixed-seed aggregation params.",
+    )
+    parser.add_argument(
         "--param-mode",
-        type=_normalize_param_mode,
-        default="default",
-        metavar="{default,cv}",
-        help="Load parameters from the default search or the cv search.",
+        dest="param_mode_alias",
+        type=_normalize_param_mode_alias,
+        default=None,
+        help=argparse.SUPPRESS,
     )
     parser.add_argument(
         "--search-profile",
@@ -337,7 +463,7 @@ def parse_cli_args():
         "--robustness-test-rates",
         type=str,
         default="0.0",
-        help="Comma-separated test missing rates for robustness mode. Default: 0.0.",
+        help="Comma-separated test missing rates for robustness mode. Default: 0.0; expanded grids are explicit opt-in.",
     )
     parser.add_argument(
         "--robustness-test-mechanisms",
@@ -348,8 +474,8 @@ def parse_cli_args():
     parser.add_argument(
         "--robustness-channel-sync-options",
         type=str,
-        default="auto",
-        help="Comma-separated channel_sync options for robustness mode: auto,false,true",
+        default="false",
+        help="Comma-separated channel_sync options for robustness mode: false,true",
     )
     parser.add_argument(
         "--split-root",
@@ -419,9 +545,17 @@ def parse_cli_args():
         type=str,
         choices=["active"],
         default="active",
-        help="Model scope for this package runtime.",
+        help=argparse.SUPPRESS,
     )
     args = parser.parse_args()
+    if args.param_mode_alias is not None:
+        if args.param_policy is not None or args.param_repeat is not None:
+            parser.error("--param-mode is a deprecated alias and cannot be combined with --param-policy or --param-repeat.")
+        args.param_policy, args.param_repeat = args.param_mode_alias
+    args.param_policy = args.param_policy or STANDARD_SEARCH_POLICY
+    args.param_repeat = args.param_repeat or SINGLE_SEARCH_REPEAT
+    if args.param_policy == CONSTRAINED_SEARCH_POLICY:
+        parser.error("--param-policy constrained is reserved for the capacity-constrained implementation and is not runnable in this patch.")
     if args.seed is None:
         args.seed = args.seed_positional if args.seed_positional is not None else 0
     args.datasets = _parse_csv_list(args.datasets)
@@ -768,6 +902,7 @@ def _build_evaluation_result(
 def _build_result_payload(
     *,
     mode,
+    evaluation_regime=None,
     task="classification",
     dataset,
     model_name,
@@ -786,8 +921,11 @@ def _build_result_payload(
     lr_policy=None,
     robustness_axes=None,
 ):
+    resolved_regime = str(evaluation_regime or mode)
+    resolved_mode = resolved_regime if str(mode).strip().lower() == "standard" else str(mode)
     return {
-        "mode": str(mode),
+        "mode": resolved_mode,
+        "evaluation_regime": resolved_regime,
         "task": str(task),
         "dataset": str(dataset),
         "model": str(model_name),
@@ -806,6 +944,7 @@ def _build_result_payload(
             "created_at": datetime.datetime.utcnow().isoformat() + "Z",
             "run_id": run_id,
             "save_predictions": str(save_predictions),
+            "evaluation_regime": resolved_regime,
             "batch_policy": batch_policy,
             "lr_policy": lr_policy,
             "robustness_axes": robustness_axes,
@@ -889,6 +1028,9 @@ def run_model(
     interpolate = data_config['interpolation']
     use_intensity = data_config['use_intensity']
     use_raw_flow_input = _requires_flow_raw_input(model_name)
+    evaluation_regime = "robustness" if robustness_mode else _evaluation_regime_for_missing_rate(missing_rate)
+    train_missing_type = "REGULAR" if robustness_mode else _missing_type_for_missing_rate(missing_rate)
+    train_channel_sync = False
        
     ## data split    
     seed_everything(SEED)
@@ -951,7 +1093,9 @@ def run_model(
         missing_rate=missing_rate,
         interpolate=interpolate,
         use_intensity=use_intensity,
-        channel_sync=use_raw_flow_input,
+        mechanism="MCAR",
+        seed=SEED,
+        channel_sync=train_channel_sync,
     )
     X_train = X_missing[train_idx]
 
@@ -1180,6 +1324,7 @@ def run_model(
 
         payload = _build_result_payload(
             mode="robustness",
+            evaluation_regime="robustness",
             task=task,
             dataset=data_name,
             model_name=model_name,
@@ -1193,7 +1338,7 @@ def run_model(
             run_id=run_id,
             save_predictions=save_predictions,
             train_missing_type="REGULAR",
-            train_channel_sync=use_raw_flow_input,
+            train_channel_sync=False,
             batch_policy=batch_policy,
             lr_policy=lr_policy,
             robustness_axes={
@@ -1273,6 +1418,7 @@ def run_model(
             "train_missing_summary": train_missing_summary,
             "target_spec": None if task == "classification" else target_spec,
             "mode": "robustness",
+            "evaluation_regime": "robustness",
         }
 
     # Normal mode: single test evaluation
@@ -1304,6 +1450,8 @@ def run_model(
         eval_result = _build_evaluation_result(
             task=task,
             test_missing_rate=missing_rate,
+            test_missing_type=_missing_type_for_missing_rate(missing_rate),
+            test_channel_sync=False,
             y_true=y_true,
             y_pred=y_pred,
             logit_list=logit_list,
@@ -1357,6 +1505,8 @@ def run_model(
         eval_result = _build_evaluation_result(
             task=task,
             test_missing_rate=missing_rate,
+            test_missing_type=_missing_type_for_missing_rate(missing_rate),
+            test_channel_sync=False,
             task_pred=task_pred,
             task_target=task_target,
             missing_seed=SEED,
@@ -1400,7 +1550,8 @@ def run_model(
     out_name = '_'.join([data_name, str(missing_rate), model_name, str(SEED)])
     output_path = os.path.join(out_root, data_name, str(missing_rate), out_name)
     payload = _build_result_payload(
-        mode="standard",
+        mode=evaluation_regime,
+        evaluation_regime=evaluation_regime,
         task=task,
         dataset=data_name,
         model_name=model_name,
@@ -1413,6 +1564,8 @@ def run_model(
         device=device,
         run_id=run_id,
         save_predictions=save_predictions,
+        train_missing_type=train_missing_type,
+        train_channel_sync=train_channel_sync,
         batch_policy=batch_policy,
         lr_policy=lr_policy,
     )
@@ -1437,7 +1590,10 @@ def run_model(
         "task_metrics": metrics if task != "classification" else None,
         "train_missing_summary": train_missing_summary,
         "target_spec": None if task == "classification" else target_spec,
-        "mode": "standard",
+        "mode": evaluation_regime,
+        "evaluation_regime": evaluation_regime,
+        "train_missing_type": train_missing_type,
+        "train_channel_sync": train_channel_sync,
     }
 
 
@@ -1504,7 +1660,9 @@ def _evaluate_robustness(
         missing_rate=0.0,
         interpolate=interpolate,
         use_intensity=use_intensity,
-        channel_sync=use_raw_flow_input,
+        mechanism="MCAR",
+        seed=SEED,
+        channel_sync=False,
     )
     train_reference = train_missing_ref[train_idx]
     train_stats = []
@@ -1517,7 +1675,7 @@ def _evaluate_robustness(
     for test_rate in test_missing_rates:
         if _is_zero_missing_rate(test_rate):
             mechanism_options = ["REGULAR"]
-            channel_sync_values = [None]
+            channel_sync_values = [False]
         else:
             mechanism_options = test_missing_mechanisms
             channel_sync_values = resolved_channel_sync_options
@@ -1728,17 +1886,19 @@ def main():
                     stop_early = True
                     break
                 try:
-                    # Load params file based on param_mode
-                    if args.param_mode == "cv":
-                        param_name = '_'.join([data_name, model_name, 'cv'])
-                    else:
-                        param_name = '_'.join([data_name, model_name])
+                    param_name, param_path = _resolve_param_artifact_path(
+                        args.param_root,
+                        data_name,
+                        model_name,
+                        param_policy=args.param_policy,
+                        param_repeat=args.param_repeat,
+                    )
 
-                    param_path = os.path.join(args.param_root, data_name, param_name)
                     if not os.path.exists(param_path):
                         raise FileNotFoundError(
                             f"Params file not found: {param_path}. "
-                            f"Run scripts/param_search.py with --search-mode {args.param_mode} first."
+                            "Run scripts/param_search.py with "
+                            f"--search-policy {args.param_policy} --search-repeat {args.param_repeat} first."
                         )
 
                     with open(param_path, 'rb') as f:
@@ -1746,6 +1906,8 @@ def main():
                     param_search_profile = _validate_param_search_profile(
                         model_config,
                         expected_search_profile=args.search_profile,
+                        expected_param_policy=args.param_policy,
+                        expected_param_repeat=args.param_repeat,
                         param_path=str(param_path),
                     )
                     param_search_contract = _param_search_contract_metadata(
@@ -1819,6 +1981,8 @@ def main():
                                     "task": args.task,
                                     "target_source": args.target_source,
                                     "search_profile": param_search_profile,
+                                    "search_policy": args.param_policy,
+                                    "search_repeat": args.param_repeat,
                                     **param_search_contract,
                                     "split_path": str(split_path),
                                     "param_path": str(param_path),
@@ -1829,6 +1993,8 @@ def main():
                         continue
                     run_result["param_path"] = str(param_path)
                     run_result["search_profile"] = param_search_profile
+                    run_result["search_policy"] = args.param_policy
+                    run_result["search_repeat"] = args.param_repeat
                     run_result.update(param_search_contract)
                     records.append(run_result)
                     run_count += 1
@@ -1858,17 +2024,19 @@ def main():
                         stop_early = True
                         break
                     try:
-                        # Load params file based on param_mode
-                        if args.param_mode == "cv":
-                            param_name = '_'.join([data_name, model_name, 'cv'])
-                        else:
-                            param_name = '_'.join([data_name, model_name])
+                        param_name, param_path = _resolve_param_artifact_path(
+                            args.param_root,
+                            data_name,
+                            model_name,
+                            param_policy=args.param_policy,
+                            param_repeat=args.param_repeat,
+                        )
 
-                        param_path = os.path.join(args.param_root, data_name, param_name)
                         if not os.path.exists(param_path):
                             raise FileNotFoundError(
                                 f"Params file not found: {param_path}. "
-                                f"Run scripts/param_search.py with --search-mode {args.param_mode} first."
+                                "Run scripts/param_search.py with "
+                                f"--search-policy {args.param_policy} --search-repeat {args.param_repeat} first."
                             )
 
                         with open(param_path, 'rb') as f:
@@ -1876,6 +2044,8 @@ def main():
                         param_search_profile = _validate_param_search_profile(
                             model_config,
                             expected_search_profile=args.search_profile,
+                            expected_param_policy=args.param_policy,
+                            expected_param_repeat=args.param_repeat,
                             param_path=str(param_path),
                         )
                         param_search_contract = _param_search_contract_metadata(
@@ -1936,6 +2106,8 @@ def main():
                                         "task": args.task,
                                         "target_source": args.target_source,
                                         "search_profile": param_search_profile,
+                                        "search_policy": args.param_policy,
+                                        "search_repeat": args.param_repeat,
                                         **param_search_contract,
                                         "split_path": str(split_path),
                                         "param_path": str(param_path),
@@ -1946,6 +2118,8 @@ def main():
                             continue
                         run_result["param_path"] = str(param_path)
                         run_result["search_profile"] = param_search_profile
+                        run_result["search_policy"] = args.param_policy
+                        run_result["search_repeat"] = args.param_repeat
                         run_result.update(param_search_contract)
                         records.append(run_result)
                         run_count += 1
@@ -2004,6 +2178,8 @@ def main():
             "dataset_source": str(args.dataset_source),
             "dataset_npz": None if args.dataset_npz is None else str(args.dataset_npz),
             "target_source": args.target_source if args.task != "classification" else "label",
+            "param_policy": args.param_policy,
+            "param_repeat": args.param_repeat,
             "search_profile": args.search_profile,
             **describe_search_profile(args.search_profile),
             "split_root": str(args.split_root),

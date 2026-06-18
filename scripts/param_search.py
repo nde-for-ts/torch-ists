@@ -44,6 +44,8 @@ from _common import (
     resolve_effective_param_config,
     resolve_learning_rate_policy,
     resolve_model_search_space,
+    SINGLE_SEARCH_REPEAT,
+    STANDARD_SEARCH_POLICY,
 )
 from dataset_source_contracts import load_dataset, normalize_dataset_source
 from script_chain_contracts import (
@@ -76,13 +78,80 @@ def _normalize_dataset_source_arg(raw: str) -> str:
         raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
-def _normalize_search_mode(raw: str) -> str:
+CONSTRAINED_SEARCH_POLICY = "constrained"
+AGGREGATED_SEARCH_REPEAT = "aggregated"
+
+
+def _normalize_search_policy_arg(raw: str) -> str:
+    normalized = str(raw).strip().lower()
+    if normalized in {STANDARD_SEARCH_POLICY, CONSTRAINED_SEARCH_POLICY}:
+        return normalized
+    if normalized == "standard":
+        return STANDARD_SEARCH_POLICY
+    raise argparse.ArgumentTypeError("search policy must be one of {'default', 'constrained'}.")
+
+
+def _normalize_search_repeat_arg(raw: str) -> str:
+    normalized = str(raw).strip().lower()
+    if normalized in {SINGLE_SEARCH_REPEAT, AGGREGATED_SEARCH_REPEAT}:
+        return normalized
+    raise argparse.ArgumentTypeError("search repeat must be one of {'single', 'aggregated'}.")
+
+
+def _normalize_search_mode_alias(raw: str) -> tuple[str, str]:
     normalized = str(raw).strip().lower()
     if normalized in {"default", "legacy"}:
-        return "default"
+        return STANDARD_SEARCH_POLICY, SINGLE_SEARCH_REPEAT
     if normalized in {"cv", "improved"}:
-        return "cv"
-    raise argparse.ArgumentTypeError("search mode must be one of {'default', 'cv'}.")
+        return STANDARD_SEARCH_POLICY, AGGREGATED_SEARCH_REPEAT
+    raise argparse.ArgumentTypeError(
+        "--search-mode is deprecated; use --search-policy {default,constrained} "
+        "and --search-repeat {single,aggregated}."
+    )
+
+
+def _search_mode_from_repeat(search_repeat: str) -> str:
+    return "cv" if search_repeat == AGGREGATED_SEARCH_REPEAT else "default"
+
+
+def _fixed_search_seed_set(search_repeat: str, search_seed: int) -> list[int]:
+    if search_repeat == AGGREGATED_SEARCH_REPEAT:
+        return [0, 1, 2, 3, 4]
+    return [int(search_seed)]
+
+
+def _build_param_artifact_name(
+    data_name: str,
+    model_name: str,
+    *,
+    search_policy: str,
+    search_repeat: str,
+    param_target: str | None = None,
+) -> str:
+    parts = [data_name, model_name]
+    if search_policy == CONSTRAINED_SEARCH_POLICY:
+        parts.append(str(param_target) if param_target else CONSTRAINED_SEARCH_POLICY)
+    if search_repeat == AGGREGATED_SEARCH_REPEAT:
+        parts.append(AGGREGATED_SEARCH_REPEAT)
+    return "_".join(parts)
+
+
+def _infer_cli_search_policy(model_config: dict) -> str:
+    raw = str(model_config.get("search_policy", STANDARD_SEARCH_POLICY)).strip().lower()
+    if raw in {STANDARD_SEARCH_POLICY, CONSTRAINED_SEARCH_POLICY}:
+        return raw
+    if raw == "standard":
+        return STANDARD_SEARCH_POLICY
+    return STANDARD_SEARCH_POLICY
+
+
+def _infer_cli_search_repeat(model_config: dict, artifact_name: str | None = None) -> str:
+    raw = str(model_config.get("search_repeat", "")).strip().lower()
+    if raw in {SINGLE_SEARCH_REPEAT, AGGREGATED_SEARCH_REPEAT}:
+        return raw
+    if artifact_name and artifact_name.endswith("_cv"):
+        return AGGREGATED_SEARCH_REPEAT
+    return SINGLE_SEARCH_REPEAT
 
 
 def _normalize_search_profile_arg(raw: str) -> str:
@@ -114,7 +183,7 @@ def parse_cli_args():
     parser = argparse.ArgumentParser(
         description="Run parameter search loop. Defaults to one dataset-model configuration; comma-separated inputs expand the run grid."
     )
-    parser.add_argument("--seed", type=int, default=42, help="Search seed (default 42, held fixed by policy; eval seeds 0-4 are disjoint). The param artifact filename does not encode the seed, so overriding silently reuses the seed-42 artifact unless you back up params/ and pass --existing-policy fail.")
+    parser.add_argument("--seed", type=int, default=42, help="Search seed for --search-repeat single (default 42). --search-repeat aggregated uses the fixed seed set 0-4; no seed-list CLI is exposed.")
     parser.add_argument(
         "--datasets",
         type=str,
@@ -140,7 +209,7 @@ def parse_cli_args():
         default="cnn",
         help="Comma-separated model list. Default: cnn.",
     )
-    parser.add_argument("--missing-rate", type=float, default=0.0, help="Missing rate used for tuning.")
+    parser.add_argument("--missing-rate", type=float, default=0.0, help=argparse.SUPPRESS)
     parser.add_argument("--num-samples", type=int, default=20, help="Ray Tune num_samples.")
     parser.add_argument("--max-num-epochs", type=int, default=10, help="Ray Tune max epochs.")
     parser.add_argument(
@@ -173,11 +242,25 @@ def parse_cli_args():
         help="Device selection mode for each Ray trial.",
     )
     parser.add_argument(
+        "--search-policy",
+        type=_normalize_search_policy_arg,
+        default=None,
+        metavar="{default,constrained}",
+        help="Search policy. default=model-specific package search; constrained=capacity-constrained search.",
+    )
+    parser.add_argument(
+        "--search-repeat",
+        type=_normalize_search_repeat_arg,
+        default=None,
+        metavar="{single,aggregated}",
+        help="Repeat policy. single uses --seed; aggregated averages the fixed seed set 0-4.",
+    )
+    parser.add_argument(
         "--search-mode",
-        type=_normalize_search_mode,
-        default="default",
-        metavar="{default,cv}",
-        help="Hyperparameter search mode. default runs the single-seed policy search (default --seed 42); cv averages over seeds 0-4 as an auxiliary cross-validated mode (approximately 5x compute).",
+        dest="search_mode_alias",
+        type=_normalize_search_mode_alias,
+        default=None,
+        help=argparse.SUPPRESS,
     )
     parser.add_argument(
         "--search-profile",
@@ -240,9 +323,24 @@ def parse_cli_args():
         type=str,
         choices=["active"],
         default="active",
-        help="Model scope for this package runtime.",
+        help=argparse.SUPPRESS,
     )
     args = parser.parse_args()
+    if args.search_mode_alias is not None:
+        if args.search_policy is not None or args.search_repeat is not None:
+            parser.error("--search-mode is a deprecated alias and cannot be combined with --search-policy or --search-repeat.")
+        args.search_policy, args.search_repeat = args.search_mode_alias
+    args.search_policy = args.search_policy or STANDARD_SEARCH_POLICY
+    args.search_repeat = args.search_repeat or SINGLE_SEARCH_REPEAT
+    if args.search_policy == CONSTRAINED_SEARCH_POLICY:
+        parser.error("--search-policy constrained is reserved for the capacity-constrained implementation and is not runnable in this patch.")
+    if not math.isclose(float(args.missing_rate), 0.0, abs_tol=1e-12):
+        parser.error(
+            "param_search.py searches clean regular data only. "
+            "Use model_run.py --missing-rates or --robustness-mode for missingness evaluation."
+        )
+    args.missing_rate = 0.0
+    args.search_mode = _search_mode_from_repeat(args.search_repeat)
     args.datasets = _parse_csv_list(args.datasets)
     args.models = _parse_csv_list(args.models)
     args.dataset_source = normalize_dataset_source(args.dataset_source)
@@ -362,7 +460,9 @@ def _collect_task_metadata(
         missing_rate=missing_rate,
         interpolate=data_config["interpolation"],
         use_intensity=data_config["use_intensity"],
-        channel_sync=_requires_flow_raw_input(model_name),
+        mechanism="MCAR",
+        seed=seed,
+        channel_sync=False,
     )
     X_train = X_missing[train_idx]
     out = []
@@ -578,7 +678,9 @@ def _train_single_seed(
         missing_rate=missing_rate,
         interpolate=interpolate,
         use_intensity=use_intensity,
-        channel_sync=_requires_flow_raw_input(model_name),
+        mechanism="MCAR",
+        seed=SEED,
+        channel_sync=False,
     )
     X_train = X_missing[train_idx]
 
@@ -878,6 +980,8 @@ def optimize(
     ray_gpu=0.5,
     device_mode="auto",
     search_mode="default",
+    search_policy=STANDARD_SEARCH_POLICY,
+    search_repeat=SINGLE_SEARCH_REPEAT,
     search_profile=DEFAULT_SEARCH_PROFILE,
     task="classification",
     forecast_horizon=None,
@@ -888,6 +992,7 @@ def optimize(
 ):
     search_space = resolve_model_search_space(model_name, search_profile)
     search_profile = search_space["search_profile"]
+    metadata_seed = _fixed_search_seed_set(search_repeat, SEED)[0]
     if num_samples <= 1:
         LOGGER.info(
             "Using local single-sample optimization path (Ray bypass) for dataset=%s model=%s",
@@ -905,14 +1010,17 @@ def optimize(
             "search_family": search_space["search_family"],
             "public_search_name": search_space["public_search_name"],
             "search_profile_visibility": search_space["search_profile_visibility"],
-            "search_policy": search_space["policy"],
+            "search_policy": search_policy,
+            "search_repeat": search_repeat,
+            "search_algorithm_policy": search_space["policy"],
             "lr": 1e-3,
             "hidden_dim": int(search_space["default_hidden_dim"]),
             "depth_level": int(search_space["default_depth_level"]),
         }
+        model_config.update(search_space.get("default_extra_params", {}))
         split_root_local = split_root
 
-        if search_mode == "default":
+        if search_repeat == SINGLE_SEARCH_REPEAT:
             best_loss = _train_single_seed(
                 data_name=data_name,
                 missing_rate=missing_rate,
@@ -931,7 +1039,7 @@ def optimize(
                 dataset_source=dataset_source,
                 dataset_npz=dataset_npz,
             )
-        elif search_mode == "cv":
+        elif search_repeat == AGGREGATED_SEARCH_REPEAT:
             losses = []
             for seed in range(5):
                 losses.append(
@@ -956,7 +1064,7 @@ def optimize(
                 )
             best_loss = float(np.mean(losses))
         else:
-            raise ValueError(f"Unknown search_mode: {search_mode}")
+            raise ValueError(f"Unknown search_repeat: {search_repeat}")
 
         saved_model_config = _normalize_param_config_for_save(
             model_name,
@@ -964,10 +1072,12 @@ def optimize(
             search_profile=search_profile,
         )
         os.makedirs(os.path.join(param_root, data_name), exist_ok=True)
-        if search_mode == "cv":
-            out_name = "_".join([data_name, model_name, "cv"])
-        else:
-            out_name = "_".join([data_name, model_name])
+        out_name = _build_param_artifact_name(
+            data_name,
+            model_name,
+            search_policy=search_policy,
+            search_repeat=search_repeat,
+        )
         param_path = os.path.join(param_root, data_name, out_name)
         with open(param_path, "wb") as f:
             pickle.dump(saved_model_config, f)
@@ -977,7 +1087,7 @@ def optimize(
             missing_rate=missing_rate,
             model_name=model_name,
             split_root=split_root,
-            seed=SEED,
+            seed=metadata_seed,
             task=task,
             forecast_horizon=forecast_horizon,
             target_source=target_source,
@@ -1000,7 +1110,9 @@ def optimize(
             "search_family": saved_model_config["search_family"],
             "public_search_name": saved_model_config["public_search_name"],
             "search_profile_visibility": saved_model_config["search_profile_visibility"],
-            "search_policy": search_space["policy"],
+            "search_policy": saved_model_config["search_policy"],
+            "search_repeat": saved_model_config["search_repeat"],
+            "search_algorithm_policy": saved_model_config["search_algorithm_policy"],
             "legacy_grid_version": saved_model_config["legacy_grid_version"],
             "architecture_axes": saved_model_config["architecture_axes"],
             "effective_params": saved_model_config["effective_params"],
@@ -1050,12 +1162,16 @@ def optimize(
         "search_family": search_space["search_family"],
         "public_search_name": search_space["public_search_name"],
         "search_profile_visibility": search_space["search_profile_visibility"],
-        "search_policy": search_space["policy"],
+        "search_policy": search_policy,
+        "search_repeat": search_repeat,
+        "search_algorithm_policy": search_space["policy"],
         # "batch_size": None, # determine by the number of the data
         "lr": tune.loguniform(*search_space["lr_bounds"]),
         "hidden_dim": tune.choice(search_space["hidden_dim_values"]),
         "depth_level": tune.choice(search_space["depth_level_values"]),
     }
+    for param_name, param_values in search_space.get("extra_param_values", {}).items():
+        model_config[param_name] = tune.choice(param_values)
 
     scheduler = ASHAScheduler(
         max_t=max_num_epochs,
@@ -1105,10 +1221,12 @@ def optimize(
     os.makedirs(os.path.join(param_root, data_name), exist_ok=True)
 
     # Distinguish default vs cv params by suffix
-    if search_mode == "cv":
-        out_name = '_'.join([data_name, model_name, 'cv'])
-    else:
-        out_name = '_'.join([data_name, model_name])
+    out_name = _build_param_artifact_name(
+        data_name,
+        model_name,
+        search_policy=search_policy,
+        search_repeat=search_repeat,
+    )
 
     param_path = os.path.join(param_root, data_name, out_name)
     saved_param_config = _normalize_param_config_for_save(
@@ -1126,7 +1244,7 @@ def optimize(
         missing_rate=missing_rate,
         model_name=model_name,
         split_root=split_root,
-        seed=SEED,
+        seed=metadata_seed,
         task=task,
         forecast_horizon=forecast_horizon,
         target_source=target_source,
@@ -1149,7 +1267,9 @@ def optimize(
         "search_family": saved_param_config["search_family"],
         "public_search_name": saved_param_config["public_search_name"],
         "search_profile_visibility": saved_param_config["search_profile_visibility"],
-        "search_policy": search_space["policy"],
+        "search_policy": saved_param_config["search_policy"],
+        "search_repeat": saved_param_config["search_repeat"],
+        "search_algorithm_policy": saved_param_config["search_algorithm_policy"],
         "legacy_grid_version": saved_param_config["legacy_grid_version"],
         "architecture_axes": saved_param_config["architecture_axes"],
         "effective_params": saved_param_config["effective_params"],
@@ -1201,15 +1321,21 @@ def main():
                 stop_early = True
                 break
 
-            # Check if params file already exists (skip logic)
-            if args.search_mode == "cv":
-                out_name = '_'.join([data_name, model_name, 'cv'])
-            else:
-                out_name = '_'.join([data_name, model_name])
-
-            split_path = os.path.join(args.split_root, data_name, f"{data_name}_{SEED}")
-            if not os.path.exists(split_path):
-                reason = f"split artifact missing: {split_path}"
+            out_name = _build_param_artifact_name(
+                data_name,
+                model_name,
+                search_policy=args.search_policy,
+                search_repeat=args.search_repeat,
+            )
+            split_seeds = _fixed_search_seed_set(args.search_repeat, SEED)
+            split_paths = [
+                os.path.join(args.split_root, data_name, f"{data_name}_{seed}")
+                for seed in split_seeds
+            ]
+            missing_split_paths = [path for path in split_paths if not os.path.exists(path)]
+            split_path = split_paths[0]
+            if missing_split_paths:
+                reason = "split artifact missing: " + ", ".join(missing_split_paths)
                 LOGGER.warning("[SKIP] %s/%s: %s", data_name, model_name, reason)
                 skipped.append({"dataset": data_name, "model": model_name, "task": args.task, "reason": reason})
                 continue
@@ -1235,10 +1361,22 @@ def main():
                         continue
                     existing_profile = infer_param_search_profile(existing_cfg)
                     existing_contract = describe_search_profile(existing_profile)
+                    existing_search_policy = _infer_cli_search_policy(existing_cfg)
+                    existing_search_repeat = _infer_cli_search_repeat(existing_cfg, out_name)
                     if existing_profile != args.search_profile:
                         reason = (
                             "param artifact search_profile mismatch "
                             f"(found={existing_profile!r}, expected={args.search_profile!r})"
+                        )
+                        LOGGER.error("[FAIL] %s/%s: %s", data_name, model_name, reason)
+                        skipped.append({"dataset": data_name, "model": model_name, "task": args.task, "reason": reason})
+                        policy_violations.append(f"{data_name}/{model_name}: {reason}")
+                        continue
+                    if existing_search_policy != args.search_policy or existing_search_repeat != args.search_repeat:
+                        reason = (
+                            "param artifact search axes mismatch "
+                            f"(found policy={existing_search_policy!r}, repeat={existing_search_repeat!r}; "
+                            f"expected policy={args.search_policy!r}, repeat={args.search_repeat!r})"
                         )
                         LOGGER.error("[FAIL] %s/%s: %s", data_name, model_name, reason)
                         skipped.append({"dataset": data_name, "model": model_name, "task": args.task, "reason": reason})
@@ -1252,6 +1390,7 @@ def main():
                             "dataset_npz": None if args.dataset_npz is None else str(args.dataset_npz),
                             "model": model_name,
                             "seed": SEED,
+                            "search_seed_set": split_seeds,
                             "missing_rate": float(args.missing_rate),
                             "task": args.task,
                             "target_source": args.target_source,
@@ -1260,7 +1399,9 @@ def main():
                             "search_family": existing_cfg.get("search_family", existing_contract["search_family"]),
                             "public_search_name": existing_cfg.get("public_search_name", existing_contract["public_search_name"]),
                             "search_profile_visibility": existing_cfg.get("search_profile_visibility", existing_contract["search_profile_visibility"]),
-                            "search_policy": existing_cfg.get("search_policy"),
+                            "search_policy": existing_search_policy,
+                            "search_repeat": existing_search_repeat,
+                            "search_algorithm_policy": existing_cfg.get("search_algorithm_policy", existing_cfg.get("search_policy")),
                             "legacy_grid_version": existing_cfg.get("legacy_grid_version", existing_profile),
                             "architecture_axes": existing_cfg.get("architecture_axes"),
                             "effective_params": existing_cfg.get("effective_params"),
@@ -1286,6 +1427,8 @@ def main():
                     ray_gpu=args.ray_gpu,
                     device_mode=args.device,
                     search_mode=args.search_mode,
+                    search_policy=args.search_policy,
+                    search_repeat=args.search_repeat,
                     search_profile=args.search_profile,
                     task=args.task,
                     forecast_horizon=args.forecast_horizon,
@@ -1317,6 +1460,7 @@ def main():
                         "dataset_npz": search_result["dataset_npz"],
                         "model": model_name,
                         "seed": SEED,
+                        "search_seed_set": _fixed_search_seed_set(args.search_repeat, SEED),
                         "missing_rate": float(args.missing_rate),
                         "task": args.task,
                         "target_source": str(search_result["target_source"]),
@@ -1333,6 +1477,8 @@ def main():
                         "public_search_name": search_result["public_search_name"],
                         "search_profile_visibility": search_result["search_profile_visibility"],
                         "search_policy": search_result["search_policy"],
+                        "search_repeat": search_result["search_repeat"],
+                        "search_algorithm_policy": search_result["search_algorithm_policy"],
                         "legacy_grid_version": search_result["legacy_grid_version"],
                         "architecture_axes": search_result["architecture_axes"],
                         "effective_params": search_result["effective_params"],
@@ -1384,6 +1530,9 @@ def main():
             "dataset_source": str(args.dataset_source),
             "dataset_npz": None if args.dataset_npz is None else str(args.dataset_npz),
             "target_source": args.target_source if args.task != "classification" else "label",
+            "search_policy": args.search_policy,
+            "search_repeat": args.search_repeat,
+            "search_seed_set": _fixed_search_seed_set(args.search_repeat, SEED),
             "search_profile": args.search_profile,
             **describe_search_profile(args.search_profile),
             "split_root": str(args.split_root),
