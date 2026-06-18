@@ -6,7 +6,7 @@
 
 It provides runtime APIs, benchmark scripts, and a built-in benchmark archive loader.
 
-**Related source docs**: [Docs index](docs/README.md) · [API Reference](docs/api_reference.md) · [Model Reference](docs/model_reference.md) · [Scripts Reference](docs/scripts_reference.md) · [Custom Data Guide](docs/custom_data_guide.md) · [Custom Model Guide](docs/custom_model_guide.md) · [Packaging Build Diagnostics](docs/packaging_build_diagnostics.md) · [Third-Party Notices](docs/third_party_notices.md) · [CIKM 2025 Tutorial site](https://nde-for-ts.github.io/)
+**Related source docs**: [Docs index](docs/README.md) · [API Reference](docs/api_reference.md) · [Model Reference](docs/model_reference.md) · [Scripts Reference](docs/scripts_reference.md) · [Custom Data Guide](docs/custom_data_guide.md) · [Custom Model Guide](docs/custom_model_guide.md) · [Third-Party Notices](docs/third_party_notices.md) · [CIKM 2025 Tutorial site](https://nde-for-ts.github.io/)
 
 ## Overview
 
@@ -18,7 +18,7 @@ Requirements:
 
 - `Python >= 3.10`
 - `PyTorch >= 2.0`
-- `pip >= 22.3` for the pyproject-only build path. Ubuntu 22.04 system `pip 22.0.2` builds an empty `UNKNOWN-0.0.0` wheel from this source layout; upgrade pip first or apply the legacy compatibility shim documented in [Packaging Build Diagnostics](docs/packaging_build_diagnostics.md).
+- `pip >= 22.3` for the pyproject-only build path; upgrade older system pip before installing from source.
 - `PYTHONNOUSERSITE=1` for runtime and source-checkout script commands
 
 Install the base package:
@@ -189,7 +189,6 @@ User-owned `nn.Module` models can compose with packaged data, split, and preproc
 - `docs/scripts_reference.md` — source-checkout CLI scripts: flags, outputs, and pipeline order
 - `docs/custom_data_guide.md` — guidance for adding user-provided datasets and NPZ script inputs
 - `docs/custom_model_guide.md` — guidance for using custom models alongside the package
-- `docs/packaging_build_diagnostics.md` — diagnosis and resolution options for legacy pip builds
 - `docs/third_party_notices.md` — upstream sources and licenses for third-party code in the package
 
 Tutorial: <https://nde-for-ts.github.io/> (CIKM 2025).
