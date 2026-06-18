@@ -32,11 +32,17 @@ from torch import nn, Tensor
 from torch.utils.data import Dataset, DataLoader
 
 from _common import (
+    DEFAULT_SEARCH_PROFILE,
     apply_model_scope_variant,
+    build_model_kwargs_from_config,
     configure_runtime_paths,
     default_method_for_model,
+    infer_param_search_profile,
+    normalize_search_profile,
     resolve_dataset_fixed_batch_policy,
+    resolve_effective_param_config,
     resolve_learning_rate_policy,
+    resolve_model_search_space,
 )
 from dataset_source_contracts import load_dataset, normalize_dataset_source
 from script_chain_contracts import (
@@ -78,6 +84,13 @@ def _normalize_search_mode(raw: str) -> str:
     raise argparse.ArgumentTypeError("search mode must be one of {'default', 'cv'}.")
 
 
+def _normalize_search_profile_arg(raw: str) -> str:
+    try:
+        return normalize_search_profile(raw)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+
+
 def _resolve_model_scope_variant(requested_variant: str) -> str:
     normalized = str(requested_variant).strip().lower()
     if normalized in {"", "active"}:
@@ -94,12 +107,6 @@ def _requires_flow_raw_input(model_name: str) -> bool:
     from torch_ists.config.alias_policy import is_flow_strict_raw_name
 
     return is_flow_strict_raw_name(str(model_name))
-
-
-def _is_flow_model_name(model_name: str) -> bool:
-    from torch_ists.config.alias_policy import is_flow_family_name
-
-    return is_flow_family_name(str(model_name))
 
 
 def parse_cli_args():
@@ -170,6 +177,13 @@ def parse_cli_args():
         default="default",
         metavar="{default,cv}",
         help="Hyperparameter search mode. default runs the single-seed policy search (default --seed 42); cv averages over seeds 0-4 as an auxiliary cross-validated mode (approximately 5x compute).",
+    )
+    parser.add_argument(
+        "--search-profile",
+        type=_normalize_search_profile_arg,
+        default=DEFAULT_SEARCH_PROFILE,
+        metavar="{legacy-expanded-v1,legacy-iclr2024-v0}",
+        help="Parameter search profile. Default legacy-expanded-v1 searches model-specific effective depth over the expanded legacy grid; legacy-iclr2024-v0 keeps the historical 4x4 grid.",
     )
     parser.add_argument(
         "--split-root",
@@ -271,10 +285,8 @@ from task_target_contracts import load_task_targets_npz
 from torch_ists.config import (
     get_data_config,
     get_active_model_list,
-    resolve_layer_depth,
     get_default_selected_datasets,
 )
-from torch_ists.config.model_data_policy import _resolve_runtime_depth_config
 
 ray = None
 tune = None
@@ -310,31 +322,6 @@ logging.basicConfig(
 LOGGER = logging.getLogger("param_search")
 
 os.makedirs('params', exist_ok=True)
-
-
-def _build_depth_model_kwargs(model_name: str, model_config: dict) -> dict:
-    depth_cfg = _resolve_runtime_depth_config(
-        model_name,
-        num_layers=model_config.get("num_layers", 1),
-        num_hidden_layers=model_config.get("num_hidden_layers"),
-        head_depth=model_config.get("head_depth"),
-        flow_num_layers=model_config.get("flow_num_layers"),
-        flow_depth=model_config.get("flow_depth"),
-    )
-    num_layers, num_hidden_layers = resolve_layer_depth(model_name, int(depth_cfg["head_depth"]))
-    if num_hidden_layers is None:
-        num_hidden_layers = num_layers
-    if depth_cfg["is_flow_model"]:
-        num_layers = 1
-        num_hidden_layers = int(depth_cfg["head_depth"])
-
-    return {
-        "num_layers": int(num_layers),
-        "num_hidden_layers": int(num_hidden_layers),
-        "head_depth": int(depth_cfg["head_depth"]),
-        "flow_num_layers": int(depth_cfg["flow_num_layers"]),
-        "flow_depth": int(depth_cfg["flow_depth"]),
-    }
 
 
 def _collect_task_metadata(
@@ -439,16 +426,17 @@ def _collect_task_metadata(
     }
 
 
-def _normalize_param_config_for_save(model_name: str, model_config: dict) -> dict:
-    saved = dict(model_config)
-    if not _is_flow_model_name(model_name):
-        return saved
-    depth_kwargs = _build_depth_model_kwargs(model_name, model_config)
-    saved["num_layers"] = int(depth_kwargs["head_depth"])
-    saved["head_depth"] = int(depth_kwargs["head_depth"])
-    saved["flow_num_layers"] = int(depth_kwargs["flow_depth"])
-    saved["flow_depth"] = int(depth_kwargs["flow_depth"])
-    return saved
+def _normalize_param_config_for_save(
+    model_name: str,
+    model_config: dict,
+    *,
+    search_profile: str | None = None,
+) -> dict:
+    return resolve_effective_param_config(
+        model_name,
+        model_config,
+        search_profile=search_profile,
+    )
 
 
 def _build_task_targets(task, x_missing_norm, y, forecast_horizon=None):
@@ -687,16 +675,7 @@ def _train_single_seed(
     valid_batch = DataLoader(valid_dataset, batch_size=batch_size, shuffle=True, drop_last=False)
 
     # Set model params
-    depth_kwargs = _build_depth_model_kwargs(model_name, model_config)
-    model_kwargs = {
-        'hidden_dim': model_config['hidden_dim'],
-        'hidden_hidden_dim': model_config['hidden_dim'],
-        'num_layers': depth_kwargs['num_layers'],
-        'num_hidden_layers': depth_kwargs['num_hidden_layers'],
-        'head_depth': depth_kwargs['head_depth'],
-        'flow_num_layers': depth_kwargs['flow_num_layers'],
-        'flow_depth': depth_kwargs['flow_depth'],
-    }
+    model_kwargs = build_model_kwargs_from_config(model_name, model_config)
 
     # Create tmp path for ANCDE (model-specific file I/O)
     os.makedirs(os.path.join(os.getcwd(), 'tmp'), exist_ok=True)
@@ -899,6 +878,7 @@ def optimize(
     ray_gpu=0.5,
     device_mode="auto",
     search_mode="default",
+    search_profile=DEFAULT_SEARCH_PROFILE,
     task="classification",
     forecast_horizon=None,
     target_source="surrogate",
@@ -906,6 +886,8 @@ def optimize(
     dataset_source="default",
     dataset_npz=None,
 ):
+    search_space = resolve_model_search_space(model_name, search_profile)
+    search_profile = search_space["search_profile"]
     if num_samples <= 1:
         LOGGER.info(
             "Using local single-sample optimization path (Ray bypass) for dataset=%s model=%s",
@@ -918,9 +900,11 @@ def optimize(
             "missing_rate": missing_rate,
             "model_name": model_name,
             "task": task,
+            "search_profile": search_profile,
+            "search_policy": search_space["policy"],
             "lr": 1e-3,
-            "hidden_dim": 32,
-            "num_layers": 1,
+            "hidden_dim": int(search_space["default_hidden_dim"]),
+            "depth_level": int(search_space["default_depth_level"]),
         }
         split_root_local = split_root
 
@@ -970,7 +954,11 @@ def optimize(
         else:
             raise ValueError(f"Unknown search_mode: {search_mode}")
 
-        saved_model_config = _normalize_param_config_for_save(model_name, model_config)
+        saved_model_config = _normalize_param_config_for_save(
+            model_name,
+            model_config,
+            search_profile=search_profile,
+        )
         os.makedirs(os.path.join(param_root, data_name), exist_ok=True)
         if search_mode == "cv":
             out_name = "_".join([data_name, model_name, "cv"])
@@ -1003,6 +991,11 @@ def optimize(
             "split_path": str(split_path),
             "batch_policy": metadata["batch_policy"],
             "lr_policy": resolve_learning_rate_policy(saved_model_config.get("lr")),
+            "search_profile": search_profile,
+            "search_policy": search_space["policy"],
+            "legacy_grid_version": saved_model_config["legacy_grid_version"],
+            "architecture_axes": saved_model_config["architecture_axes"],
+            "effective_params": saved_model_config["effective_params"],
             "train_missing_summary": metadata["train_missing_summary"],
             "target_spec": metadata["target_spec"],
             "target_source": metadata["target_source"],
@@ -1044,10 +1037,12 @@ def optimize(
         "missing_rate": missing_rate,
         "model_name": model_name,
         "task": task,
+        "search_profile": search_profile,
+        "search_policy": search_space["policy"],
         # "batch_size": None, # determine by the number of the data
-        "lr": tune.loguniform(1e-4, 1e-2),
-        "hidden_dim": tune.choice([16, 32, 64, 128]),
-        "num_layers": tune.choice([1, 2, 3, 4]),
+        "lr": tune.loguniform(*search_space["lr_bounds"]),
+        "hidden_dim": tune.choice(search_space["hidden_dim_values"]),
+        "depth_level": tune.choice(search_space["depth_level_values"]),
     }
 
     scheduler = ASHAScheduler(
@@ -1104,7 +1099,11 @@ def optimize(
         out_name = '_'.join([data_name, model_name])
 
     param_path = os.path.join(param_root, data_name, out_name)
-    saved_param_config = _normalize_param_config_for_save(model_name, best_trial.config)
+    saved_param_config = _normalize_param_config_for_save(
+        model_name,
+        best_trial.config,
+        search_profile=search_profile,
+    )
     with open(param_path, 'wb') as f:
         pickle.dump(saved_param_config, f)
 
@@ -1133,6 +1132,11 @@ def optimize(
         "split_path": str(split_path),
         "batch_policy": metadata["batch_policy"],
         "lr_policy": resolve_learning_rate_policy(saved_param_config.get("lr")),
+        "search_profile": search_profile,
+        "search_policy": search_space["policy"],
+        "legacy_grid_version": saved_param_config["legacy_grid_version"],
+        "architecture_axes": saved_param_config["architecture_axes"],
+        "effective_params": saved_param_config["effective_params"],
         "train_missing_summary": metadata["train_missing_summary"],
         "target_spec": metadata["target_spec"],
         "target_source": metadata["target_source"],
@@ -1204,19 +1208,28 @@ def main():
                     skipped.append({"dataset": data_name, "model": model_name, "task": args.task, "reason": reason})
                     policy_violations.append(f"{data_name}/{model_name}: {reason}")
                 else:
-                    LOGGER.info("Params file already exists: %s/%s (reusing)", data_name, out_name)
-                    param_hash = ""
+                    LOGGER.info("Params file already exists: %s/%s (checking reuse contract)", data_name, out_name)
                     try:
                         with open(existing_param_path, "rb") as f:
                             existing_cfg = pickle.load(f)
                         param_hash = stable_hash(existing_cfg)
                     except Exception as exc:
-                        LOGGER.warning(
-                            "Failed to load existing params for hash %s/%s: %s",
-                            data_name,
-                            out_name,
-                            exc,
+                        reason = f"failed to load existing params for reuse contract: {exc}"
+                        LOGGER.error("[FAIL] %s/%s: %s", data_name, model_name, reason)
+                        skipped.append({"dataset": data_name, "model": model_name, "task": args.task, "reason": reason})
+                        policy_violations.append(f"{data_name}/{model_name}: {reason}")
+                        continue
+                    existing_profile = infer_param_search_profile(existing_cfg)
+                    if existing_profile != args.search_profile:
+                        reason = (
+                            "param artifact search_profile mismatch "
+                            f"(found={existing_profile!r}, expected={args.search_profile!r})"
                         )
+                        LOGGER.error("[FAIL] %s/%s: %s", data_name, model_name, reason)
+                        skipped.append({"dataset": data_name, "model": model_name, "task": args.task, "reason": reason})
+                        policy_violations.append(f"{data_name}/{model_name}: {reason}")
+                        continue
+                    LOGGER.info("Params file already exists: %s/%s (reusing)", data_name, out_name)
                     reused_records.append(
                         {
                             "dataset": data_name,
@@ -1227,6 +1240,11 @@ def main():
                             "missing_rate": float(args.missing_rate),
                             "task": args.task,
                             "target_source": args.target_source,
+                            "search_profile": existing_profile,
+                            "search_policy": existing_cfg.get("search_policy"),
+                            "legacy_grid_version": existing_cfg.get("legacy_grid_version", existing_profile),
+                            "architecture_axes": existing_cfg.get("architecture_axes"),
+                            "effective_params": existing_cfg.get("effective_params"),
                             "split_path": str(split_path),
                             "param_path": str(existing_param_path),
                             "param_hash": str(param_hash),
@@ -1249,6 +1267,7 @@ def main():
                     ray_gpu=args.ray_gpu,
                     device_mode=args.device,
                     search_mode=args.search_mode,
+                    search_profile=args.search_profile,
                     task=args.task,
                     forecast_horizon=args.forecast_horizon,
                     target_source=args.target_source,
@@ -1289,6 +1308,11 @@ def main():
                         "param_hash": str(search_result["param_hash"]),
                         "batch_policy": search_result["batch_policy"],
                         "lr_policy": search_result["lr_policy"],
+                        "search_profile": search_result["search_profile"],
+                        "search_policy": search_result["search_policy"],
+                        "legacy_grid_version": search_result["legacy_grid_version"],
+                        "architecture_axes": search_result["architecture_axes"],
+                        "effective_params": search_result["effective_params"],
                         "best_loss": float(search_result["best_loss"]),
                     }
                 )
@@ -1310,7 +1334,7 @@ def main():
     exit_code = 0
     if policy_violations:
         LOGGER.error(
-            "existing-policy=fail violations=%d. First violation: %s",
+            "Parameter artifact policy violations=%d. First violation: %s",
             len(policy_violations),
             policy_violations[0],
         )
@@ -1337,6 +1361,7 @@ def main():
             "dataset_source": str(args.dataset_source),
             "dataset_npz": None if args.dataset_npz is None else str(args.dataset_npz),
             "target_source": args.target_source if args.task != "classification" else "label",
+            "search_profile": args.search_profile,
             "split_root": str(args.split_root),
             "param_root": str(args.param_root),
             "records": records,

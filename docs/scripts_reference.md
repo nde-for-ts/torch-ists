@@ -51,6 +51,9 @@ All three scripts also append a JSON manifest to `evidence/` for run tracking.
 - `param_search.py` and `model_run.py` do not search `batch_size`; they determine it automatically from the loaded training split and sample footprint.
 - The resolved batch-size metadata is recorded in search/run manifests and run payload metadata.
 
+**Parameter grid**:
+- `param_search.py` defaults to `--search-profile legacy-expanded-v1`, which searches model-specific effective width/depth axes while preserving `legacy-iclr2024-v0` as an explicit compatibility profile.
+
 **Environment variable**:
 - `TORCH_ISTS_RUNTIME_ROOT` (optional) — override the runtime root when running the scripts from outside the package directory.
 - `TORCH_ISTS_DATA_ROOT` (optional) — override the built-in UCR/UEA archive root used by `--dataset-source default`.
@@ -122,6 +125,7 @@ This is a bounded smoke run; the full defaults (`--num-samples 20 --max-num-epoc
 | `--max-runs-mode` | `{completed, new}` | `completed` | What counts toward `--max-runs`: `completed` (executed + reused) or `new` (executed only). |
 | `--existing-policy` | `{reuse, fail}` | `reuse` | Behavior when a param artifact already exists. **Note**: the artifact filename (`<dataset>_<model>[_cv]`) does not encode the search seed; the search seed is held at `42` by policy. If you override `--seed`, delete or back up the existing `params/` directory and pass `--existing-policy fail` to surface any silently-reused artifact. |
 | `--search-mode` | `{default, cv}` | `default` | `default` runs the single-seed policy search (default `--seed 42`, fixed by policy); `cv` averages over `SEED=0–4` (≈5× compute; note that `cv` uses the evaluation seeds for hyperparameter selection). |
+| `--search-profile` | `{legacy-expanded-v1, legacy-iclr2024-v0}` | `legacy-expanded-v1` | Parameter grid profile. The default expands the legacy width/depth grid and resolves model-specific effective parameters; `legacy-iclr2024-v0` keeps the historical 4×4 grid. |
 | `--ray-cpu` | `float` | `16.0` | CPU per Ray trial. |
 | `--ray-gpu` | `float` | `0.5` | GPU per Ray trial (`0` for CPU-only). |
 | `--device` | `{auto, cpu, cuda}` | `auto` | Per-trial device selection. |
@@ -140,8 +144,8 @@ This is a bounded smoke run; the full defaults (`--num-samples 20 --max-num-epoc
 
 ### Output
 
-- **Param file** (pickle): `<param-root>/<dataset>/<dataset>_<model>[_cv]` containing the best hyperparameter dict.
-- **Run manifest**: `<contract-dir>/search_<run-id>.json` (records, reused records, skipped, summary). Executed records include resolved batch-size metadata.
+- **Param file** (pickle): `<param-root>/<dataset>/<dataset>_<model>[_cv]` containing the best hyperparameter dict, `search_profile`, and resolved effective model parameters.
+- **Run manifest**: `<contract-dir>/search_<run-id>.json` (records, reused records, skipped, summary). Executed records include resolved batch-size and search-profile metadata.
 
 ### Workflow Dependencies
 
@@ -192,6 +196,7 @@ PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/model_run.py \
 | `--existing-policy` | `{reuse, fail}` | `reuse` | Behavior when an output artifact already exists. |
 | `--check` / `--no-check` | flag | `True` | Pre-flight existence check; skip the run if the output file already exists. |
 | `--param-mode` | `{default, cv}` | `default` | Which `param_search.py` output to consume. Must match the search mode used. |
+| `--search-profile` | `{legacy-expanded-v1, legacy-iclr2024-v0}` | `legacy-expanded-v1` | Expected search profile of the loaded param artifact. Use `legacy-iclr2024-v0` only when intentionally evaluating historical-grid params. |
 | `--robustness-mode` | flag | `False` | Robustness evaluation: train on `missing=0`, evaluate on multiple test rates. |
 | `--robustness-test-rates` | `str` | `0.0,0.3,0.5,0.7` | Test missing rates for robustness mode. Only used when `--robustness-mode` is set. |
 | `--save-predictions` | `{full, summary}` | `full` | `full` stores prediction arrays; `summary` stores only shape/dtype metadata. |
@@ -246,7 +251,7 @@ The task and metric tables in this document describe `ists_model` API outputs. T
 
 Requires:
 - Split files from `set_splits.py` for every dataset at every reported evaluation seed (`--seed 0..4` for the standard evaluation; the `param_search.py` step additionally needs the configured search seed, default `--seed 42`).
-- Param files from `param_search.py --search-mode {default|cv}` matching `--param-mode`.
+- Param files from `param_search.py --search-mode {default|cv}` and `--search-profile ...` matching `--param-mode` and `--search-profile`.
 
 ---
 

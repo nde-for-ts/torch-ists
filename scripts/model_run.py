@@ -32,9 +32,13 @@ from torch import nn, Tensor
 from torch.utils.data import Dataset, DataLoader
 
 from _common import (
+    DEFAULT_SEARCH_PROFILE,
     apply_model_scope_variant,
+    build_model_kwargs_from_config,
     configure_runtime_paths,
     default_method_for_model,
+    infer_param_search_profile,
+    normalize_search_profile,
     resolve_dataset_fixed_batch_policy,
     resolve_learning_rate_policy,
 )
@@ -74,6 +78,13 @@ def _normalize_param_mode(raw: str) -> str:
     raise argparse.ArgumentTypeError("parameter mode must be one of {'default', 'cv'}.")
 
 
+def _normalize_search_profile_arg(raw: str) -> str:
+    try:
+        return normalize_search_profile(raw)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+
+
 def _resolve_model_scope_variant(requested_variant: str) -> str:
     normalized = str(requested_variant).strip().lower()
     if normalized in {"", "active"}:
@@ -92,28 +103,22 @@ def _requires_flow_raw_input(model_name: str) -> bool:
     return is_flow_strict_raw_name(str(model_name))
 
 
-def _build_depth_model_kwargs(model_name: str, model_config: dict) -> dict:
-    depth_cfg = _resolve_runtime_depth_config(
-        model_name,
-        num_layers=model_config.get("num_layers", 1),
-        num_hidden_layers=model_config.get("num_hidden_layers"),
-        head_depth=model_config.get("head_depth"),
-        flow_num_layers=model_config.get("flow_num_layers"),
-        flow_depth=model_config.get("flow_depth"),
-    )
-    num_layers, num_hidden_layers = resolve_layer_depth(model_name, int(depth_cfg["head_depth"]))
-    if num_hidden_layers is None:
-        num_hidden_layers = num_layers
-    if depth_cfg["is_flow_model"]:
-        num_layers = 1
-        num_hidden_layers = int(depth_cfg["head_depth"])
-    return {
-        "num_layers": int(num_layers),
-        "num_hidden_layers": int(num_hidden_layers),
-        "head_depth": int(depth_cfg["head_depth"]),
-        "flow_num_layers": int(depth_cfg["flow_num_layers"]),
-        "flow_depth": int(depth_cfg["flow_depth"]),
-    }
+def _validate_param_search_profile(
+    model_config: dict,
+    *,
+    expected_search_profile: str,
+    param_path: str,
+) -> str:
+    actual = infer_param_search_profile(model_config)
+    expected = normalize_search_profile(expected_search_profile)
+    if actual != expected:
+        raise ValueError(
+            "Param artifact search_profile mismatch: "
+            f"{param_path} has {actual!r}, expected {expected!r}. "
+            "Pass --search-profile legacy-iclr2024-v0 only when intentionally "
+            "evaluating historical-grid params."
+        )
+    return actual
 
 
 def _parse_missing_rates(raw):
@@ -313,6 +318,13 @@ def parse_cli_args():
         help="Load parameters from the default search or the cv search.",
     )
     parser.add_argument(
+        "--search-profile",
+        type=_normalize_search_profile_arg,
+        default=DEFAULT_SEARCH_PROFILE,
+        metavar="{legacy-expanded-v1,legacy-iclr2024-v0}",
+        help="Expected search profile of the loaded param artifact.",
+    )
+    parser.add_argument(
         "--robustness-mode",
         action="store_true",
         help="Robustness evaluation: train on missing=0, test on multiple rates",
@@ -466,10 +478,8 @@ from task_target_contracts import load_task_targets_npz
 from torch_ists.config import (
     get_data_config,
     get_active_model_list,
-    resolve_layer_depth,
     get_default_selected_datasets,
 )
-from torch_ists.config.model_data_policy import _resolve_runtime_depth_config
 
 logging.basicConfig(
     level=logging.INFO,
@@ -1058,18 +1068,7 @@ def run_model(
     test_batch = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, drop_last=False)
     
     # set params
-    depth_kwargs = _build_depth_model_kwargs(model_name, model_config)
-
-    # get model_kwargs
-    model_kwargs = {
-        'hidden_dim': model_config['hidden_dim'], 
-        'hidden_hidden_dim': model_config['hidden_dim'], 
-        'num_layers': depth_kwargs['num_layers'], 
-        'num_hidden_layers': depth_kwargs['num_hidden_layers'],
-        'head_depth': depth_kwargs['head_depth'],
-        'flow_num_layers': depth_kwargs['flow_num_layers'],
-        'flow_depth': depth_kwargs['flow_depth'],
-    }
+    model_kwargs = build_model_kwargs_from_config(model_name, model_config)
     
     # set tmp_path
     os.makedirs(os.path.join(os.getcwd(), 'tmp'), exist_ok=True)
@@ -1739,6 +1738,11 @@ def main():
 
                     with open(param_path, 'rb') as f:
                         model_config = pickle.load(f)
+                    param_search_profile = _validate_param_search_profile(
+                        model_config,
+                        expected_search_profile=args.search_profile,
+                        param_path=str(param_path),
+                    )
 
                     run_result = run_model(
                         data_name,
@@ -1809,6 +1813,7 @@ def main():
                                     "robustness_test_seeds": [int(seed) for seed in args.robustness_test_seeds],
                                     "task": args.task,
                                     "target_source": args.target_source,
+                                    "search_profile": param_search_profile,
                                     "split_path": str(split_path),
                                     "param_path": str(param_path),
                                     "output_path": str(output_path),
@@ -1817,6 +1822,7 @@ def main():
                             )
                         continue
                     run_result["param_path"] = str(param_path)
+                    run_result["search_profile"] = param_search_profile
                     records.append(run_result)
                     run_count += 1
 
@@ -1860,6 +1866,11 @@ def main():
 
                         with open(param_path, 'rb') as f:
                             model_config = pickle.load(f)
+                        param_search_profile = _validate_param_search_profile(
+                            model_config,
+                            expected_search_profile=args.search_profile,
+                            param_path=str(param_path),
+                        )
 
                         run_result = run_model(
                             data_name,
@@ -1913,6 +1924,7 @@ def main():
                                         "missing_rate": float(missing_rate),
                                         "task": args.task,
                                         "target_source": args.target_source,
+                                        "search_profile": param_search_profile,
                                         "split_path": str(split_path),
                                         "param_path": str(param_path),
                                         "output_path": str(output_path),
@@ -1921,6 +1933,7 @@ def main():
                                 )
                             continue
                         run_result["param_path"] = str(param_path)
+                        run_result["search_profile"] = param_search_profile
                         records.append(run_result)
                         run_count += 1
 
@@ -1978,6 +1991,7 @@ def main():
             "dataset_source": str(args.dataset_source),
             "dataset_npz": None if args.dataset_npz is None else str(args.dataset_npz),
             "target_source": args.target_source if args.task != "classification" else "label",
+            "search_profile": args.search_profile,
             "split_root": str(args.split_root),
             "param_root": str(args.param_root),
             "out_root": str(args.out_root),
