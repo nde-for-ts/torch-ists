@@ -11,8 +11,11 @@ sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(SCRIPTS_ROOT))
 
 from _common import (
+    CONSTRAINED_MATCHED_CAPACITY_DEPTH_LEVEL_VALUES,
+    CONSTRAINED_MATCHED_CAPACITY_HIDDEN_DIM_VALUES,
     CONSTRAINED_MATCHED_CAPACITY_TARGET,
     CONSTRAINED_MATCHED_CAPACITY_TARGET_NAME,
+    DEFAULT_MODEL_NATIVE_HIDDEN_DIM_VALUES,
     build_model_kwargs_from_config,
     describe_search_profile,
     infer_param_search_profile,
@@ -81,7 +84,7 @@ def test_search_profile_aliases_and_grids():
 
     native = resolve_model_search_space("rnn", "default")
     assert native["search_profile"] == "model-native-v1"
-    assert native["hidden_dim_values"] == [32, 64, 96, 128, 192, 256]
+    assert native["hidden_dim_values"] == DEFAULT_MODEL_NATIVE_HIDDEN_DIM_VALUES
     assert native["depth_level_values"] == [1, 2, 3, 4, 5]
     assert native["candidate_axes"] == ["lr", "hidden_dim", "num_layers"]
 
@@ -212,13 +215,13 @@ def test_cli_search_axes_artifact_names():
         "cnn",
         search_policy="constrained",
         search_repeat="single",
-    ) == "BasicMotions_cnn_matched300k"
+    ) == "BasicMotions_cnn_matched200k"
     assert _build_search_param_artifact_name(
         "BasicMotions",
         "cnn",
         search_policy="constrained",
         search_repeat="aggregated",
-    ) == "BasicMotions_cnn_matched300k_aggregated"
+    ) == "BasicMotions_cnn_matched200k_aggregated"
     assert _build_run_param_artifact_name(
         "BasicMotions",
         "cnn",
@@ -379,8 +382,10 @@ def test_constrained_capacity_resolver_fixes_capacity_carrier():
     assert metadata["search_policy_axis"] == "constrained"
     assert metadata["matched_capacity_target"] == CONSTRAINED_MATCHED_CAPACITY_TARGET
     assert metadata["matched_capacity_target_name"] == CONSTRAINED_MATCHED_CAPACITY_TARGET_NAME
-    assert metadata["matched_hidden_dim"] in space["hidden_dim_values"]
-    assert metadata["matched_depth_level"] in space["depth_level_values"]
+    assert metadata["matched_hidden_dim"] in CONSTRAINED_MATCHED_CAPACITY_HIDDEN_DIM_VALUES
+    assert metadata["matched_depth_level"] in CONSTRAINED_MATCHED_CAPACITY_DEPTH_LEVEL_VALUES
+    assert metadata["matched_hidden_dim_grid"] == CONSTRAINED_MATCHED_CAPACITY_HIDDEN_DIM_VALUES
+    assert metadata["matched_depth_level_grid"] == CONSTRAINED_MATCHED_CAPACITY_DEPTH_LEVEL_VALUES
     assert metadata["matched_capacity"] > 0
 
     constrained_space = _apply_constrained_capacity_to_search_space(space, resolved)

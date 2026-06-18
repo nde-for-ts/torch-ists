@@ -480,7 +480,7 @@ def parse_cli_args():
         metavar="{default,constrained}",
         help=(
             "Parameter search policy to load. default=model-specific package search; "
-            "constrained=experimental coarse matched-capacity (~300k) params."
+            "constrained=experimental matched-capacity (~200k) params."
         ),
     )
     parser.add_argument(

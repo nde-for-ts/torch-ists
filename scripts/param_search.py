@@ -32,6 +32,8 @@ from torch import nn, Tensor
 from torch.utils.data import Dataset, DataLoader
 
 from _common import (
+    CONSTRAINED_MATCHED_CAPACITY_DEPTH_LEVEL_VALUES,
+    CONSTRAINED_MATCHED_CAPACITY_HIDDEN_DIM_VALUES,
     CONSTRAINED_MATCHED_CAPACITY_LABEL,
     CONSTRAINED_MATCHED_CAPACITY_TARGET,
     CONSTRAINED_MATCHED_CAPACITY_TARGET_NAME,
@@ -252,7 +254,7 @@ def parse_cli_args():
         metavar="{default,constrained}",
         help=(
             "Search policy. default=model-specific package search; "
-            "constrained=experimental coarse matched-capacity (~300k) search."
+            "constrained=experimental matched-capacity (~200k) search."
         ),
     )
     parser.add_argument(
@@ -675,8 +677,14 @@ def _resolve_constrained_capacity_config(
         flow_values = [None]
 
     candidates = []
-    for hidden_dim in search_space["hidden_dim_values"]:
-        for depth_level in search_space["depth_level_values"]:
+    hidden_dim_values = list(CONSTRAINED_MATCHED_CAPACITY_HIDDEN_DIM_VALUES)
+    if search_space.get("depth_collapsed"):
+        depth_level_values = [1]
+    else:
+        depth_level_values = list(CONSTRAINED_MATCHED_CAPACITY_DEPTH_LEVEL_VALUES)
+
+    for hidden_dim in hidden_dim_values:
+        for depth_level in depth_level_values:
             for flow_depth in flow_values:
                 extra_params = dict(extra_defaults)
                 if flow_depth is not None:
@@ -729,13 +737,19 @@ def _resolve_constrained_capacity_config(
     in_band = lower <= selected["param_count"] <= upper
     metadata = {
         "search_policy_axis": CONSTRAINED_SEARCH_POLICY,
-        "matched_capacity_policy": "coarse-matched-capacity-v1",
+        "matched_capacity_policy": "matched-capacity-200k-v1",
         "matched_capacity_target": target,
         "matched_capacity_target_name": CONSTRAINED_MATCHED_CAPACITY_TARGET_NAME,
         "matched_capacity_label": CONSTRAINED_MATCHED_CAPACITY_LABEL,
         "matched_capacity_tolerance": 0.5,
         "matched_capacity_lower": lower,
         "matched_capacity_upper": upper,
+        "matched_hidden_dim_grid": list(hidden_dim_values),
+        "matched_depth_level_grid": list(depth_level_values),
+        "matched_flow_depth_grid": [
+            None if value is None else int(value)
+            for value in flow_values
+        ],
         "matched_capacity": int(selected["param_count"]),
         "matched_capacity_distance": int(selected["distance"]),
         "matched_capacity_in_band": bool(in_band),
@@ -805,6 +819,9 @@ _CONSTRAINED_CAPACITY_METADATA_KEYS = (
     "matched_capacity_tolerance",
     "matched_capacity_lower",
     "matched_capacity_upper",
+    "matched_hidden_dim_grid",
+    "matched_depth_level_grid",
+    "matched_flow_depth_grid",
     "matched_capacity",
     "matched_capacity_distance",
     "matched_capacity_in_band",

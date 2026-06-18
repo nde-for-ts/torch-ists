@@ -122,7 +122,7 @@ This is a bounded smoke run; the full defaults (`--num-samples 20 --max-num-epoc
 | `--max-runs` | `int` | `None` | Stop after this many runs across the dataset × model grid. |
 | `--max-runs-mode` | `{completed, new}` | `completed` | What counts toward `--max-runs`: `completed` (executed + reused) or `new` (executed only). |
 | `--existing-policy` | `{reuse, fail}` | `reuse` | Behavior when a param artifact already exists. **Note**: the artifact filename (`<dataset>_<model>[_aggregated]`) does not encode the search seed; the search seed is held at `42` by policy. If you override `--seed`, delete or back up the existing `params/` directory and pass `--existing-policy fail` to surface any silently-reused artifact. |
-| `--search-policy` | `{default, constrained}` | `default` | Search policy. `default` is the package search. `constrained` is an experimental coarse matched-capacity (`~300k`) search. |
+| `--search-policy` | `{default, constrained}` | `default` | Search policy. `default` is the package search. `constrained` is an experimental matched-capacity (`~200k`) search. |
 | `--search-repeat` | `{single, aggregated}` | `single` | Repeat policy. `single` uses search seed `42`; `aggregated` averages the fixed seed set `0-4` and uses about 5x compute. |
 | `--ray-cpu` | `float` | `16.0` | CPU per Ray trial. |
 | `--ray-gpu` | `float` | `0.5` | GPU per Ray trial (`0` for CPU-only). |
@@ -138,8 +138,8 @@ This is a bounded smoke run; the full defaults (`--num-samples 20 --max-num-epoc
 
 - **`default + single`** — default model-specific search on seed `42`. Output filename: `<dataset>_<model>`.
 - **`default + aggregated`** — repeats search over the fixed seed set `0-4` and averages trial scores. Output filename: `<dataset>_<model>_aggregated`.
-- **`constrained + single`** — experimental coarse matched-capacity (`~300k`) search. Output filename: `<dataset>_<model>_matched300k`.
-- **`constrained + aggregated`** — same constrained carrier with fixed seed aggregation. Output filename: `<dataset>_<model>_matched300k_aggregated`.
+- **`constrained + single`** — experimental matched-capacity (`~200k`) search. Output filename: `<dataset>_<model>_matched200k`.
+- **`constrained + aggregated`** — same constrained carrier with fixed seed aggregation. Output filename: `<dataset>_<model>_matched200k_aggregated`.
 
 The default search uses model-specific axes where relevant, such as attention `n_heads`, flow `flow_depth`, and fixed Neural RDE depth by model name. Batch size and learning rate are resolved outside architecture search.
 
@@ -147,7 +147,7 @@ Parameter search runs the standard search without synthetic missingness injectio
 
 ### Output
 
-- **Param file** (pickle): `<param-root>/<dataset>/<dataset>_<model>[_matched300k][_aggregated]` containing the best hyperparameter dict, resolved effective model parameters, and machine-readable search-contract provenance. Older `_cv` aggregated artifacts are read as a compatibility fallback.
+- **Param file** (pickle): `<param-root>/<dataset>/<dataset>_<model>[_matched200k][_aggregated]` containing the best hyperparameter dict, resolved effective model parameters, and machine-readable search-contract provenance. Older `_cv` aggregated artifacts are read as a compatibility fallback.
 - **Run manifest**: `<contract-dir>/<run-id>/search.manifest.json` (records, reused records, skipped, summary). Executed records include resolved batch-size and search-contract metadata.
 
 ### Workflow Dependencies
@@ -194,7 +194,7 @@ PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/model_run.py \
 | `--max-runs-mode` | `{completed, new}` | `completed` | What counts toward `--max-runs`. |
 | `--existing-policy` | `{reuse, fail}` | `reuse` | Behavior when `--check` finds an output artifact: reuse validates the stored run contract; fail treats it as a policy violation. |
 | `--check` / `--no-check` | flag | `True` | Validate and reuse an existing output file when present; `--existing-policy` controls reuse vs fail behavior. |
-| `--param-policy` | `{default, constrained}` | `default` | Parameter artifact policy to consume. Must match `param_search.py --search-policy`; constrained loads `_matched300k` params. |
+| `--param-policy` | `{default, constrained}` | `default` | Parameter artifact policy to consume. Must match `param_search.py --search-policy`; constrained loads `_matched200k` params. |
 | `--param-repeat` | `{single, aggregated}` | `single` | Parameter artifact repeat policy to consume. Must match `param_search.py --search-repeat`. |
 | `--robustness-mode` | flag | `False` | Robustness evaluation: train on `missing=0.0`, evaluate on configured test rates. |
 | `--robustness-test-rates` | `str` | `0.0` | Positive test missing rates for robustness mode; the clean `0.0` `STANDARD` anchor is always included. |

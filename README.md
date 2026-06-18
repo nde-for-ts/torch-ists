@@ -1,6 +1,6 @@
 # torch-ists
 
-[![Version](https://img.shields.io/badge/version-0.3.1-blue)](pyproject.toml) [![Python](https://img.shields.io/badge/python-%3E%3D3.10-blue)](pyproject.toml) [![PyTorch](https://img.shields.io/badge/PyTorch-%3E%3D2.0-ee4c2c)](pyproject.toml) [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![Package status](https://img.shields.io/badge/status-preview-orange)](#project-status)
+[![Version](https://img.shields.io/badge/version-0.3.2-blue)](pyproject.toml) [![Python](https://img.shields.io/badge/python-%3E%3D3.10-blue)](pyproject.toml) [![PyTorch](https://img.shields.io/badge/PyTorch-%3E%3D2.0-ee4c2c)](pyproject.toml) [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![Package status](https://img.shields.io/badge/status-preview-orange)](#project-status)
 
 **PyTorch toolkit for irregularly sampled multivariate time series with continuous-time methods (Neural ODE/CDE/SDE) and discrete-time baselines.**
 
@@ -200,7 +200,7 @@ Tutorial: <https://nde-for-ts.github.io/> (CIKM 2025).
 This is a **preview** release:
 
 - Classification is the primary supported workflow.
-- Source-checkout scripts default to model-specific search; constrained search is experimental and writes `_matched300k` params.
+- Source-checkout scripts default to model-specific search; constrained search is experimental and writes `_matched200k` params.
 - Synthetic missingness (`MCAR`/`MAR`/`MNAR`/`BLOCK`/`BURST`) and robustness result schemas are experimental.
 - Stable and parity-verified claims remain future work (`1.0.0` is the stable target).
 
