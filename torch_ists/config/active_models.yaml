@@ -29,6 +29,9 @@ models:
   - neuralcde-r
   - neuralcde-c
   - neuralcde-h
+  - neuralrde-1
+  - neuralrde-2
+  - neuralrde-3
   - gru-dt
   - gru-d
   - gru-ode

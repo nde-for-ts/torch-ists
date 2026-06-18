@@ -16,6 +16,7 @@
 | Time-Gated LSTM | `tglstm` | `basic/tglstm.py` | [FedericOldani/TGLSTM](https://github.com/FedericOldani/TGLSTM) | None |
 | ODE-LSTM | `ode-lstm` | `ode/odelstm.py` | [mlech26l/ode-lstms](https://github.com/mlech26l/ode-lstms) | MIT |
 | Neural CDE `controldiffeq` | `neuralcde`, `gru-d`, `gru-dt`, `gru-ode`, `ode-rnn-spline` | `cde/_controldiffeq/` | [patrick-kidger/NeuralCDE](https://github.com/patrick-kidger/NeuralCDE) | Apache-2.0 |
+| Neural RDE | `neuralrde-1/2/3` | `cde/nrde_model.py` | Adapted from the NeuralCDE metamodel lineage; method paper: [Morrill et al. 2021](https://arxiv.org/abs/2009.08295) | Apache-2.0 lineage for copied structure |
 | ANCDE | `ancde` | `cde/ancde/` | [sheoyon-jhin/ANCDE](https://github.com/sheoyon-jhin/ANCDE) | Apache-2.0 |
 | EXIT | `exit` | `cde/exit/` | [sheoyon-jhin/EXIT](https://github.com/sheoyon-jhin/EXIT) | Apache-2.0 |
 | LEAP | `leap` | `cde/leap/` | [alflsowl12/LEAP](https://github.com/alflsowl12/LEAP) | None |

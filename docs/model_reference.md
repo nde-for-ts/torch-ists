@@ -15,7 +15,7 @@ Use the API reference for class signatures and call patterns; use this document 
 2. [Attention-based methods](#2-attention-based-methods)
 3. [Neural ODE methods](#3-neural-ode-methods)
 4. [ODE-RNN, Latent ODE, and GRU-ODE-Bayes](#4-ode-rnn-latent-ode-and-gru-ode-bayes)
-5. [Neural CDE](#5-neural-cde)
+5. [Neural CDE and Neural RDE](#5-neural-cde-and-neural-rde)
 6. [ANCDE, EXIT, and LEAP](#6-ancde-exit-and-leap)
 7. [NeuralFlow](#7-neuralflow)
 8. [DualDynamics and FlowPath](#8-dualdynamics-and-flowpath)
@@ -86,7 +86,9 @@ Canonical implementations from the original papers / repositories.
 
 ---
 
-## 5. Neural CDE
+## 5. Neural CDE and Neural RDE
+
+Neural CDE methods:
 
 | Model | Interpolation | Underlying library | Origin |
 |---|---|---|---|
@@ -96,7 +98,15 @@ Canonical implementations from the original papers / repositories.
 | `neuralcde-c` | cubic | [torchcde](https://github.com/patrick-kidger/torchcde) | Same paper |
 | `neuralcde-h` | hermite | [torchcde](https://github.com/patrick-kidger/torchcde) | Same paper |
 
-`neuralcde` uses the original `controldiffeq` reference; the `-l/-r/-c/-h` variants use the `torchcde` library and select the interpolation scheme for the control path.
+Neural RDE methods:
+
+| Model | Base path | Log-signature depth | Underlying library | Origin |
+|---|---|---|---|---|
+| `neuralrde-1` | natural cubic spline | 1 | [torchcde](https://github.com/patrick-kidger/torchcde) + [`controldiffeq`](https://github.com/patrick-kidger/NeuralCDE) | [Morrill et al., *Neural Rough Differential Equations for Long Time Series* (ICML 2021)](https://arxiv.org/abs/2009.08295) |
+| `neuralrde-2` | natural cubic spline | 2 | [torchcde](https://github.com/patrick-kidger/torchcde) + [`controldiffeq`](https://github.com/patrick-kidger/NeuralCDE) | Same Neural RDE paper |
+| `neuralrde-3` | natural cubic spline | 3 | [torchcde](https://github.com/patrick-kidger/torchcde) + [`controldiffeq`](https://github.com/patrick-kidger/NeuralCDE) | Same Neural RDE paper |
+
+`neuralcde` uses the original `controldiffeq` reference; the `-l/-r/-c/-h` variants use the `torchcde` library and select the interpolation scheme for the control path. `neuralrde-1/2/3` first builds a natural-spline path, then applies log-signature windows at the requested depth.
 
 ANCDE, EXIT, LEAP, DualDynamics, and FlowPath also use CDE-style control paths and consume interpolation coefficients.
 

@@ -117,7 +117,7 @@ This is a bounded smoke run; the full defaults (`--num-samples 20 --max-num-epoc
 | `--datasets` | `str` | (required) | Comma-separated dataset list. |
 | `--dataset-source` | `{default,npz}` | `default` | Dataset source backend. `default` loads benchmark archive data by dataset name through `torch_ists.benchmark_loader.get_data`; `npz` loads one local file through `--dataset-npz`. |
 | `--dataset-npz` | `str` | `None` | Required when `--dataset-source npz`; `--datasets` must contain exactly one dataset name. |
-| `--models` | `str` | (all packaged models) | Comma-separated model list. Defaults to all 47 packaged models. |
+| `--models` | `str` | `cnn` | Comma-separated model list. Pass a comma-separated list to run additional models. |
 | `--missing-rate` | `float` | `0.0` | Single missing rate applied uniformly during tuning. |
 | `--num-samples` | `int` | `20` | Ray Tune `num_samples` — hyperparameter trial budget. |
 | `--max-num-epochs` | `int` | `10` | Per-trial training budget. |
@@ -188,7 +188,7 @@ PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/model_run.py \
 | `--datasets` | `str` | (default list) | Comma-separated dataset list. Defaults to the packaged dataset list. |
 | `--dataset-source` | `{default,npz}` | `default` | Dataset source backend. `default` loads benchmark archive data by dataset name through `torch_ists.benchmark_loader.get_data`; `npz` loads one local file through `--dataset-npz`. |
 | `--dataset-npz` | `str` | `None` | Required when `--dataset-source npz`; `--datasets` must contain exactly one dataset name. |
-| `--models` | `str` | (all packaged models) | Comma-separated model list. Defaults to all 47 packaged models. |
+| `--models` | `str` | `cnn` | Comma-separated model list. Pass a comma-separated list to run additional models. |
 | `--missing-rates` | `str` | `0.0,0.3,0.5,0.7` | Comma-separated missing rates for standard mode. Ignored in robustness mode. |
 | `--epochs` | `int` | `100` | Epochs per (dataset, missing-rate, model) run. |
 | `--max-runs` | `int` | `None` | Stop after this many runs across the run grid. |

@@ -8,10 +8,11 @@ import sys as _sys
 
 from . import _controldiffeq as controldiffeq
 from .neuralcde_variants import FinalTanh, FinalTanhT, NeuralCDE
+from .nrde_model import NeuralRDE
 
 _sys.modules.setdefault(__name__ + ".controldiffeq", controldiffeq)
 
-__all__ = ["controldiffeq", "FinalTanh", "FinalTanhT", "NeuralCDE"]
+__all__ = ["controldiffeq", "FinalTanh", "FinalTanhT", "NeuralCDE", "NeuralRDE"]
 
 try:
     from .ancde.ancde_model import ANCDE

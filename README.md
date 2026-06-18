@@ -1,6 +1,6 @@
 # torch-ists
 
-[![Version](https://img.shields.io/badge/version-0.2.3-blue)](pyproject.toml) [![Python](https://img.shields.io/badge/python-%3E%3D3.10-blue)](pyproject.toml) [![PyTorch](https://img.shields.io/badge/PyTorch-%3E%3D2.0-ee4c2c)](pyproject.toml) [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![Package status](https://img.shields.io/badge/status-preview-orange)](#project-status)
+[![Version](https://img.shields.io/badge/version-0.2.6-blue)](pyproject.toml) [![Python](https://img.shields.io/badge/python-%3E%3D3.10-blue)](pyproject.toml) [![PyTorch](https://img.shields.io/badge/PyTorch-%3E%3D2.0-ee4c2c)](pyproject.toml) [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![Package status](https://img.shields.io/badge/status-preview-orange)](#project-status)
 
 **PyTorch toolkit for irregularly sampled multivariate time series with continuous-time methods (Neural ODE/CDE/SDE) and discrete-time baselines.**
 
@@ -10,7 +10,7 @@ It provides runtime APIs, benchmark scripts, and a built-in benchmark archive lo
 
 ## Overview
 
-The package exposes `ists_classifier` for classification and the lower-level `ists_model` constructor for additional task heads. It includes 47 models spanning sequence baselines, attention-based methods, Neural ODE/CDE/SDE methods, NeuralFlow, DualDynamics and FlowPath, and Stable Neural SDEs.
+The package exposes `ists_classifier` for classification and the lower-level `ists_model` constructor for additional task heads. It includes 50 models spanning sequence baselines, attention-based methods, Neural ODE/CDE/SDE methods, NeuralFlow, DualDynamics and FlowPath, and Stable Neural SDEs.
 
 ## Installation
 
@@ -53,7 +53,7 @@ PYTHONNOUSERSITE=1 python -m pip install -e .[all]
 
 **Source-checkout scripts require `torchcde`.** The `scripts/set_splits.py` -> `scripts/param_search.py` -> `scripts/model_run.py` pipeline shares one preprocessing path that builds interpolation coefficients with `torchcde`. This runs for **every** selected model, including the sequence baselines such as `cnn`, so the scripts need `torchcde` even when the model is not a continuous-time method. Install `.[all]` (recommended) or at least `.[tune,cde]`; `.[tune]` on its own can fail with `No module named 'torchcde'`.
 
-NeuralCDE / ANCDE / EXIT / LEAP additionally require a manual signatory install from source:
+NeuralCDE / Neural RDE / ANCDE / EXIT / LEAP additionally require a manual signatory install from source:
 
 ```bash
 PYTHONNOUSERSITE=1 python -m pip install git+https://github.com/patrick-kidger/signatory.git
@@ -152,13 +152,13 @@ Imputation strategy:
 
 ## Models Included
 
-The package includes 47 models across the groups below. See [Model Reference](docs/model_reference.md) for per-model details.
+The package includes 50 models across the groups below. See [Model Reference](docs/model_reference.md) for per-model details.
 
 - **Sequence baselines** — `cnn`, `rnn`, `lstm`, `gru`, `bilstm`, `gru-simple`, `plstm`, `tlstm`, `tglstm` (§1)
 - **Attention-based methods** — `transformer`, `transformer-mask`, `sand`, `mtan`, `miam` (§2)
 - **Neural ODE methods** — `gru-dt`, `gru-d`, `gru-ode`, `ode-rnn-spline`, `ode-lstm` (§3)
 - **ODE-RNN, Latent ODE, and GRU-ODE-Bayes** — `ode-rnn`, `latentode`, `gru-ode-bayes` (§4)
-- **Neural CDE** — `neuralcde`, `neuralcde-l`, `neuralcde-r`, `neuralcde-c`, `neuralcde-h` (§5)
+- **Neural CDE and Neural RDE** — `neuralcde`, `neuralcde-l`, `neuralcde-r`, `neuralcde-c`, `neuralcde-h`, `neuralrde-1`, `neuralrde-2`, `neuralrde-3` (§5)
 - **ANCDE, EXIT, and LEAP** — `ancde`, `exit`, `leap` (§6)
 - **NeuralFlow** — `neuralflow` (residual-flow alias for `neuralflow-r`), `neuralflow-r`, `neuralflow-g`, `neuralflow-c` (§7)
 - **DualDynamics and FlowPath** — `dualdynamics`, `flowpath`, and `-r/g/c` variants; the bare `dualdynamics` and `flowpath` names are residual-flow aliases of `dualdynamics-r` and `flowpath-r` (§8)

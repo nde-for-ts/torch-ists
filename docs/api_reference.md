@@ -59,11 +59,11 @@ Environment:
 - `.[tune]` is required for Ray Tune-backed parameter search
 - `.[data]` installs `pandas` and `sktime` for `torch_ists.benchmark_loader`
 - `.[ode]` installs the packaged ODE backend requirements (`torchdiffeq`, `torchdyn`)
-- `.[cde]` installs the packaged NeuralCDE backend requirements (`torchcde`, `torchdiffeq`)
+- `.[cde]` installs the packaged CDE backend requirements (`torchcde`, `torchdiffeq`)
 - `.[sde]` installs the packaged SDE backend requirements (`torchsde`, `torchcde`)
 - `.[all]` installs the optional data and model backend dependencies
 - `TORCH_ISTS_RUNTIME_ROOT` is optional when running the source-checkout scripts from outside the package directory
-- `signatory` must be installed manually for the NeuralCDE, ANCDE, EXIT, and LEAP paths
+- `signatory` must be installed manually for the NeuralCDE, Neural RDE, ANCDE, EXIT, and LEAP paths
 
 ```bash
 PYTHONNOUSERSITE=1 python -m pip install git+https://github.com/patrick-kidger/signatory.git
@@ -499,7 +499,7 @@ When `model_name` is set, `interpolate` and `use_intensity` default to `get_data
 
 | Mode | Method | Use Case |
 |------|--------|----------|
-| `'natural'` | Natural cubic spline | Natural-spline control-path methods such as `neuralcde`, `gru-d*`, `ancde`, `exit`, and `leap` |
+| `'natural'` | Natural cubic spline | Natural-spline control-path methods such as `neuralcde`, `neuralrde-*`, `gru-d*`, `ancde`, `exit`, and `leap` |
 | `'linear'` | Linear interpolation | Fast, piecewise linear |
 | `'rectilinear'` | Rectilinear linear interpolation | Stepwise observation paths |
 | `'cubic'` | Cubic spline | Global fallback and coeff scaffolding for basic/attention rows |
@@ -806,7 +806,7 @@ See [Custom Model Guide](custom_model_guide.md) for the wrapper pattern.
 
 Current defaults:
 - `cnn`, `rnn`, `lstm`, `gru`: `head_depth` is not used
-- `neuralcde*` and the SDE baseline/stable-SDE models: `head_depth` defaults to the script/runtime-provided layer depth
+- `neuralcde*`, `neuralrde-*`, and the SDE baseline/stable-SDE models: `head_depth` defaults to the script/runtime-provided layer depth
 - `neuralflow`: `flow_depth=3` by default
 - `dualdynamics`: `flow_depth=2` by default
 - `flowpath`: `flow_depth=1` by default
@@ -860,6 +860,7 @@ def get_data_config(model_name: str) -> Dict[str, Any]:
 | `mtan`, `miam` | `'cubic'` | `False` | `coeffs` ignored; runtime uses values, the original sequence stack, and normalized sequence timestamps |
 | `neuralcde` | `'natural'` | `False` | consumes `coeffs` |
 | `neuralcde-l/r/c/h` | override (`linear/rectilinear/cubic/hermite`) | `False` | consumes `coeffs` |
+| `neuralrde-1/2/3` | `'natural'` | `False` | consumes `coeffs`; computes log-signature control paths at the selected depth |
 | `ancde`, `exit`, `leap` | `'natural'` | `False` | consumes `coeffs`; uses CDE control paths with `rk4` and a fixed-grid step from input times |
 | `dualdynamics`, `flowpath`, and their explicit variants | `'hermite'` | `False` | consumes `coeffs`; uses flow-based CDE/control-path dynamics |
 | `gru-d`, `gru-dt`, `ode-rnn-spline` | `'natural'` | `True` | consumes `coeffs` with intensity channels |

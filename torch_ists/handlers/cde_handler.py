@@ -14,6 +14,7 @@ from ..module.cde import (
     FinalTanh as NeuralCDEFinalTanh,
     FinalTanhT,
     NeuralCDE,
+    NeuralRDE,
 )
 
 
@@ -29,6 +30,9 @@ class CDEHandler(BaseHandler):
     - ancde
     - exit
     - leap
+    - neuralrde-1
+    - neuralrde-2
+    - neuralrde-3
     """
 
     name: str = "cde"
@@ -42,6 +46,9 @@ class CDEHandler(BaseHandler):
         "ancde": {"family": "ancde", "use_intensity": False, "control": "natural"},
         "exit": {"family": "exit", "use_intensity": False, "control": "natural"},
         "leap": {"family": "leap", "use_intensity": False, "control": "natural"},
+        "neuralrde-1": {"family": "neuralrde", "use_intensity": False, "control": "natural", "depth": 1},
+        "neuralrde-2": {"family": "neuralrde", "use_intensity": False, "control": "natural", "depth": 2},
+        "neuralrde-3": {"family": "neuralrde", "use_intensity": False, "control": "natural", "depth": 3},
     }
     CDE_ALLOWED_METHODS = {"euler", "midpoint", "rk4", "dopri5"}
     CDE_METHOD_ALIASES = {
@@ -235,6 +242,25 @@ class CDEHandler(BaseHandler):
                 file=file_path,
                 initial=True,
             )
+        elif family == "neuralrde":
+            from signatory import logsignature_channels
+
+            depth = int(spec["depth"])
+            signature_channels = logsignature_channels(in_channels=control_channels, depth=depth)
+            func = NeuralCDEFinalTanh(
+                input_channels=signature_channels,
+                hidden_channels=hidden_dim,
+                hidden_hidden_channels=hidden_dim,
+                num_hidden_layers=num_layers,
+            )
+            model = NeuralRDE(
+                func=func,
+                input_channels=signature_channels,
+                hidden_channels=hidden_dim,
+                output_channels=hidden_dim,
+                initial=True,
+            )
+            model.rde_depth = depth
         else:
             raise ValueError(f"Unsupported CDE family: {family}")
 
@@ -332,6 +358,20 @@ class CDEHandler(BaseHandler):
             out, hn, reg = model(times, coeffs, data["final_index"], **call_kwargs)
             out, hn = self._normalize_outputs(out, hn, seq.shape[0], data["x"].shape[1])
             return out, hn, reg
+
+        if model_name.startswith("neuralrde-"):
+            depth = int(getattr(model, "rde_depth", self.CDE_MODELS[model_name]["depth"]))
+            out, hn = model(
+                data["x"],
+                times,
+                coeffs,
+                data["final_index"],
+                interpolation=True,
+                depth=depth,
+                **call_kwargs,
+            )
+            out, hn = self._normalize_outputs(out, hn, seq.shape[0], data["x"].shape[1])
+            return out, hn
 
         out, hn = model(times, coeffs, data["final_index"], **call_kwargs)
         out, hn = self._normalize_outputs(out, hn, seq.shape[0], data["x"].shape[1])

@@ -136,8 +136,8 @@ def parse_cli_args():
     parser.add_argument(
         "--models",
         type=str,
-        default=None,
-        help="Comma-separated model list. Default uses get_active_model_list().",
+        default="cnn",
+        help="Comma-separated model list. Default: cnn.",
     )
     parser.add_argument("--missing-rate", type=float, default=0.0, help="Missing rate used for tuning.")
     parser.add_argument("--num-samples", type=int, default=20, help="Ray Tune num_samples.")
@@ -1165,8 +1165,7 @@ def main():
         data_selected = args.datasets
 
     if args.models is None:
-        model_name_list = get_active_model_list()
-        np.random.shuffle(model_name_list)
+        model_name_list = ["cnn"]
     else:
         model_name_list = args.models
         _validate_requested_scope(model_name_list, scope_variant=scope_override)
