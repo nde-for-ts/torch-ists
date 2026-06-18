@@ -106,7 +106,7 @@ Neural RDE methods:
 | `neuralrde-2` | natural cubic spline | 2 | [torchcde](https://github.com/patrick-kidger/torchcde) + [`controldiffeq`](https://github.com/patrick-kidger/NeuralCDE) | Same Neural RDE paper |
 | `neuralrde-3` | natural cubic spline | 3 | [torchcde](https://github.com/patrick-kidger/torchcde) + [`controldiffeq`](https://github.com/patrick-kidger/NeuralCDE) | Same Neural RDE paper |
 
-`neuralcde` uses the original `controldiffeq` reference; the `-l/-r/-c/-h` variants use the `torchcde` library and select the interpolation scheme for the control path. `neuralrde-1/2/3` first builds a natural-spline path, then applies log-signature windows at the requested depth.
+`neuralcde` uses the original `controldiffeq` reference; the `-l/-r/-c/-h` variants use the `torchcde` library and select the interpolation scheme for the control path. `neuralrde-1/2/3` first builds a natural-spline path, then applies log-signature windows at the requested depth. Keep native missing values as `NaN` before `preprocess(...)`; the interpolation path is built from that missing-aware input.
 
 ANCDE, EXIT, LEAP, DualDynamics, and FlowPath also use CDE-style control paths and consume interpolation coefficients.
 
@@ -138,7 +138,7 @@ Origin paper: [*Neural Flows: Efficient Alternative to Neural ODEs* (NeurIPS 202
 
 Use `neuralflow` for the residual-flow default. The suffix selects an explicit flow variant: `-r` = residual flow, `-g` = GRU-style flow, and `-c` = coupling-style flow.
 
-For missing-data handling, `neuralflow` and its explicit variants keep raw missing values on the direct value path.
+For missing-data handling, `neuralflow` and its explicit variants keep raw missing values on the direct value path. Missing positions should remain `NaN` with mask value `0`.
 
 ---
 
@@ -157,7 +157,7 @@ Origin papers:
 
 Use `dualdynamics` and `flowpath` for residual-flow defaults. The suffix selects an explicit flow variant: `-r` = residual flow, `-g` = GRU-style flow, and `-c` = coupling-style flow. These remain CDE/control-path methods.
 
-For missing-data handling, use `preprocess(X, model_name=...)` to build matching interpolation coefficients.
+For missing-data handling, use `preprocess(X, model_name=...)` to build matching interpolation coefficients. `flowpath-*` also keeps the raw missing-value path; `dualdynamics-*` follows the coefficient-driven control path.
 
 ---
 

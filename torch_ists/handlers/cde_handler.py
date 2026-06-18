@@ -25,9 +25,10 @@ def _require_signatory_logsignature_channels():
         raise ImportError(
             "Neural RDE models (neuralrde-1/2/3) require the optional "
             "dependency 'signatory'. The PyPI wheel is torch-version-pinned; "
-            "install a compatible source build, for example: "
-            "PYTHONNOUSERSITE=1 python -m pip install "
-            "git+https://github.com/patrick-kidger/signatory.git"
+            "install a compatible source build from a source checkout with "
+            "PYTHONNOUSERSITE=1 python -m pip install --no-build-isolation "
+            "-e .[signatory], or install "
+            "git+https://github.com/patrick-kidger/signatory.git directly."
         ) from exc
     return logsignature_channels
 

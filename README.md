@@ -53,10 +53,10 @@ PYTHONNOUSERSITE=1 python -m pip install -e .[all]
 
 **Source-checkout scripts require `torchcde`.** The `scripts/set_splits.py` -> `scripts/param_search.py` -> `scripts/model_run.py` pipeline shares one preprocessing path that builds interpolation coefficients with `torchcde`. This runs for **every** selected model, including the sequence baselines such as `cnn`, so the scripts need `torchcde` even when the model is not a continuous-time method. Install `.[all]` (recommended) or at least `.[tune,cde]`; `.[tune]` on its own can fail with `No module named 'torchcde'`.
 
-NeuralCDE / Neural RDE / ANCDE / EXIT / LEAP additionally require a manual signatory install from source:
+NeuralCDE / Neural RDE / ANCDE / EXIT / LEAP additionally require `signatory`. It is kept out of `.[all]` because the PyPI wheel is torch-version-pinned; install the source-build extra only when those paths are needed:
 
 ```bash
-PYTHONNOUSERSITE=1 python -m pip install git+https://github.com/patrick-kidger/signatory.git
+PYTHONNOUSERSITE=1 python -m pip install --no-build-isolation -e .[signatory]
 ```
 
 ## Data Loading
@@ -139,15 +139,17 @@ PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/model_run.py \
     --split-root /tmp/torch_ists_demo/split --param-root /tmp/torch_ists_demo/params
 ```
 
-These are bounded smoke-safe runs; the full defaults (`param_search.py --num-samples 20`, `model_run.py --epochs 100`) and all flags are documented in `docs/scripts_reference.md`. The hyperparameter search seed (default `42`) is disjoint from the standard evaluation seeds (`0..4`), so reported numbers are out-of-sample with respect to hyperparameter selection. To reproduce the ICLR 2024 protocol pass `--seed 0` to step 1 (`set_splits.py`); step 2 (`param_search.py`) keeps its default `--seed 42` because the search seed is held fixed by policy (the param artifact filename does not encode the seed); steps 3 and 4 already run at seed `0`.
+These are bounded smoke-safe runs; the full defaults (`param_search.py --num-samples 20`, `model_run.py --epochs 100`) and all flags are documented in `docs/scripts_reference.md`. With the default single-seed search, the hyperparameter search seed (default `42`) is disjoint from the standard evaluation seeds (`0..4`), so reported numbers are out-of-sample with respect to hyperparameter selection (aggregated search tunes over `0..4` and is diagnostic, not out-of-sample). To reproduce the ICLR 2024 protocol pass `--seed 0` to step 1 (`set_splits.py`); step 2 (`param_search.py`) keeps its default `--seed 42` because the search seed is held fixed by policy (the param artifact filename does not encode the seed); steps 3 and 4 already run at seed `0`.
 
 The script workflow resolves `batch_size` automatically from the dataset instead of searching it; the resolved value is recorded with the run metadata. See [Scripts Reference](docs/scripts_reference.md).
 
 See [Model Reference](docs/model_reference.md) for which models need `preprocess(X, model_name=...)` versus the direct sequence stack.
 
-Imputation strategy:
+Missing-value handling:
 
-- Missing entries on the value channel are imputed before the backbone consumes them. `ists_classifier(..., imputation_strategy="zero")` is the default and matches the established zero-fill baseline (mean-equivalent under training-set standardization).
+- `preprocess(...)` preserves missing values as `NaN` in `X_missing` and derives `X_mask`, `X_delta`, and interpolation coefficients from that path.
+- Most direct backbones fill missing value-channel entries before the backbone call. `ists_classifier(..., imputation_strategy="zero")` is the default and matches the established zero-fill baseline.
+- `neuralflow-*` and `flowpath-*` are strict raw-missing rows: keep missing positions as `NaN` with `X_mask=0`. The source-checkout scripts handle this automatically.
 - `last_observed` (last-observation-carried-forward) and `channel_mean` (per-series observed mean) are experimental opt-in alternatives selected through the same argument.
 
 ## Models Included

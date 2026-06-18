@@ -100,7 +100,7 @@ bundle = DataLoader.from_file(
 
 ## 5. Generate or Reuse Splits
 
-The default split utility creates a stratified 70/15/15 train/valid/test split. Generate one split per seed; the regular evaluation workflow needs the hyperparameter-search seed `42` plus the evaluation seeds `0..4`:
+The default split utility creates a stratified 70/15/15 train/valid/test split. Generate one split per seed; the standard evaluation workflow needs the hyperparameter-search seed `42` plus the evaluation seeds `0..4`:
 
 ```bash
 PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/set_splits.py \
@@ -155,7 +155,7 @@ PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/model_run.py \
   --seed 0
 ```
 
-`model_run.py` is invoked once per reported regular evaluation seed (`0`, `1`, `2`, `3`, `4`); the snippet above shows seed `0` only.
+`model_run.py` is invoked once per reported standard evaluation seed (`0`, `1`, `2`, `3`, `4`); the snippet above shows seed `0` only.
 
 When `--dataset-source npz` is used, `--datasets` must contain exactly one name (it controls split/param/output paths; the NPZ path controls the data file).
 

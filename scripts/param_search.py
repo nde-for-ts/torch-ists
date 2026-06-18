@@ -342,8 +342,8 @@ def parse_cli_args():
         parser.error("--search-policy constrained is reserved for the capacity-constrained implementation and is not runnable in this patch.")
     if not math.isclose(float(args.missing_rate), 0.0, abs_tol=1e-12):
         parser.error(
-            "param_search.py searches clean regular data only. "
-            "Use model_run.py --missing-rates or --robustness-mode for missingness evaluation."
+            "param_search.py runs the standard search without synthetic missingness injection. "
+            "Provided datasets may still contain NaNs; use model_run.py --missing-rates or --robustness-mode for injected-missingness evaluation."
         )
     args.missing_rate = 0.0
     args.search_mode = _search_mode_from_repeat(args.search_repeat)

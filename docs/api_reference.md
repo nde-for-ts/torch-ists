@@ -62,11 +62,12 @@ Environment:
 - `.[cde]` installs the packaged CDE backend requirements (`torchcde`, `torchdiffeq`)
 - `.[sde]` installs the packaged SDE backend requirements (`torchsde`, `torchcde`)
 - `.[all]` installs the optional data and model backend dependencies
+- `.[signatory]` installs `signatory` from source for signature-based CDE / Neural RDE paths
 - `TORCH_ISTS_RUNTIME_ROOT` is optional when running the source-checkout scripts from outside the package directory
-- `signatory` must be installed manually for the NeuralCDE, Neural RDE, ANCDE, EXIT, and LEAP paths
+- `signatory` is intentionally not included in `.[all]` because the PyPI wheel is torch-version-pinned
 
 ```bash
-PYTHONNOUSERSITE=1 python -m pip install git+https://github.com/patrick-kidger/signatory.git
+PYTHONNOUSERSITE=1 python -m pip install --no-build-isolation -e .[signatory]
 ```
 
 ### 1.2 Basic Usage
@@ -478,6 +479,8 @@ def preprocess(
 3. `X_delta`: `[N, L, D]` - Time-since-last-observation (index-based)
 4. `coeffs`: `torch.Tensor` interpolation coefficients. The trailing channel dimension depends on the interpolation mode and whether intensity channels are included.
 
+Keep native missing entries as `NaN` before calling `preprocess(...)`; the mask and interpolation coefficients are derived from those positions. Strict raw-missing rows such as `neuralflow-*` and `flowpath-*` require the value channel to keep `NaN` at `X_mask=0` positions.
+
 #### Example
 
 ```python
@@ -732,7 +735,7 @@ Behavior notes:
 - `transformer-mask` uses the same zero-filled values, but it also applies `src_key_padding_mask` derived from the packaged observation mask.
 - `mtan` and `miam` consume zero-filled values together with the original sequence stack and normalized timestamps; they do not use interpolation coefficients.
 - Under the source-checkout scripts' train-only z-score normalization, the zero-fill path becomes per-channel mean imputation in raw value space.
-- `imputation_strategy` selects how missing entries on the value channel are filled before the backbone: `"zero"` (default, the zero-fill path described above) and the experimental opt-in alternatives `"last_observed"` (last-observation-carried-forward; leading gaps become `0`) and `"channel_mean"` (per-series observed mean; all-missing channels become `0`). It applies only to the value channel; the observation mask and time-delta channels are unaffected. An unknown value raises `ValueError`.
+- `imputation_strategy` selects how missing entries are filled for direct value-channel backbones: `"zero"` (default), `"last_observed"`, and `"channel_mean"`. Strict raw-missing rows (`neuralflow-*`, `flowpath-*`) keep raw `NaN` until their mask-aware internal fill; coefficient-driven rows consume the `coeffs` built by `preprocess(...)`.
 - Non-finite backbone outputs, hidden states, or logits raise `RuntimeError`; the package does not silently zero-fill them.
 
 ### 6.2 `ists_model`
@@ -862,7 +865,8 @@ def get_data_config(model_name: str) -> Dict[str, Any]:
 | `neuralcde-l/r/c/h` | override (`linear/rectilinear/cubic/hermite`) | `False` | consumes `coeffs` |
 | `neuralrde-1/2/3` | `'natural'` | `False` | consumes `coeffs`; computes log-signature control paths at the selected depth |
 | `ancde`, `exit`, `leap` | `'natural'` | `False` | consumes `coeffs`; uses CDE control paths with `rk4` and a fixed-grid step from input times |
-| `dualdynamics`, `flowpath`, and their explicit variants | `'hermite'` | `False` | consumes `coeffs`; uses flow-based CDE/control-path dynamics |
+| `dualdynamics` and explicit variants | `'hermite'` | `False` | consumes `coeffs`; uses flow-based CDE/control-path dynamics |
+| `flowpath` and explicit variants | `'hermite'` | `False` | consumes `coeffs` and keeps the raw missing-value path for mask-aware flow handling |
 | `gru-d`, `gru-dt`, `ode-rnn-spline` | `'natural'` | `True` | consumes `coeffs` with intensity channels |
 | `gru-ode` | `'natural'` | `False` | consumes `coeffs` |
 | `ode-lstm` | `'cubic'` | `False` | runtime ignores `coeffs`; uses values, timestamps, and mask directly |

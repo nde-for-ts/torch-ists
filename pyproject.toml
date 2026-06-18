@@ -62,8 +62,15 @@ ode = [
 cde = [
     "torchdiffeq>=0.2.2",
     "torchcde>=0.2.5",
-    # signatory: install manually from GitHub
-    # pip install git+https://github.com/patrick-kidger/signatory.git
+    # signatory is intentionally separate because the PyPI wheel is
+    # torch-version-pinned. Use .[signatory] for source-checkout builds.
+]
+
+# Source-build optional dependency for Neural RDE / signature-based CDE paths.
+# Kept out of .[cde] and .[all] so standard installs do not silently pick a
+# torch-incompatible prebuilt wheel.
+signatory = [
+    "signatory @ git+https://github.com/patrick-kidger/signatory.git",
 ]
 
 # SDE models: naive_cde, neural_ode(_t), neural_sde(_t),

@@ -33,7 +33,7 @@ Installed separately, each under its own license (not bundled):
 
 - **Core**: `torch`, `numpy`, `scipy`, `scikit-learn`
 - **Continuous-time backends** (`.[ode]` / `.[cde]` / `.[sde]`): `torchdiffeq`, `torchdyn`, `torchcde`, `torchsde`
-- **CDE signatures** (manual install): `signatory`
+- **CDE signatures** (source-build optional extra): `signatory`
 - **Optional** (`.[tune]` / `.[data]`): `ray[tune]`, `pandas`, `sktime`
 
 ## Notes

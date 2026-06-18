@@ -329,12 +329,24 @@ def _is_zero_missing_rate(rate):
     return abs(float(rate)) < 1e-12
 
 
+def _effective_robustness_test_rates(rates):
+    parsed = _parse_missing_rates(rates)
+    positives = []
+    for rate in parsed:
+        rate = float(rate)
+        if _is_zero_missing_rate(rate):
+            continue
+        if not any(abs(rate - existing) < 1e-12 for existing in positives):
+            positives.append(rate)
+    return [0.0] + positives
+
+
 def _evaluation_regime_for_missing_rate(rate):
-    return "regular" if _is_zero_missing_rate(rate) else "irregular"
+    return "standard" if _is_zero_missing_rate(rate) else "missingness"
 
 
 def _missing_type_for_missing_rate(rate):
-    return "REGULAR" if _is_zero_missing_rate(rate) else "MCAR"
+    return "STANDARD" if _is_zero_missing_rate(rate) else "MCAR"
 
 
 def _axis_token(values):
@@ -349,7 +361,7 @@ def _build_robustness_axis_suffix(
     robustness_test_mechanisms=None,
     robustness_channel_sync_options=None,
 ):
-    rates = _parse_missing_rates(robustness_test_rates)
+    rates = _effective_robustness_test_rates(robustness_test_rates)
     mechanisms = _parse_robustness_mechanisms(robustness_test_mechanisms)
     sync_options = _parse_robustness_channel_sync_options(robustness_channel_sync_options)
     if all(_is_zero_missing_rate(rate) for rate in rates):
@@ -1045,7 +1057,7 @@ def run_model(
     use_intensity = data_config['use_intensity']
     use_raw_flow_input = _requires_flow_raw_input(model_name)
     evaluation_regime = "robustness" if robustness_mode else _evaluation_regime_for_missing_rate(missing_rate)
-    train_missing_type = "REGULAR" if robustness_mode else _missing_type_for_missing_rate(missing_rate)
+    train_missing_type = "STANDARD" if robustness_mode else _missing_type_for_missing_rate(missing_rate)
     train_channel_sync = False
        
     ## data split    
@@ -1315,12 +1327,17 @@ def run_model(
 
     # Robustness mode: evaluate on multiple test rates
     if robustness_mode:
+        effective_robustness_test_rates = _effective_robustness_test_rates(robustness_test_rates)
+        resolved_robustness_channel_sync_options = _resolve_channel_sync_options(
+            robustness_channel_sync_options,
+            use_raw_flow_input,
+        )
         evaluations = _evaluate_robustness(
             model=model,
             data_name=data_name,
             model_name=model_name,
             SEED=SEED,
-            test_missing_rates=robustness_test_rates,
+            test_missing_rates=effective_robustness_test_rates,
             test_missing_mechanisms=robustness_test_mechanisms,
             channel_sync_options=robustness_channel_sync_options,
             X=X,
@@ -1336,6 +1353,7 @@ def run_model(
             task=task,
             task_targets=task_targets,
             target_masks=target_masks,
+            batch_size=batch_size,
         )
 
         payload = _build_result_payload(
@@ -1353,18 +1371,19 @@ def run_model(
             device=device,
             run_id=run_id,
             save_predictions=save_predictions,
-            train_missing_type="REGULAR",
+            train_missing_type="STANDARD",
             train_channel_sync=False,
             batch_policy=batch_policy,
             lr_policy=lr_policy,
             robustness_axes={
                 "missing_seed": int(SEED),
-                "test_missing_rates": [float(rate) for rate in robustness_test_rates],
+                "test_missing_rates": [float(rate) for rate in effective_robustness_test_rates],
                 "test_missing_types": list(robustness_test_mechanisms),
-                "test_channel_sync_options": _resolve_channel_sync_options(
-                    robustness_channel_sync_options,
-                    use_raw_flow_input,
-                ),
+                "test_channel_sync_options": resolved_robustness_channel_sync_options,
+                "anchor_policy": "singleton_standard",
+                "perturbation_missing_rates": [
+                    float(rate) for rate in effective_robustness_test_rates if not _is_zero_missing_rate(rate)
+                ],
             },
         )
         payload.update(param_search_contract)
@@ -1377,7 +1396,7 @@ def run_model(
             SEED,
             out_root,
             robustness_mode=True,
-            robustness_test_rates=robustness_test_rates,
+            robustness_test_rates=effective_robustness_test_rates,
             robustness_test_mechanisms=robustness_test_mechanisms,
             robustness_channel_sync_options=robustness_channel_sync_options,
         )
@@ -1422,7 +1441,7 @@ def run_model(
             **param_search_contract,
             "seed": int(SEED),
             "missing_rate": 0.0,
-            "robustness_test_rates": [float(rate) for rate in robustness_test_rates],
+            "robustness_test_rates": [float(rate) for rate in effective_robustness_test_rates],
             "robustness_test_mechanisms": list(robustness_test_mechanisms),
             "robustness_channel_sync_options": list(robustness_channel_sync_options),
             "robustness_evaluations": int(len(evaluations)),
@@ -1634,6 +1653,7 @@ def _evaluate_robustness(
     task,
     task_targets,
     target_masks,
+    batch_size,
 ):
     """
     Evaluate trained model on multiple test missing rates.
@@ -1662,9 +1682,7 @@ def _evaluate_robustness(
     model.eval()
     evaluations = []
     use_raw_flow_input = _requires_flow_raw_input(model_name)
-    test_missing_rates = _parse_missing_rates(test_missing_rates)
-    if not any(_is_zero_missing_rate(rate) for rate in test_missing_rates):
-        test_missing_rates = [0.0] + test_missing_rates
+    test_missing_rates = _effective_robustness_test_rates(test_missing_rates)
     test_missing_mechanisms = _parse_robustness_mechanisms(test_missing_mechanisms)
     missing_seed = int(SEED)
     resolved_channel_sync_options = _resolve_channel_sync_options(
@@ -1690,8 +1708,8 @@ def _evaluate_robustness(
 
     for test_rate in test_missing_rates:
         if _is_zero_missing_rate(test_rate):
-            mechanism_options = ["REGULAR"]
-            channel_sync_values = [False]
+            mechanism_options = ["STANDARD"]
+            channel_sync_values = [None]
         else:
             mechanism_options = test_missing_mechanisms
             channel_sync_values = resolved_channel_sync_options
@@ -1739,7 +1757,7 @@ def _evaluate_robustness(
                         targets=task_targets,
                         target_masks=target_masks,
                     )
-                    test_batch = DataLoader(test_dataset, batch_size=64, shuffle=False, drop_last=False)
+                    test_batch = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, drop_last=False)
 
                     if task == "classification":
                         y_true, y_pred, logit_list = [], [], []
