@@ -3,6 +3,8 @@ import inspect
 import subprocess
 import sys
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS_ROOT = REPO_ROOT / "scripts"
 sys.path.insert(0, str(REPO_ROOT))
@@ -15,8 +17,13 @@ from _common import (
     normalize_search_profile,
     resolve_effective_param_config,
     resolve_model_search_space,
+    validate_param_artifact_metadata,
 )
-from param_search import _build_param_artifact_name as _build_search_param_artifact_name
+from param_search import (
+    _build_param_artifact_name as _build_search_param_artifact_name,
+    _derive_trial_seed,
+    tune_model,
+)
 from model_run import (
     _build_param_artifact_name as _build_run_param_artifact_name,
     _infer_cli_search_repeat as _infer_run_cli_search_repeat,
@@ -24,6 +31,24 @@ from model_run import (
 )
 from torch_ists import ists_classifier
 from torch_ists.config import get_active_model_list
+
+
+def _complete_param_config(**overrides):
+    cfg = {
+        "search_profile": "model-native-v1",
+        "search_contract": "model-specific-default-v1",
+        "search_family": "default",
+        "public_search_name": "default model-specific search",
+        "search_profile_visibility": "internal",
+        "search_policy": "default",
+        "search_repeat": "single",
+        "search_algorithm_policy": "model-native-effective-params-v1",
+        "architecture_axes": {"candidate_axes": ["lr", "hidden_dim", "num_layers"]},
+        "effective_params": {"hidden_dim": 64, "num_layers": 2},
+        "lr": 1e-3,
+    }
+    cfg.update(overrides)
+    return cfg
 
 
 def test_search_profile_aliases_and_grids():
@@ -132,8 +157,37 @@ def test_model_native_candidate_axes_are_valid_for_all_active_models():
             assert "model_params.flow_backend=native" in fixed_axes
 
 
-def test_missing_profile_infers_historical_grid():
-    assert infer_param_search_profile({"hidden_dim": 32, "num_layers": 1}) == "legacy-iclr2024-v0"
+def test_missing_profile_fails_fast_without_explicit_legacy_opt_in():
+    legacy_cfg = {"hidden_dim": 32, "num_layers": 1, "lr": 1e-3}
+    with pytest.raises(ValueError, match="search_profile"):
+        infer_param_search_profile(legacy_cfg)
+    with pytest.raises(ValueError, match="search_profile"):
+        validate_param_artifact_metadata(legacy_cfg)
+    assert (
+        validate_param_artifact_metadata(
+            legacy_cfg,
+            allow_legacy_search_profile=True,
+        )
+        == "legacy-iclr2024-v0"
+    )
+
+
+def test_param_artifact_metadata_requires_contract_fields_and_lr():
+    with pytest.raises(ValueError, match="search-contract field"):
+        validate_param_artifact_metadata(_complete_param_config(search_contract=None))
+    with pytest.raises(ValueError, match="'lr'"):
+        validate_param_artifact_metadata(_complete_param_config(lr=None))
+    assert validate_param_artifact_metadata(_complete_param_config()) == "model-native-v1"
+
+
+def test_ray_trial_init_seed_is_trial_specific_but_stable():
+    assert "trial_seed" in inspect.signature(tune_model).parameters
+    assert _derive_trial_seed(42, "trial-a") == _derive_trial_seed(42, "trial-a")
+    assert _derive_trial_seed(42, "trial-a") != _derive_trial_seed(42, "trial-b")
+    assert _derive_trial_seed(_derive_trial_seed(42, "trial-a"), 0) != _derive_trial_seed(
+        _derive_trial_seed(42, "trial-a"),
+        1,
+    )
 
 
 def test_cli_search_axes_artifact_names():
@@ -196,11 +250,23 @@ def test_param_artifact_names_are_missingness_independent():
             search_policy="constrained",
             search_repeat="single",
         ),
+        _build_search_param_artifact_name(
+            "BasicMotions",
+            "cnn",
+            search_policy="constrained",
+            search_repeat="aggregated",
+        ),
         _build_run_param_artifact_name(
             "BasicMotions",
             "cnn",
             param_policy="default",
             param_repeat="single",
+        ),
+        _build_run_param_artifact_name(
+            "BasicMotions",
+            "cnn",
+            param_policy="constrained",
+            param_repeat="aggregated",
         ),
     ]
     for artifact_name in names:

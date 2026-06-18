@@ -44,6 +44,7 @@ from _common import (
     resolve_learning_rate_policy,
     SINGLE_SEARCH_REPEAT,
     STANDARD_SEARCH_POLICY,
+    validate_param_artifact_metadata,
 )
 from dataset_source_contracts import load_dataset, normalize_dataset_source
 from script_chain_contracts import generate_run_id, write_manifest
@@ -209,8 +210,14 @@ def _validate_param_search_profile(
     expected_param_policy: str,
     expected_param_repeat: str,
     param_path: str,
+    allow_legacy_search_profile: bool = False,
 ) -> str:
-    actual = infer_param_search_profile(model_config)
+    actual = validate_param_artifact_metadata(
+        model_config,
+        context=f"Param artifact {param_path}",
+        allow_legacy_search_profile=allow_legacy_search_profile,
+        require_lr=True,
+    )
     expected = normalize_search_profile(expected_search_profile)
     if actual != expected:
         raise ValueError(
@@ -452,6 +459,11 @@ def parse_cli_args():
         "--search-profile",
         type=_normalize_search_profile_arg,
         default=DEFAULT_SEARCH_PROFILE,
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--allow-legacy-search-profile",
+        action="store_true",
         help=argparse.SUPPRESS,
     )
     parser.add_argument(
@@ -1052,7 +1064,7 @@ def run_model(
     batch_size = int(batch_policy["batch_size"])
 
     # set learning params
-    lr_policy = resolve_learning_rate_policy(model_config.get("lr"))
+    lr_policy = resolve_learning_rate_policy(model_config.get("lr"), require_config=True)
     param_search_contract = _param_search_contract_metadata(
         model_config,
         infer_param_search_profile(model_config),
@@ -1909,6 +1921,7 @@ def main():
                         expected_param_policy=args.param_policy,
                         expected_param_repeat=args.param_repeat,
                         param_path=str(param_path),
+                        allow_legacy_search_profile=args.allow_legacy_search_profile,
                     )
                     param_search_contract = _param_search_contract_metadata(
                         model_config,
@@ -2047,6 +2060,7 @@ def main():
                             expected_param_policy=args.param_policy,
                             expected_param_repeat=args.param_repeat,
                             param_path=str(param_path),
+                            allow_legacy_search_profile=args.allow_legacy_search_profile,
                         )
                         param_search_contract = _param_search_contract_metadata(
                             model_config,

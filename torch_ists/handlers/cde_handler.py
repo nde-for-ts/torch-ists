@@ -18,6 +18,20 @@ from ..module.cde import (
 )
 
 
+def _require_signatory_logsignature_channels():
+    try:
+        from signatory import logsignature_channels
+    except ImportError as exc:
+        raise ImportError(
+            "Neural RDE models (neuralrde-1/2/3) require the optional "
+            "dependency 'signatory'. The PyPI wheel is torch-version-pinned; "
+            "install a compatible source build, for example: "
+            "PYTHONNOUSERSITE=1 python -m pip install "
+            "git+https://github.com/patrick-kidger/signatory.git"
+        ) from exc
+    return logsignature_channels
+
+
 class CDEHandler(BaseHandler):
     """Handler for CDE-family paper models.
 
@@ -243,8 +257,7 @@ class CDEHandler(BaseHandler):
                 initial=True,
             )
         elif family == "neuralrde":
-            from signatory import logsignature_channels
-
+            logsignature_channels = _require_signatory_logsignature_channels()
             depth = int(spec["depth"])
             signature_channels = logsignature_channels(in_channels=control_channels, depth=depth)
             func = NeuralCDEFinalTanh(

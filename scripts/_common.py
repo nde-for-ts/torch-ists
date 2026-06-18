@@ -32,6 +32,7 @@ __all__ = [
     "describe_search_profile",
     "normalize_search_profile",
     "infer_param_search_profile",
+    "validate_param_artifact_metadata",
     "resolve_model_search_space",
     "resolve_effective_param_config",
     "build_model_kwargs_from_config",
@@ -246,13 +247,80 @@ def describe_search_profile(raw: str | None) -> dict:
 
 
 def infer_param_search_profile(model_config: dict | None) -> str:
-    """Infer profile for saved params; missing profile means historical ICLR grid."""
+    """Infer profile for saved params; missing profile is no longer implicit."""
     if not model_config:
-        return LEGACY_ICLR2024_SEARCH_PROFILE
+        raise ValueError(
+            "Param artifact is empty or missing; cannot infer search_profile. "
+            "Regenerate params with scripts/param_search.py."
+        )
     raw = model_config.get("search_profile")
     if raw in {None, ""}:
-        return LEGACY_ICLR2024_SEARCH_PROFILE
+        raise ValueError(
+            "Param artifact is missing required field 'search_profile'. "
+            "Regenerate params with the current default search, or pass the hidden "
+            "compatibility flag only for intentional legacy artifact audits."
+        )
     return normalize_search_profile(raw)
+
+
+def _metadata_value_missing(value) -> bool:
+    return value is None or (isinstance(value, str) and value == "")
+
+
+def validate_param_artifact_metadata(
+    model_config: dict | None,
+    *,
+    context: str = "param artifact",
+    allow_legacy_search_profile: bool = False,
+    require_lr: bool = True,
+) -> str:
+    """Validate saved parameter artifacts before reuse or evaluation."""
+    if not isinstance(model_config, dict) or not model_config:
+        raise ValueError(f"{context} is empty or not a metadata dictionary.")
+
+    raw_profile = model_config.get("search_profile")
+    legacy_profile_missing = _metadata_value_missing(raw_profile)
+    if legacy_profile_missing:
+        if not allow_legacy_search_profile:
+            raise ValueError(
+                f"{context} is missing required field 'search_profile'. "
+                "Regenerate params with scripts/param_search.py. Hidden legacy "
+                "profile compatibility must be explicitly opted in for audits."
+            )
+        profile = LEGACY_ICLR2024_SEARCH_PROFILE
+    else:
+        profile = normalize_search_profile(raw_profile)
+
+    required_fields = [
+        "search_contract",
+        "search_family",
+        "public_search_name",
+        "search_profile_visibility",
+        "search_policy",
+        "search_repeat",
+        "search_algorithm_policy",
+        "architecture_axes",
+        "effective_params",
+    ]
+    missing_fields = [
+        field
+        for field in required_fields
+        if _metadata_value_missing(model_config.get(field))
+    ]
+    if missing_fields and not (allow_legacy_search_profile and profile == LEGACY_ICLR2024_SEARCH_PROFILE):
+        missing = ", ".join(missing_fields)
+        raise ValueError(
+            f"{context} is missing required search-contract field(s): {missing}. "
+            "Regenerate params with scripts/param_search.py."
+        )
+
+    if require_lr and _metadata_value_missing(model_config.get("lr")):
+        raise ValueError(
+            f"{context} is missing required field 'lr'. "
+            "Refusing silent learning-rate fallback for saved params; regenerate "
+            "the artifact with scripts/param_search.py."
+        )
+    return profile
 
 
 def _resolve_config_search_profile(config: dict, search_profile: str | None) -> str:
@@ -697,9 +765,15 @@ def resolve_learning_rate_policy(
     *,
     default_lr=1e-3,
     weight_decay_ratio=0.01,
+    require_config: bool = False,
 ) -> dict:
     """Resolve optimizer LR without coupling fallback behavior to batch size."""
     if config_lr is None:
+        if require_config:
+            raise ValueError(
+                "learning rate is missing from the parameter artifact; refusing "
+                "silent fallback. Regenerate params with scripts/param_search.py."
+            )
         lr = float(default_lr)
         source = "fixed_fallback"
     else:

@@ -46,6 +46,7 @@ from _common import (
     resolve_model_search_space,
     SINGLE_SEARCH_REPEAT,
     STANDARD_SEARCH_POLICY,
+    validate_param_artifact_metadata,
 )
 from dataset_source_contracts import load_dataset, normalize_dataset_source
 from script_chain_contracts import (
@@ -269,6 +270,11 @@ def parse_cli_args():
         help=argparse.SUPPRESS,
     )
     parser.add_argument(
+        "--allow-legacy-search-profile",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
         "--split-root",
         type=str,
         default="split",
@@ -367,6 +373,31 @@ def seed_everything(seed):
     
 SEED = 0
 seed_everything(SEED)
+
+
+def _derive_trial_seed(base_seed: int, trial_token: object) -> int:
+    """Derive a trial-local initialization seed without changing split seeds."""
+    token = stable_hash({"base_seed": int(base_seed), "trial_token": str(trial_token)})
+    derived = (int(token[:8], 16) + int(base_seed)) % (2**31 - 1)
+    return derived if derived > 0 else int(base_seed)
+
+
+def _current_tune_trial_token(model_config: dict) -> str:
+    try:
+        trial_id = tune.get_trial_id()
+        if trial_id:
+            return str(trial_id)
+    except Exception:
+        pass
+    try:
+        from ray import train as ray_train
+
+        trial_id = ray_train.get_context().get_trial_id()
+        if trial_id:
+            return str(trial_id)
+    except Exception:
+        pass
+    return stable_hash(model_config)
 
 # Import from the packaged torch_ists runtime.
 from torch_ists.preprocessing import preprocess
@@ -883,6 +914,7 @@ def tune_model(
     targets_root="targets",
     dataset_source="default",
     dataset_npz=None,
+    trial_seed=None,
 ):
     trial_device = resolve_trial_device(device_mode, ray_gpu)
     LOGGER.info("Tune start dataset=%s model=%s mode=%s", data_name, model_name, search_mode)
@@ -900,7 +932,7 @@ def tune_model(
 
     if search_mode == "default":
         # Default mode: single-seed search on the requested seed
-        seed_everything(SEED)
+        seed_everything(SEED if trial_seed is None else trial_seed)
         best_loss = _train_single_seed(
             data_name=data_name,
             missing_rate=missing_rate,
@@ -926,7 +958,8 @@ def tune_model(
         # CV mode: average SEED=0~4 results at higher compute cost
         cv_losses = []
         for seed in range(5):
-            seed_everything(seed)
+            fold_trial_seed = seed if trial_seed is None else _derive_trial_seed(trial_seed, seed)
+            seed_everything(fold_trial_seed)
             loss = _train_single_seed(
                 data_name=data_name,
                 missing_rate=missing_rate,
@@ -1179,12 +1212,14 @@ def optimize(
         reduction_factor=2)
 
     def optimize_model(model_config):
+        trial_seed = _derive_trial_seed(SEED, _current_tune_trial_token(model_config))
         tune_model(data_name=data_name, missing_rate=missing_rate, model_name=model_name,
                    model_config=model_config, EPOCHS=max_num_epochs, SEED=SEED,
                    device_mode=device_mode, ray_gpu=ray_gpu, search_mode=search_mode,
                    split_root=split_root, task=task, forecast_horizon=forecast_horizon,
                    target_source=target_source, targets_root=targets_root,
-                   dataset_source=dataset_source, dataset_npz=dataset_npz)
+                   dataset_source=dataset_source, dataset_npz=dataset_npz,
+                   trial_seed=trial_seed)
 
     result = tune.run(
         tune.with_parameters(optimize_model),
@@ -1359,7 +1394,12 @@ def main():
                         skipped.append({"dataset": data_name, "model": model_name, "task": args.task, "reason": reason})
                         policy_violations.append(f"{data_name}/{model_name}: {reason}")
                         continue
-                    existing_profile = infer_param_search_profile(existing_cfg)
+                    existing_profile = validate_param_artifact_metadata(
+                        existing_cfg,
+                        context=f"Param artifact {existing_param_path}",
+                        allow_legacy_search_profile=args.allow_legacy_search_profile,
+                        require_lr=True,
+                    )
                     existing_contract = describe_search_profile(existing_profile)
                     existing_search_policy = _infer_cli_search_policy(existing_cfg)
                     existing_search_repeat = _infer_cli_search_repeat(existing_cfg, out_name)
