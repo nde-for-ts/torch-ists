@@ -78,6 +78,12 @@ def _parse_csv_list(raw):
     return items or None
 
 
+def _abspath_or_none(path):
+    if path is None:
+        return None
+    return os.path.abspath(os.path.expanduser(str(path)))
+
+
 def _normalize_dataset_source_arg(raw: str) -> str:
     try:
         return normalize_dataset_source(raw)
@@ -701,6 +707,12 @@ def parse_cli_args():
             parser.error("--dataset-npz is required when --dataset-source=npz")
         if not args.datasets or len(args.datasets) != 1:
             parser.error("--dataset-source=npz requires exactly one dataset in --datasets")
+    args.split_root = os.path.abspath(os.path.expanduser(str(args.split_root)))
+    args.param_root = os.path.abspath(os.path.expanduser(str(args.param_root)))
+    args.out_root = os.path.abspath(os.path.expanduser(str(args.out_root)))
+    args.contract_dir = os.path.abspath(os.path.expanduser(str(args.contract_dir)))
+    args.targets_root = os.path.abspath(os.path.expanduser(str(args.targets_root)))
+    args.dataset_npz = _abspath_or_none(args.dataset_npz)
     return args
 
 # setup seed
@@ -764,8 +776,6 @@ logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
 )
 LOGGER = logging.getLogger("model_run")
-
-os.makedirs('out', exist_ok=True)
 
 
 def _expand_mask_or_delta(feature, x_missing):
