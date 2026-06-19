@@ -51,7 +51,11 @@ from _common import (
     validate_param_artifact_identity,
     validate_param_artifact_metadata,
 )
-from dataset_source_contracts import load_dataset, normalize_dataset_source
+from dataset_source_contracts import (
+    load_dataset_payload,
+    normalize_dataset_source,
+    resolve_timestamp_delta_metadata,
+)
 from script_chain_contracts import generate_run_id, write_manifest
 
 sys.dont_write_bytecode = True
@@ -736,10 +740,13 @@ from torch_ists.preprocessing import preprocess
 from torch_ists import ists_classifier, ists_model
 from _training_runtime import (
     _align_prediction_target,
+    apply_train_normalization_stats,
+    compute_train_normalization_stats,
     compute_train_missing_summary,
     enforce_train_missing_gate,
     evaluate,
     ists_dataset,
+    normalize_with_train_stats,
     train,
 )
 from task_target_contracts import load_task_targets_npz
@@ -845,6 +852,7 @@ def _build_output_contract(
     batch_policy,
     lr_policy,
     param_search_contract,
+    timestamp_summary=None,
     robustness_axes=None,
 ):
     return {
@@ -872,6 +880,7 @@ def _build_output_contract(
         "batch_policy": batch_policy,
         "lr_policy": lr_policy,
         "param_search_contract": dict(param_search_contract),
+        "timestamp_summary": timestamp_summary,
         "robustness_axes": robustness_axes,
     }
 
@@ -1221,6 +1230,7 @@ def _build_result_payload(
     lr_policy=None,
     robustness_axes=None,
     output_contract=None,
+    timestamp_summary=None,
 ):
     resolved_regime = str(evaluation_regime or mode)
     resolved_mode = resolved_regime if str(mode).strip().lower() == "standard" else str(mode)
@@ -1238,6 +1248,7 @@ def _build_result_payload(
         "batch_policy": batch_policy,
         "lr_policy": lr_policy,
         "robustness_axes": robustness_axes,
+        "timestamp_summary": timestamp_summary,
     }
     if output_contract is not None:
         meta["output_contract"] = output_contract
@@ -1315,11 +1326,15 @@ def run_model(
     os.makedirs(os.path.join(out_root, data_name), exist_ok=True)
     
     # load data
-    X, Y = load_dataset(
+    dataset_payload = load_dataset_payload(
         dataset_name=data_name,
         dataset_source=dataset_source,
         dataset_npz=dataset_npz,
     )
+    X = dataset_payload.X
+    Y = dataset_payload.y
+    timestamps = dataset_payload.timestamps
+    timestamp_summary = dataset_payload.timestamp_summary
     num_data = X.shape[0]
     num_dim = X.shape[1]
     seq_len = X.shape[2]
@@ -1346,6 +1361,11 @@ def run_model(
     split_path = os.path.join(split_root, data_name, out_name)
     with open(split_path, 'rb') as f:
         train_idx, valid_idx, test_idx = pickle.load(f)
+    timestamp_delta_scale, timestamp_summary = resolve_timestamp_delta_metadata(
+        timestamps,
+        train_idx=train_idx,
+        summary=dataset_payload.timestamp_summary,
+    )
     batch_policy = resolve_dataset_fixed_batch_policy(
         train_n=len(train_idx),
         input_dim=num_dim,
@@ -1394,6 +1414,7 @@ def run_model(
         batch_policy=batch_policy,
         lr_policy=lr_policy,
         param_search_contract=param_search_contract,
+        timestamp_summary=timestamp_summary,
         robustness_axes=robustness_axes,
     )
     output_contract_hash = _output_contract_hash(output_contract)
@@ -1439,17 +1460,13 @@ def run_model(
         mechanism="MCAR",
         seed=SEED,
         channel_sync=train_channel_sync,
+        timestamps=timestamps,
+        timestamp_delta_scale=timestamp_delta_scale,
+        missingness_reference=X[train_idx],
     )
-    X_train = X_missing[train_idx]
-
-    out = []
-    for Xi, train_Xi in zip(X_missing.unbind(dim=-1), X_train.unbind(dim=-1)):
-        train_Xi_nonan = train_Xi.masked_select(~torch.isnan(train_Xi))
-        mean = train_Xi_nonan.mean()  # compute statistics using only training data.
-        std = train_Xi_nonan.std()
-        out.append((Xi - mean) / (std + 1e-5))
-    X_missing_norm = torch.stack(out, dim=-1)
+    X_missing_norm, normalization_summary = normalize_with_train_stats(X_missing, train_idx)
     train_missing_summary = compute_train_missing_summary(X_missing, train_idx)
+    train_missing_summary.update(normalization_summary)
     target_masks = None
     if task == "classification":
         task_targets = _build_task_targets(
@@ -1638,7 +1655,10 @@ def run_model(
     try:
         model.load_state_dict(best_model_wts)
     except Exception as e:
-        LOGGER.warning("Failed to load best weights for %s/%s: %s", data_name, model_name, e)
+        raise RuntimeError(
+            f"Failed to restore best weights for {data_name}/{model_name}; "
+            "refusing to evaluate final-epoch weights as best checkpoint."
+        ) from e
 
     # Robustness mode: evaluate on multiple test rates
     if robustness_mode:
@@ -1665,6 +1685,8 @@ def run_model(
             task_targets=task_targets,
             target_masks=target_masks,
             batch_size=batch_size,
+            timestamps=timestamps,
+            timestamp_delta_scale=timestamp_delta_scale,
         )
 
         payload = _build_result_payload(
@@ -1688,6 +1710,7 @@ def run_model(
             lr_policy=lr_policy,
             robustness_axes=robustness_axes,
             output_contract=output_contract,
+            timestamp_summary=timestamp_summary,
         )
         payload.update(param_search_contract)
 
@@ -1739,6 +1762,7 @@ def run_model(
             "dataset": data_name,
             "dataset_source": str(dataset_source),
             "dataset_npz": None if dataset_npz is None else str(dataset_npz),
+            "timestamp_summary": timestamp_summary,
             "task": task,
             "model": model_name,
             **param_search_contract,
@@ -1908,6 +1932,7 @@ def run_model(
         batch_policy=batch_policy,
         lr_policy=lr_policy,
         output_contract=output_contract,
+        timestamp_summary=timestamp_summary,
     )
     payload.update(param_search_contract)
     with open(output_path, 'wb') as f:
@@ -1916,6 +1941,7 @@ def run_model(
         "dataset": data_name,
         "dataset_source": str(dataset_source),
         "dataset_npz": None if dataset_npz is None else str(dataset_npz),
+        "timestamp_summary": timestamp_summary,
         "task": task,
         "target_source": target_source if task != "classification" else "label",
         "model": model_name,
@@ -1960,6 +1986,8 @@ def _evaluate_robustness(
     task_targets,
     target_masks,
     batch_size,
+    timestamps=None,
+    timestamp_delta_scale=None,
 ):
     """
     Evaluate trained model on multiple test missing rates.
@@ -2003,14 +2031,11 @@ def _evaluate_robustness(
         mechanism="MCAR",
         seed=SEED,
         channel_sync=False,
+        timestamps=timestamps,
+        timestamp_delta_scale=timestamp_delta_scale,
+        missingness_reference=X[train_idx],
     )
-    train_reference = train_missing_ref[train_idx]
-    train_stats = []
-    for train_Xi in train_reference.unbind(dim=-1):
-        train_Xi_nonan = train_Xi.masked_select(~torch.isnan(train_Xi))
-        mean = train_Xi_nonan.mean()
-        std = train_Xi_nonan.std()
-        train_stats.append((mean, std))
+    train_stats, _normalization_summary = compute_train_normalization_stats(train_missing_ref, train_idx)
 
     for test_rate in test_missing_rates:
         if _is_zero_missing_rate(test_rate):
@@ -2042,13 +2067,13 @@ def _evaluate_robustness(
                         mechanism=preprocess_mechanism,
                         seed=missing_seed,
                         channel_sync=preprocess_channel_sync,
+                        timestamps=timestamps,
+                        timestamp_delta_scale=timestamp_delta_scale,
+                        missingness_reference=X[train_idx],
                     )
 
                     # Reuse the training missing=0.0 statistics for all robustness test axes.
-                    out = []
-                    for Xi, (mean, std) in zip(X_missing.unbind(dim=-1), train_stats):
-                        out.append((Xi - mean) / (std + 1e-5))
-                    X_missing_norm = torch.stack(out, dim=-1)
+                    X_missing_norm = apply_train_normalization_stats(X_missing, train_stats)
 
                     # Create test dataset with this missing axis point.
                     test_dataset = ists_dataset(

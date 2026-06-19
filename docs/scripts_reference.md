@@ -79,7 +79,7 @@ PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/set_splits.py --dataset-name Basi
 |---|---|---|---|
 | `--dataset-name` | `str` | (required) | Dataset id used in the split file path. |
 | `--dataset-source` | `{default,npz}` | `default` | Dataset source backend. `default` loads benchmark archive data by dataset name through `torch_ists.benchmark_loader.get_data`; `npz` loads a local file through `--dataset-npz`. |
-| `--dataset-npz` | `str` | `None` | Required when `--dataset-source npz`; NPZ must contain `X [N,D,L]` and `y [N]`. |
+| `--dataset-npz` | `str` | `None` | Required when `--dataset-source npz`; NPZ must contain `X [N,D,L]` and `y [N]`; optional `timestamps [N,L]` are validated and recorded. |
 | `--seed` | `int` | `42` | Random seed for the stratified split. Default `42` is the hyperparameter search seed (disjoint from evaluation seeds `0-4`); pass `--seed 0..4` to generate the evaluation splits, or `--seed 0` for ICLR 2024 reproducibility. |
 | `--if-exists` | `{reuse, fail}` | `reuse` | Behavior when the split artifact already exists. `reuse` keeps the existing file; `fail` raises. |
 | `--out-dir` (alias `--output-dir`) | `str` | `split` | Root directory for split artifacts. |
@@ -115,7 +115,7 @@ This is a bounded smoke run; the full defaults (`--num-samples 50 --max-num-epoc
 | `--seed` | `int` | `42` | Seed for split selection and hyperparameter search. The default `42` is disjoint from evaluation seeds `0-4` for `--search-repeat single`; `--search-repeat aggregated` averages over `0-4` and is diagnostic. |
 | `--datasets` | `str` | `BasicMotions` | Comma-separated dataset list. Pass a comma-separated list to run additional datasets. |
 | `--dataset-source` | `{default,npz}` | `default` | Dataset source backend. `default` loads benchmark archive data by dataset name through `torch_ists.benchmark_loader.get_data`; `npz` loads one local file through `--dataset-npz`. |
-| `--dataset-npz` | `str` | `None` | Required when `--dataset-source npz`; `--datasets` must contain exactly one dataset name. |
+| `--dataset-npz` | `str` | `None` | Required when `--dataset-source npz`; `--datasets` must contain exactly one dataset name; optional `timestamps [N,L]` are validated and recorded. |
 | `--models` | `str` | `cnn` | Comma-separated model list. Pass a comma-separated list to run additional models. |
 | `--num-samples` | `int` | `50` | Ray Tune `num_samples` — hyperparameter trial budget. Saved parameter artifacts record this value and mark `--num-samples 1` artifacts as smoke/local artifacts. |
 | `--max-num-epochs` | `int` | `10` | Per-trial training budget. |
@@ -187,7 +187,7 @@ PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/model_run.py \
 | `--seed` | `int` | `0` | Random seed. |
 | `--datasets` | `str` | `BasicMotions` | Comma-separated dataset list. Pass a comma-separated list to run additional datasets. |
 | `--dataset-source` | `{default,npz}` | `default` | Dataset source backend. `default` loads benchmark archive data by dataset name through `torch_ists.benchmark_loader.get_data`; `npz` loads one local file through `--dataset-npz`. |
-| `--dataset-npz` | `str` | `None` | Required when `--dataset-source npz`; `--datasets` must contain exactly one dataset name. |
+| `--dataset-npz` | `str` | `None` | Required when `--dataset-source npz`; `--datasets` must contain exactly one dataset name; optional `timestamps [N,L]` are validated and recorded. |
 | `--models` | `str` | `cnn` | Comma-separated model list. Pass a comma-separated list to run additional models. |
 | `--missing-rates` | `str` | `0.0` | Comma-separated missing rates for standard/missingness evaluation. `0.0` is standard; positive rates are missingness. Ignored in robustness mode. |
 | `--epochs` | `int` | `100` | Epochs per (dataset, missing-rate, model) run. |

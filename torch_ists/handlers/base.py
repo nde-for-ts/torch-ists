@@ -269,7 +269,8 @@ class BaseHandler(ABC):
         # Create timestamps: [L] -> [N, L]
         seq_ts = times.unsqueeze(0).repeat(N, 1)
 
-        # Compute final index based on mask (or use sequence length)
+        # Use the terminal sequence index. Missingness is represented by mask/delta
+        # channels; it must not shorten the continuous-time evaluation horizon.
         final_index = self.get_final_index(seq_mask, L)
 
         return {
@@ -285,29 +286,25 @@ class BaseHandler(ABC):
         seq_mask: torch.Tensor,
         seq_len: Optional[int] = None
     ) -> torch.Tensor:
-        """Compute the last valid index for each sample.
+        """Compute the terminal sequence index for each sample.
 
         Reference: torch_ists/_layer.py L542
 
         Args:
             seq_mask: [N, L] Observation mask (1=observed, 0=missing)
-            seq_len: Optional sequence length (used if mask is all zeros)
+            seq_len: Optional sequence length
 
         Returns:
-            torch.Tensor: [N] Last valid index for each sample
+            torch.Tensor: [N] Terminal sequence index for each sample
         """
-        # Count observed points per sample
-        counts = seq_mask.sum(dim=1)
-
-        # Handle edge case: all zeros -> use seq_len
-        if seq_len is not None:
-            counts = torch.where(counts == 0, torch.tensor(seq_len, device=seq_mask.device), counts)
-
-        # Subtract 1 to get index (counts start from 1)
-        final_index = counts - 1
-        final_index = torch.clamp(final_index, min=0)
-
-        return final_index.long()
+        resolved_len = int(seq_len) if seq_len is not None else int(seq_mask.shape[1])
+        terminal_index = max(resolved_len - 1, 0)
+        return torch.full(
+            (int(seq_mask.shape[0]),),
+            terminal_index,
+            dtype=torch.long,
+            device=seq_mask.device,
+        )
 
 
 __all__ = ['BaseHandler']

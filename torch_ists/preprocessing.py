@@ -1,6 +1,7 @@
 """Self-contained preprocessing utilities for torch_ists."""
 
 from typing import Any, Optional, Tuple
+import warnings
 
 import numpy as np
 
@@ -99,21 +100,55 @@ def _sigmoid(x: np.ndarray) -> np.ndarray:
     return 1.0 / (1.0 + np.exp(-x))
 
 
-def _build_mar_probability(X: np.ndarray, rate: float) -> np.ndarray:
+def _safe_nanmean_scalar(x: np.ndarray, default: float = 0.0) -> float:
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+        value = np.nanmean(x)
+    return float(value) if np.isfinite(value) else float(default)
+
+
+def _safe_nanstd_scalar(x: np.ndarray, default: float = 1.0) -> float:
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+        value = np.nanstd(x)
+    return float(value) if np.isfinite(value) and float(value) > 0.0 else float(default)
+
+
+def _safe_nanmean_array(x: np.ndarray, axis=None, keepdims: bool = False) -> np.ndarray:
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+        value = np.nanmean(x, axis=axis, keepdims=keepdims)
+    return np.asarray(value, dtype=np.float32)
+
+
+def _build_mar_probability(
+    X: np.ndarray,
+    rate: float,
+    reference_X: Optional[np.ndarray] = None,
+) -> np.ndarray:
     # Feature-dependent missingness probability.
-    feature_mean = np.nanmean(X, axis=2, keepdims=True)
-    centered = feature_mean - np.nanmean(feature_mean)
-    logits = centered / (np.nanstd(centered) + 1e-8)
+    reference = X if reference_X is None else np.asarray(reference_X, dtype=np.float32)
+    feature_mean = _safe_nanmean_array(X, axis=2, keepdims=True)
+    reference_feature_mean = _safe_nanmean_array(reference, axis=2, keepdims=True)
+    centered = feature_mean - _safe_nanmean_scalar(reference_feature_mean)
+    logits = centered / (_safe_nanstd_scalar(reference_feature_mean) + 1e-8)
     probs = _sigmoid(logits)
-    probs = probs / (np.nanmean(probs) + 1e-8) * rate
+    probs = np.nan_to_num(probs, nan=0.0, posinf=0.99, neginf=0.0)
+    probs = probs / (_safe_nanmean_scalar(probs, default=1.0) + 1e-8) * rate
     return np.clip(probs, 0.0, 0.99)
 
 
-def _build_mnar_probability(X: np.ndarray, rate: float) -> np.ndarray:
+def _build_mnar_probability(
+    X: np.ndarray,
+    rate: float,
+    reference_X: Optional[np.ndarray] = None,
+) -> np.ndarray:
     # Value-dependent missingness probability.
-    norm = (X - np.nanmean(X)) / (np.nanstd(X) + 1e-8)
+    reference = X if reference_X is None else np.asarray(reference_X, dtype=np.float32)
+    norm = (X - _safe_nanmean_scalar(reference)) / (_safe_nanstd_scalar(reference) + 1e-8)
     probs = _sigmoid(norm)
-    probs = probs / (np.nanmean(probs) + 1e-8) * rate
+    probs = np.nan_to_num(probs, nan=0.0, posinf=0.99, neginf=0.0)
+    probs = probs / (_safe_nanmean_scalar(probs, default=1.0) + 1e-8) * rate
     return np.clip(probs, 0.0, 0.99)
 
 
@@ -172,6 +207,87 @@ def _compute_delta(mask_observed_ndl: np.ndarray) -> np.ndarray:
     return delta
 
 
+def _validate_timestamps_for_preprocess(timestamps: Any, X_np: np.ndarray) -> np.ndarray:
+    timestamps_np = np.asarray(timestamps, dtype=np.float32)
+    expected_shape = (int(X_np.shape[0]), int(X_np.shape[2]))
+    if timestamps_np.ndim != 2:
+        raise ValueError(f"timestamps must be 2D [N, L], got shape {timestamps_np.shape}")
+    if tuple(timestamps_np.shape) != expected_shape:
+        raise ValueError(f"timestamps shape mismatch: expected {expected_shape}, got {timestamps_np.shape}")
+    for row in timestamps_np:
+        finite_row = row[np.isfinite(row)]
+        if finite_row.size > 1 and np.any(np.diff(finite_row) < 0):
+            raise ValueError("timestamps must be non-decreasing within each sample")
+    return timestamps_np
+
+
+def _resolve_timestamp_delta_scale(
+    timestamps_nl: np.ndarray,
+    timestamp_delta_scale: Optional[float],
+) -> float:
+    if timestamp_delta_scale is not None:
+        scale = float(timestamp_delta_scale)
+        if scale <= 0.0 or not np.isfinite(scale):
+            raise ValueError(f"timestamp_delta_scale must be finite and positive, got {timestamp_delta_scale}")
+        return scale
+    if timestamps_nl.shape[1] < 2:
+        return 1.0
+    left = timestamps_nl[:, :-1]
+    right = timestamps_nl[:, 1:]
+    diffs = right - left
+    valid = np.isfinite(left) & np.isfinite(right) & (diffs > 0)
+    positive_diffs = diffs[valid]
+    if positive_diffs.size == 0:
+        return 1.0
+    return float(np.median(positive_diffs))
+
+
+def _compute_timestamp_delta(
+    mask_observed_ndl: np.ndarray,
+    timestamps_nl: np.ndarray,
+    *,
+    timestamp_delta_scale: float,
+    ) -> np.ndarray:
+    """Compute scale-normalized elapsed-time delta tensor with shape [N, D, L]."""
+    observed = mask_observed_ndl.astype(bool)
+    timestamps = np.asarray(timestamps_nl, dtype=np.float32)
+    n, d, l = observed.shape
+    delta = np.zeros((n, d, l), dtype=np.float32)
+
+    for i in range(n):
+        times_i = timestamps[i]
+        finite_i = np.isfinite(times_i)
+        for j in range(d):
+            last_observed_time = None
+            for t in range(l):
+                if finite_i[t] and last_observed_time is not None:
+                    elapsed = max(float(times_i[t] - last_observed_time), 0.0)
+                    delta[i, j, t] = elapsed / float(timestamp_delta_scale)
+                if observed[i, j, t] and finite_i[t]:
+                    last_observed_time = float(times_i[t])
+    return delta
+
+
+def _common_timestamp_grid(timestamps_nl: Optional[np.ndarray]) -> Optional[np.ndarray]:
+    if timestamps_nl is None:
+        return None
+    timestamps = np.asarray(timestamps_nl, dtype=np.float32)
+    if timestamps.ndim != 2 or timestamps.shape[0] == 0:
+        return None
+    if not np.isfinite(timestamps).all():
+        return None
+    reference = timestamps[0]
+    if not all(np.allclose(row, reference, atol=1e-6, rtol=0.0) for row in timestamps[1:]):
+        return None
+    if not np.all(np.diff(reference) > 0):
+        return None
+    time_min = float(reference.min())
+    time_max = float(reference.max())
+    if time_max <= time_min:
+        return None
+    return ((reference - time_min) / (time_max - time_min)).astype(np.float32)
+
+
 def _finalize_preprocess_outputs(
     X_missing_np: np.ndarray,
     mask_ndl: np.ndarray,
@@ -179,6 +295,7 @@ def _finalize_preprocess_outputs(
     *,
     interpolate: str,
     use_intensity: bool,
+    time_grid_np: Optional[np.ndarray] = None,
 ):
     import torch
 
@@ -190,7 +307,12 @@ def _finalize_preprocess_outputs(
     X_delta = torch.from_numpy(delta_ndl).to(torch.float32).permute(0, 2, 1)       # [N, L, D]
 
     seq_len = X_missing.shape[1]
-    times = torch.linspace(0, 1, seq_len, dtype=X_missing.dtype)
+    if time_grid_np is None:
+        times = torch.linspace(0, 1, seq_len, dtype=X_missing.dtype)
+    else:
+        times = torch.as_tensor(time_grid_np, dtype=X_missing.dtype)
+        if times.ndim != 1 or times.numel() != seq_len:
+            raise ValueError(f"time grid must have shape [{seq_len}], got {tuple(times.shape)}")
 
     intensity = (~torch.isnan(X_missing)).to(X_missing.dtype).cumsum(dim=1)
     time_feat = times.view(1, seq_len, 1).expand(X_missing.shape[0], seq_len, 1)
@@ -220,12 +342,12 @@ def _finalize_preprocess_outputs(
     return X_missing, X_mask, X_delta, coeffs
 
 
-def apply_missingness_compat(
+def apply_missingness_refactoring_compat(
     X: np.ndarray,
     rate: float,
     seed: int = 0,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Reproduce reference missingness semantics for compatibility checks only."""
+    """Reproduce root-refactoring missingness semantics for parity diagnosis only."""
     import torch
 
     _validate_inputs(X, rate)
@@ -262,6 +384,7 @@ def apply_missingness(
     mechanism: str = "MCAR",
     seed: int = 0,
     channel_sync: bool = False,
+    reference_X: Optional[np.ndarray] = None,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Apply synthetic missingness to [N, D, L] input data.
 
@@ -315,9 +438,9 @@ def apply_missingness(
                         sampled_missing[i, j, removed] = True
     elif rate > 0.0:
         if mechanism == "MAR":
-            prob = _build_mar_probability(X, rate)
+            prob = _build_mar_probability(X, rate, reference_X=reference_X)
         else:
-            prob = _build_mnar_probability(X, rate)
+            prob = _build_mnar_probability(X, rate, reference_X=reference_X)
 
         if channel_sync:
             # Aggregate channel-level probabilities to time-level probabilities.
@@ -344,6 +467,9 @@ def preprocess(
     channel_sync: bool = False,
     mechanism: str = "MCAR",
     model_name: Optional[str] = None,
+    timestamps: Optional[Any] = None,
+    timestamp_delta_scale: Optional[float] = None,
+    missingness_reference: Optional[Any] = None,
 ):
     """Preprocess data and build interpolation features.
 
@@ -362,6 +488,14 @@ def preprocess(
         model_name: Optional model name. When set, `interpolate` and
             `use_intensity` default to the model's expected configuration via
             `get_data_config(model_name)`. Explicit kwargs still override.
+        timestamps: Optional per-sample timestamp grid [N, L]. When provided,
+            `X_delta` uses elapsed timestamp distance instead of index distance.
+        timestamp_delta_scale: Positive scale used to express timestamp deltas in
+            index-step equivalent units. If omitted, the dataset median positive
+            adjacent timestamp gap is used.
+        missingness_reference: Optional [N_ref, D, L] array used as the reference
+            distribution for MAR/MNAR synthetic masks. Script entrypoints pass the
+            training split here to avoid test-to-train mask-stat leakage.
 
     Returns:
         X_missing: torch.Tensor [N, L, D]
@@ -391,9 +525,11 @@ def preprocess(
         X_np = X.detach().cpu().numpy().astype(np.float32)
     else:
         X_np = np.asarray(X, dtype=np.float32)
+    reference_np = None if missingness_reference is None else np.asarray(missingness_reference, dtype=np.float32)
 
     rate = 0.0 if missing_rate is None else float(missing_rate)
     _validate_inputs(X_np, rate)
+    timestamps_np = None if timestamps is None else _validate_timestamps_for_preprocess(timestamps, X_np)
 
     if rate > 0.0:
         X_missing_np, mask_ndl = apply_missingness(
@@ -402,29 +538,39 @@ def preprocess(
             mechanism=mechanism,
             seed=seed,
             channel_sync=channel_sync,
+            reference_X=reference_np,
         )
     else:
         X_missing_np = X_np.copy()
         mask_ndl = (~np.isnan(X_missing_np)).astype(np.float32)
 
-    delta_ndl = _compute_delta(mask_ndl)
+    if timestamps_np is not None:
+        resolved_timestamp_delta_scale = _resolve_timestamp_delta_scale(timestamps_np, timestamp_delta_scale)
+        delta_ndl = _compute_timestamp_delta(
+            mask_ndl,
+            timestamps_np,
+            timestamp_delta_scale=resolved_timestamp_delta_scale,
+        )
+    else:
+        delta_ndl = _compute_delta(mask_ndl)
     return _finalize_preprocess_outputs(
         X_missing_np,
         mask_ndl,
         delta_ndl,
         interpolate=resolved_interpolate,
         use_intensity=resolved_use_intensity,
+        time_grid_np=None,
     )
 
 
-def preprocess_compat(
+def preprocess_refactoring_compat(
     X: Any,
     missing_rate: Optional[float] = None,
     interpolate: str = "natural",
     use_intensity: bool = True,
     seed: int = 0,
 ):
-    """Compatibility preprocess helper that matches reference semantics."""
+    """Parity-only preprocess helper that matches root-refactoring semantics."""
     import torch
 
     if isinstance(X, torch.Tensor):
@@ -436,7 +582,7 @@ def preprocess_compat(
     _validate_inputs(X_np, rate)
 
     if rate > 0.0:
-        X_missing_np, mask_ndl, delta_ndl = apply_missingness_compat(
+        X_missing_np, mask_ndl, delta_ndl = apply_missingness_refactoring_compat(
             X_np,
             rate=rate,
             seed=seed,
@@ -455,5 +601,5 @@ def preprocess_compat(
     )
 
 
-apply_missingness_refactoring_compat = apply_missingness_compat
-preprocess_refactoring_compat = preprocess_compat
+apply_missingness_compat = apply_missingness_refactoring_compat
+preprocess_compat = preprocess_refactoring_compat

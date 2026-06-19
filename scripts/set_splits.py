@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 from _common import configure_runtime_paths
-from dataset_source_contracts import load_dataset, normalize_dataset_source
+from dataset_source_contracts import load_dataset_payload, normalize_dataset_source
 
 sys.dont_write_bytecode = True
 
@@ -23,7 +23,7 @@ def _normalize_dataset_source_arg(raw: str) -> str:
 
 
 def _load_dataset(args):
-    return load_dataset(
+    return load_dataset_payload(
         dataset_name=args.dataset_name,
         dataset_source=args.dataset_source,
         dataset_npz=args.dataset_npz,
@@ -106,6 +106,8 @@ def main() -> int:
 
         split_path = get_split_path(Path(args.out_dir), args.dataset_name, args.seed)
         reuse_existing = False
+        payload = _load_dataset(args)
+        timestamp_summary = payload.timestamp_summary
 
         if split_path.exists():
             if args.if_exists == "fail":
@@ -113,8 +115,7 @@ def main() -> int:
             train_idx, valid_idx, test_idx = load_splits(split_path)
             reuse_existing = True
         else:
-            _, y = _load_dataset(args)
-            train_idx, valid_idx, test_idx = make_stratified_splits(y=y, seed=args.seed)
+            train_idx, valid_idx, test_idx = make_stratified_splits(y=payload.y, seed=args.seed)
             if not args.dry_run:
                 save_splits(split_path, train_idx, valid_idx, test_idx)
 
@@ -128,6 +129,7 @@ def main() -> int:
                 "seed": int(args.seed),
                 "dataset_source": args.dataset_source,
                 "dataset_npz": None if args.dataset_npz is None else str(args.dataset_npz),
+                "timestamp_summary": timestamp_summary,
                 "split_path": str(split_path),
                 "reuse_existing": bool(reuse_existing),
                 "dry_run": bool(args.dry_run),
@@ -144,6 +146,7 @@ def main() -> int:
             "run_id": run_id,
             "dataset_source": args.dataset_source,
             "dataset_npz": None if args.dataset_npz is None else str(args.dataset_npz),
+            "timestamp_summary": timestamp_summary,
             "split_path": str(split_path),
             "split_manifest_path": str(manifest_path),
             "reuse_existing": bool(reuse_existing),

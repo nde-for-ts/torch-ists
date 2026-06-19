@@ -61,7 +61,11 @@ from _common import (
     validate_param_artifact_identity,
     validate_param_artifact_metadata,
 )
-from dataset_source_contracts import load_dataset, normalize_dataset_source
+from dataset_source_contracts import (
+    load_dataset_payload,
+    normalize_dataset_source,
+    resolve_timestamp_delta_metadata,
+)
 from script_chain_contracts import (
     generate_run_id,
     stable_hash,
@@ -454,6 +458,7 @@ from _training_runtime import (
     enforce_train_missing_gate,
     evaluate,
     ists_dataset,
+    normalize_with_train_stats,
     train,
 )
 from task_target_contracts import load_task_targets_npz
@@ -517,11 +522,14 @@ def _collect_task_metadata(
     dataset_source: str,
     dataset_npz: str | None,
 ) -> dict:
-    X, Y = load_dataset(
+    dataset_payload = load_dataset_payload(
         dataset_name=data_name,
         dataset_source=dataset_source,
         dataset_npz=dataset_npz,
     )
+    X = dataset_payload.X
+    Y = dataset_payload.y
+    timestamps = dataset_payload.timestamps
     num_data = int(X.shape[0])
     num_dim = int(X.shape[1])
     seq_len = int(X.shape[2])
@@ -529,6 +537,11 @@ def _collect_task_metadata(
     with open(split_path, "rb") as f:
         train_idx, valid_idx, test_idx = pickle.load(f)
     del valid_idx, test_idx
+    timestamp_delta_scale, timestamp_summary = resolve_timestamp_delta_metadata(
+        timestamps,
+        train_idx=train_idx,
+        summary=dataset_payload.timestamp_summary,
+    )
     batch_policy = resolve_dataset_fixed_batch_policy(
         train_n=len(train_idx),
         input_dim=num_dim,
@@ -544,16 +557,13 @@ def _collect_task_metadata(
         mechanism="MCAR",
         seed=seed,
         channel_sync=False,
+        timestamps=timestamps,
+        timestamp_delta_scale=timestamp_delta_scale,
+        missingness_reference=X[train_idx],
     )
-    X_train = X_missing[train_idx]
-    out = []
-    for Xi, train_Xi in zip(X_missing.unbind(dim=-1), X_train.unbind(dim=-1)):
-        train_Xi_nonan = train_Xi.masked_select(~torch.isnan(train_Xi))
-        mean = train_Xi_nonan.mean()
-        std = train_Xi_nonan.std()
-        out.append((Xi - mean) / (std + 1e-5))
-    X_missing_norm = torch.stack(out, dim=-1)
+    X_missing_norm, normalization_summary = normalize_with_train_stats(X_missing, train_idx)
     train_missing_summary = compute_train_missing_summary(X_missing, train_idx)
+    train_missing_summary.update(normalization_summary)
 
     if task == "classification":
         target_masks = None
@@ -604,6 +614,7 @@ def _collect_task_metadata(
         "train_missing_summary": train_missing_summary,
         "target_spec": target_spec,
         "target_source": str(target_source if task != "classification" else "label"),
+        "timestamp_summary": timestamp_summary,
     }
 
 
@@ -945,22 +956,65 @@ def _build_task_targets(task, x_missing_norm, y, forecast_horizon=None):
     raise ValueError(f"Unsupported task: {task}")
 
 
-def report_tune_loss(loss_value):
+def report_tune_loss(loss_value, *, epoch=None):
     _ray, _tune, *_ = _load_ray_tune()
-    metric = float(loss_value)
+    metrics = {"loss": float(loss_value)}
+    if epoch is not None:
+        metrics["epoch"] = int(epoch)
     try:
-        _tune.report(loss=metric)
+        _tune.report(**metrics)
         return
     except TypeError:
         pass
     try:
-        _tune.report({"loss": metric})
+        _tune.report(metrics)
         return
     except TypeError:
         pass
     from ray import train as ray_train
 
-    ray_train.report({"loss": metric})
+    ray_train.report(metrics)
+
+
+def _trial_reported_iteration(trial) -> int:
+    last_result = getattr(trial, "last_result", None) or {}
+    iteration = 0
+    for key in ("training_iteration", "epoch"):
+        value = last_result.get(key)
+        if value is None:
+            continue
+        try:
+            iteration = max(iteration, int(value))
+        except (TypeError, ValueError):
+            continue
+    return iteration
+
+
+def _trial_reported_loss(trial) -> float | None:
+    last_result = getattr(trial, "last_result", None) or {}
+    if "loss" not in last_result:
+        return None
+    try:
+        loss = float(last_result["loss"])
+    except (TypeError, ValueError):
+        return None
+    return loss if np.isfinite(loss) else None
+
+
+def _select_best_ray_trial(result, *, max_num_epochs: int, require_completed: bool):
+    if not require_completed:
+        return result.get_best_trial("loss", "min", "last")
+    candidates = []
+    for trial in getattr(result, "trials", []) or []:
+        loss = _trial_reported_loss(trial)
+        if loss is None:
+            continue
+        if _trial_reported_iteration(trial) >= int(max_num_epochs):
+            candidates.append((loss, trial))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: item[0])
+    return candidates[0][1]
 
 
 def resolve_trial_device(device_mode, ray_gpu):
@@ -996,17 +1050,21 @@ def _train_single_seed(
     targets_root="targets",
     dataset_source="default",
     dataset_npz=None,
+    epoch_reporter=None,
 ):
     """
     Train and evaluate model on a single seed split.
     Returns the best validation loss for this seed.
     """
     # Load data
-    X, Y = load_dataset(
+    dataset_payload = load_dataset_payload(
         dataset_name=data_name,
         dataset_source=dataset_source,
         dataset_npz=dataset_npz,
     )
+    X = dataset_payload.X
+    Y = dataset_payload.y
+    timestamps = dataset_payload.timestamps
     num_data = X.shape[0]
     num_dim = X.shape[1]
     seq_len = X.shape[2]
@@ -1021,6 +1079,11 @@ def _train_single_seed(
         )
     with open(split_path, 'rb') as f:
         train_idx, valid_idx, test_idx = pickle.load(f)
+    timestamp_delta_scale, timestamp_summary = resolve_timestamp_delta_metadata(
+        timestamps,
+        train_idx=train_idx,
+        summary=dataset_payload.timestamp_summary,
+    )
     batch_policy = resolve_dataset_fixed_batch_policy(
         train_n=len(train_idx),
         input_dim=num_dim,
@@ -1062,20 +1125,15 @@ def _train_single_seed(
         interpolate=interpolate,
         use_intensity=use_intensity,
         mechanism="MCAR",
-        seed=SEED,
+        seed=seed,
         channel_sync=False,
+        timestamps=timestamps,
+        timestamp_delta_scale=timestamp_delta_scale,
+        missingness_reference=X[train_idx],
     )
-    X_train = X_missing[train_idx]
-
-    # Normalize using train set statistics
-    out = []
-    for Xi, train_Xi in zip(X_missing.unbind(dim=-1), X_train.unbind(dim=-1)):
-        train_Xi_nonan = train_Xi.masked_select(~torch.isnan(train_Xi))
-        mean = train_Xi_nonan.mean()
-        std = train_Xi_nonan.std()
-        out.append((Xi - mean) / (std + 1e-5))
-    X_missing_norm = torch.stack(out, dim=-1)
+    X_missing_norm, normalization_summary = normalize_with_train_stats(X_missing, train_idx)
     train_missing_summary = compute_train_missing_summary(X_missing, train_idx)
+    train_missing_summary.update(normalization_summary)
 
     target_masks = None
     if task == "classification":
@@ -1239,6 +1297,9 @@ def _train_single_seed(
         else:
             patient += 1
 
+        if epoch_reporter is not None:
+            epoch_reporter(best_loss, epoch=e + 1)
+
         if (e > 10) and (patient > 5):
             break
 
@@ -1284,6 +1345,13 @@ def tune_model(
 
     if search_repeat == SINGLE_SEARCH_REPEAT:
         seed_everything(SEED if trial_seed is None else trial_seed)
+        reported_epochs = 0
+
+        def _report_epoch(loss_value, *, epoch):
+            nonlocal reported_epochs
+            reported_epochs += 1
+            report_tune_loss(loss_value, epoch=epoch)
+
         best_loss = _train_single_seed(
             data_name=data_name,
             missing_rate=missing_rate,
@@ -1301,9 +1369,11 @@ def tune_model(
             targets_root=targets_root,
             dataset_source=dataset_source,
             dataset_npz=dataset_npz,
+            epoch_reporter=_report_epoch,
         )
         LOGGER.info("Single repeat finished dataset=%s model=%s best_loss=%.6f", data_name, model_name, best_loss)
-        report_tune_loss(best_loss)
+        if reported_epochs == 0:
+            report_tune_loss(best_loss)
 
     elif search_repeat == AGGREGATED_SEARCH_REPEAT:
         repeat_losses = []
@@ -1373,13 +1443,19 @@ def optimize(
 ):
     search_space = resolve_model_search_space(model_name, search_profile)
     search_profile = search_space["search_profile"]
+    dataset_payload = load_dataset_payload(
+        dataset_name=data_name,
+        dataset_source=dataset_source,
+        dataset_npz=dataset_npz,
+    )
+    _, timestamp_summary = resolve_timestamp_delta_metadata(
+        dataset_payload.timestamps,
+        summary=dataset_payload.timestamp_summary,
+    )
     constrained_capacity_config = None
     if search_policy == CONSTRAINED_SEARCH_POLICY:
-        X_capacity, Y_capacity = load_dataset(
-            dataset_name=data_name,
-            dataset_source=dataset_source,
-            dataset_npz=dataset_npz,
-        )
+        X_capacity = dataset_payload.X
+        Y_capacity = dataset_payload.y
         input_dim = int(X_capacity.shape[1])
         seq_len = int(X_capacity.shape[2])
         if str(task).strip().lower() == "classification":
@@ -1497,31 +1573,6 @@ def optimize(
         else:
             raise ValueError(f"Unknown search_repeat: {search_repeat}")
 
-        saved_model_config = _normalize_param_config_for_save(
-            model_name,
-            model_config,
-            search_profile=search_profile,
-            artifact_identity=artifact_identity,
-            search_provenance=_build_search_provenance(
-                num_samples=num_samples,
-                max_num_epochs=max_num_epochs,
-                execution_backend="local-single",
-                search_algorithm="local-single",
-                search_algorithm_seed=SEED,
-            ),
-        )
-        os.makedirs(os.path.join(param_root, data_name), exist_ok=True)
-        out_name = _build_param_artifact_name(
-            data_name,
-            model_name,
-            search_policy=search_policy,
-            search_repeat=search_repeat,
-            task=task,
-        )
-        param_path = os.path.join(param_root, data_name, out_name)
-        with open(param_path, "wb") as f:
-            pickle.dump(saved_model_config, f)
-
         metadata = _collect_task_metadata(
             data_name=data_name,
             missing_rate=missing_rate,
@@ -1535,6 +1586,32 @@ def optimize(
             dataset_source=dataset_source,
             dataset_npz=dataset_npz,
         )
+        saved_model_config = _normalize_param_config_for_save(
+            model_name,
+            model_config,
+            search_profile=search_profile,
+            artifact_identity=artifact_identity,
+            search_provenance=_build_search_provenance(
+                num_samples=num_samples,
+                max_num_epochs=max_num_epochs,
+                execution_backend="local-single",
+                search_algorithm="local-single",
+                search_algorithm_seed=SEED,
+            ),
+        )
+        saved_model_config["timestamp_summary"] = metadata["timestamp_summary"]
+        saved_model_config["param_hash"] = compute_param_config_hash(saved_model_config)
+        os.makedirs(os.path.join(param_root, data_name), exist_ok=True)
+        out_name = _build_param_artifact_name(
+            data_name,
+            model_name,
+            search_policy=search_policy,
+            search_repeat=search_repeat,
+            task=task,
+        )
+        param_path = os.path.join(param_root, data_name, out_name)
+        with open(param_path, "wb") as f:
+            pickle.dump(saved_model_config, f)
 
         return {
             "best_trial": None,
@@ -1566,6 +1643,7 @@ def optimize(
             "train_missing_summary": metadata["train_missing_summary"],
             "target_spec": metadata["target_spec"],
             "target_source": metadata["target_source"],
+            "timestamp_summary": metadata["timestamp_summary"],
             "dataset_source": str(dataset_source),
             "dataset_npz": None if dataset_npz is None else str(dataset_npz),
         }
@@ -1658,8 +1736,22 @@ def optimize(
         raise_on_failed_trial=False,
     )
     
-    best_trial = result.get_best_trial("loss", "min", "last")
+    require_completed_trial = search_repeat == SINGLE_SEARCH_REPEAT
+    best_trial = _select_best_ray_trial(
+        result,
+        max_num_epochs=max_num_epochs,
+        require_completed=require_completed_trial,
+    )
     if best_trial is None:
+        if require_completed_trial:
+            LOGGER.error(
+                "No successful Ray trial reached max_t=%d with finite loss dataset=%s model=%s. "
+                "Check ASHA pruning/resource failures or lower --max-num-epochs.",
+                max_num_epochs,
+                data_name,
+                model_name,
+            )
+            return None
         LOGGER.error(
             "No successful trial with finite loss dataset=%s model=%s. "
             "Check --device/--ray-gpu and runtime resources.",
@@ -1675,7 +1767,12 @@ def optimize(
         )
         return None
     LOGGER.info("Best trial config: %s", best_trial.config)
-    LOGGER.info("Best trial final validation loss: %s", best_trial.last_result["loss"])
+    LOGGER.info(
+        "Best trial final validation loss: %s iteration=%s completion_required=%s",
+        best_trial.last_result["loss"],
+        _trial_reported_iteration(best_trial),
+        require_completed_trial,
+    )
     
     # save params
     os.makedirs(os.path.join(param_root, data_name), exist_ok=True)
@@ -1702,6 +1799,8 @@ def optimize(
             search_algorithm_seed=SEED,
         ),
     )
+    saved_param_config["timestamp_summary"] = metadata["timestamp_summary"]
+    saved_param_config["param_hash"] = compute_param_config_hash(saved_param_config)
     with open(param_path, 'wb') as f:
         pickle.dump(saved_param_config, f)
 
@@ -1751,6 +1850,7 @@ def optimize(
         "train_missing_summary": metadata["train_missing_summary"],
         "target_spec": metadata["target_spec"],
         "target_source": metadata["target_source"],
+        "timestamp_summary": metadata["timestamp_summary"],
         "dataset_source": str(dataset_source),
         "dataset_npz": None if dataset_npz is None else str(dataset_npz),
     }
@@ -1885,6 +1985,16 @@ def main():
                         skipped.append({"dataset": data_name, "model": model_name, "task": args.task, "reason": reason})
                         policy_violations.append(f"{data_name}/{model_name}: {reason}")
                         continue
+                    existing_seed = existing_cfg.get("search_algorithm_seed")
+                    if existing_seed is None or int(existing_seed) != int(SEED):
+                        reason = (
+                            "param artifact search_algorithm_seed mismatch "
+                            f"(found={existing_seed!r}, expected={int(SEED)!r})"
+                        )
+                        LOGGER.error("[FAIL] %s/%s: %s", data_name, model_name, reason)
+                        skipped.append({"dataset": data_name, "model": model_name, "task": args.task, "reason": reason})
+                        policy_violations.append(f"{data_name}/{model_name}: {reason}")
+                        continue
                     LOGGER.info("Params file already exists: %s/%s (reusing)", data_name, out_name)
                     reused_records.append(
                         {
@@ -1897,6 +2007,7 @@ def main():
                             "missing_rate": float(args.missing_rate),
                             "task": args.task,
                             "target_source": args.target_source,
+                            "timestamp_summary": existing_cfg.get("timestamp_summary"),
                             "search_profile": existing_profile,
                             "search_contract": existing_cfg.get("search_contract", existing_contract["search_contract"]),
                             "search_family": existing_cfg.get("search_family", existing_contract["search_family"]),
@@ -1975,6 +2086,7 @@ def main():
                         "target_source": str(search_result["target_source"]),
                         "train_missing_summary": search_result["train_missing_summary"],
                         "target_spec": search_result["target_spec"],
+                        "timestamp_summary": search_result["timestamp_summary"],
                         "split_path": str(search_result["split_path"]),
                         "param_path": str(search_result["param_path"]),
                         "param_hash": str(search_result["param_hash"]),

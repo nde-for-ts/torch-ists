@@ -35,7 +35,7 @@ Current limitations:
 
 - registering a new dataset catalog entry inside the package
 - preserving the original UCR/UEA train/test split in the packaged benchmark loader
-- per-sample timestamp grids in packaged model forward calls
+- per-sample timestamp solver grids in packaged model forward calls
 - bundled benchmark runner scripts; orchestration scripts are not part of the public package payload
 
 ## 2. Input Data Format
@@ -46,7 +46,7 @@ All supported data paths use this array format:
 |---|---|---|---|
 | `X` | `[N, D, L]` | yes | `N` samples, `D` feature channels, `L` time steps. Use `float32` where possible. |
 | `y` | `[N]` | yes | One label per sample for the stable classification workflow. Integer labels are recommended. |
-| `timestamps` | `[N, L]` | optional | Stored by `DataLoader`, but not consumed by the included script pipeline. |
+| `timestamps` | `[N, L]` | optional | Stored by `DataLoader`; source-checkout scripts validate and record it in NPZ runs when present. |
 
 Missing values should be represented as `NaN`. For variable-length series, pad shorter series to a fixed `L` with `NaN`; `preprocess` builds the observed-value mask from those `NaN` positions.
 
@@ -58,6 +58,7 @@ Missing values should be represented as `NaN`. For variable-length series, pad s
 | In-memory NumPy arrays | `DataLoader.from_numpy(X, y)` | `X [N,D,L]`, `y [N]`, optional `timestamps [N,L]`. |
 | Long-format pandas data frame | `DataLoader.from_dataframe(...)` | Groups by `series_id` by default, sorts each group by `time_col`, pads with `NaN`. |
 | NPZ file from Python | `DataLoader.from_file("data.npz")` | Accepts `X`/`y` or `x`/`Y`; optional `timestamps`. |
+| NPZ file in source-checkout scripts | `--dataset-source npz --dataset-npz data/ToyDataset.npz` | Accepts `X`/`y` or `x`/`Y`; optional `timestamps [N,L]` are validated and recorded. |
 
 `get_data` pools UCR/UEA TRAIN+TEST before the project split is created. See [API Reference §3](api_reference.md#3-data-loading-api) for the legacy-mode caveats and full schema.
 
@@ -114,8 +115,10 @@ save_splits(path, train_idx, valid_idx, test_idx)
 |---|---|---|
 | `X_missing` | `[N,L,D]` | values with `NaN` at missing positions |
 | `X_mask` | `[N,L,D]` | 1.0 observed, 0.0 missing |
-| `X_delta` | `[N,L,D]` | index-based steps since last observation (not timestamp-aware) |
+| `X_delta` | `[N,L,D]` | steps since last observation; source-checkout NPZ runs use timestamp-normalized deltas when `timestamps [N,L]` are present |
 | `coeffs` | model-dependent | interpolation coefficients |
+
+Continuous-time interpolation coefficients still use the package's normalized sequence grid.
 
 When `model_name` is supplied, `interpolate` and `use_intensity` default to `get_data_config(model_name)`; explicit kwargs override.
 
