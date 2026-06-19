@@ -16,8 +16,8 @@ def apply_advanced_cde_solver_defaults(
 ) -> dict[str, Any]:
     """Apply the package runtime defaults for promoted advanced-CDE models.
 
-    The vendored ANCDE/EXIT/LEAP low-level modules preserve upstream-style
-    integer-grid fallbacks, including rk4 step_size=1.0 branches. Package
+    The ANCDE/EXIT/LEAP low-level modules preserve upstream-style integer-grid
+    fallbacks, including rk4 step_size=1.0 branches. Package
     preprocessing builds coefficients on normalized [0, 1] times, so the
     active wrappers prefill a data-driven fixed-grid step size before those
     provenance-only fallbacks can fire.

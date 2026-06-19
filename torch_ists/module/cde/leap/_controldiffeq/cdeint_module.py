@@ -94,7 +94,7 @@ def cdeint(dX_dt, z0, func, t, adjoint=True, **kwargs):
         # Preserve the upstream LEAP integer-grid rk4 default for provenance.
         # The current deployment/release handler now aligns LEAP forward times to
         # the normalized coeff time base, so this fixed step_size only describes
-        # the vendored upstream-style branch, not the active runtime time scale.
+        # the upstream-style branch, not the active runtime time scale.
         kwargs["options"].setdefault("step_size", 1.0)
 
     control_gradient = dX_dt(torch.zeros(1, dtype=z0.dtype, device=z0.device))
@@ -164,7 +164,7 @@ def cdeint_Learnable(
         # Preserve the upstream LEAP integer-grid rk4 default for provenance.
         # The current deployment/release handler now aligns LEAP forward times to
         # the normalized coeff time base, so this fixed step_size only describes
-        # the vendored upstream-style branch, not the active runtime time scale.
+        # the upstream-style branch, not the active runtime time scale.
         kwargs["options"].setdefault("step_size", 1.0)
 
     if kwargs["method"] == "sym12async":

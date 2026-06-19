@@ -50,7 +50,7 @@ class ODEHandler(BaseHandler):
     ) -> list[str]:
         explicit: list[str] = []
         for key in cls._INERT_SOLVER_KEYS:
-            if key in direct or key in model_params:
+            if direct.get(key) is not None or model_params.get(key) is not None:
                 explicit.append(key)
 
         for key in ("options", "solver_options"):

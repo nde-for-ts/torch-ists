@@ -1,4 +1,4 @@
-"""Handler for repo-backed ODE-family source variants."""
+"""Handler for source ODE method variants."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ from ..module.ode import (
 
 
 class SourceODEHandler(BaseHandler):
-    """Handler for repo-backed ODE-family source variants."""
+    """Handler for source ODE method variants."""
 
     name: str = "ode"
 
