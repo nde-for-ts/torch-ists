@@ -56,10 +56,11 @@ All three scripts also write JSON run logs under `evidence/`.
 - Older width/depth-only settings are accepted only for compatibility.
 
 **Environment variable**:
-- `TORCH_ISTS_RUNTIME_ROOT` (optional) — override the runtime root when running the scripts from outside the package directory.
+- `TORCH_ISTS_RUNTIME_ROOT` (optional) — override the runtime root for custom source-checkout layouts.
 - `TORCH_ISTS_DATA_ROOT` (optional) — override the built-in UCR/UEA archive root used by `--dataset-source default`.
 
 - `--help` works from a repository checkout with `PYTHONPATH=.`.
+- Local dataset, split, parameter, target, and evidence paths are resolved to absolute paths before Ray workers start.
 
 ---
 

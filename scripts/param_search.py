@@ -92,6 +92,12 @@ def _parse_csv_list(raw):
     return items or None
 
 
+def _abspath_or_none(path):
+    if path is None:
+        return None
+    return os.path.abspath(os.path.expanduser(str(path)))
+
+
 def _normalize_dataset_source_arg(raw: str) -> str:
     try:
         return normalize_dataset_source(raw)
@@ -411,6 +417,11 @@ def parse_cli_args():
             parser.error("--dataset-npz is required when --dataset-source=npz")
         if len(args.datasets) != 1:
             parser.error("--dataset-source=npz requires exactly one dataset in --datasets")
+    args.split_root = os.path.abspath(os.path.expanduser(str(args.split_root)))
+    args.param_root = os.path.abspath(os.path.expanduser(str(args.param_root)))
+    args.contract_dir = os.path.abspath(os.path.expanduser(str(args.contract_dir)))
+    args.targets_root = os.path.abspath(os.path.expanduser(str(args.targets_root)))
+    args.dataset_npz = _abspath_or_none(args.dataset_npz)
     return args
 
 # setup seed
@@ -1287,6 +1298,11 @@ def _train_single_seed(
         valid_loss = evaluate(
             model_name, model, criterion, valid_batch, interpolate, use_intensity, trial_device, task=task
         )
+        if not np.isfinite(valid_loss):
+            raise RuntimeError(
+                f"Validation loss became non-finite for dataset={data_name} "
+                f"model={model_name} seed={seed} epoch={e}: {valid_loss!r}"
+            )
 
         if e % 10 == 0:
             LOGGER.info(
@@ -1448,6 +1464,10 @@ def optimize(
     dataset_source="default",
     dataset_npz=None,
 ):
+    split_root = os.path.abspath(os.path.expanduser(str(split_root)))
+    param_root = os.path.abspath(os.path.expanduser(str(param_root)))
+    targets_root = os.path.abspath(os.path.expanduser(str(targets_root)))
+    dataset_npz = _abspath_or_none(dataset_npz)
     search_space = resolve_model_search_space(model_name, search_profile)
     search_profile = search_space["search_profile"]
     dataset_payload = load_dataset_payload(
@@ -1797,6 +1817,19 @@ def optimize(
     )
 
     param_path = os.path.join(param_root, data_name, out_name)
+    metadata = _collect_task_metadata(
+        data_name=data_name,
+        missing_rate=missing_rate,
+        model_name=model_name,
+        split_root=split_root,
+        seed=metadata_seed,
+        task=task,
+        forecast_horizon=forecast_horizon,
+        target_source=target_source,
+        targets_root=targets_root,
+        dataset_source=dataset_source,
+        dataset_npz=dataset_npz,
+    )
     saved_param_config = _normalize_param_config_for_save(
         model_name,
         best_trial.config,
@@ -1816,20 +1849,6 @@ def optimize(
         pickle.dump(saved_param_config, f)
 
     LOGGER.info("Params saved to %s (repeat=%s)", param_path, search_repeat)
-
-    metadata = _collect_task_metadata(
-        data_name=data_name,
-        missing_rate=missing_rate,
-        model_name=model_name,
-        split_root=split_root,
-        seed=metadata_seed,
-        task=task,
-        forecast_horizon=forecast_horizon,
-        target_source=target_source,
-        targets_root=targets_root,
-        dataset_source=dataset_source,
-        dataset_npz=dataset_npz,
-    )
 
     return {
         "best_trial": best_trial,

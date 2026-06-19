@@ -60,6 +60,8 @@ Missing values should be represented as `NaN`. For variable-length series, pad s
 | NPZ file from Python | `DataLoader.from_file("data.npz")` | Accepts `X`/`y` or `x`/`Y`; optional `timestamps`. |
 | NPZ file in source-checkout scripts | `--dataset-source npz --dataset-npz data/ToyDataset.npz` | Accepts `X`/`y` or `x`/`Y`; optional `timestamps [N,L]` are validated and recorded. |
 
+The source-checkout script chain resolves local file and artifact roots to absolute paths before multi-worker parameter search starts. See [Scripts Reference](scripts_reference.md) for the full split/search/run command surface.
+
 `get_data` pools UCR/UEA TRAIN+TEST before the project split is created. See [API Reference §3](api_reference.md#3-data-loading-api) for the legacy-mode caveats and full schema.
 
 ## 4. Build a User-Provided NPZ Dataset

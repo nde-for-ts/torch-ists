@@ -207,12 +207,23 @@ def _clear_incompatible_runtime_submodules(runtime_roots: list[Path]) -> None:
 def configure_runtime_paths(caller_file: str | Path) -> Path:
     """Ensure packaged runtime resolution for script execution."""
     caller_path = Path(caller_file).resolve()
-    repo_root = caller_path.parents[2]
-    release_root = repo_root / "release"
-    scripts_root = release_root / "scripts"
-    runtime_root = Path(
-        os.environ.get("TORCH_ISTS_RUNTIME_ROOT", str(release_root))
-    ).resolve()
+    source_repo_root = caller_path.parents[2]
+    source_release_root = source_repo_root / "release"
+    public_checkout_root = caller_path.parents[1]
+    env_runtime_root = os.environ.get("TORCH_ISTS_RUNTIME_ROOT")
+    if env_runtime_root:
+        runtime_root = Path(env_runtime_root).resolve()
+        repo_root = source_repo_root
+    elif (source_release_root / "torch_ists" / "__init__.py").exists():
+        runtime_root = source_release_root.resolve()
+        repo_root = source_repo_root
+    elif (public_checkout_root / "torch_ists" / "__init__.py").exists():
+        runtime_root = public_checkout_root.resolve()
+        repo_root = public_checkout_root.resolve()
+    else:
+        runtime_root = source_release_root.resolve()
+        repo_root = source_repo_root
+    scripts_root = runtime_root / "scripts"
 
     for path in (runtime_root, repo_root, scripts_root):
         path_str = str(path)
@@ -895,6 +906,8 @@ def resolve_dataset_fixed_batch_policy(
         "seq_len": int(seq_len),
         "sample_elements": int(sample_elements),
         "memory_cap": int(memory_cap),
+        "memory_cap_respected": bool(batch_size <= memory_cap),
+        "singleton_remainder_unresolved": bool(last_batch_size == 1 and train_n > batch_size),
         "drop_last": False,
         "last_batch_size": int(last_batch_size),
         "singleton_last_batch": bool(last_batch_size == 1 and train_n > batch_size),
