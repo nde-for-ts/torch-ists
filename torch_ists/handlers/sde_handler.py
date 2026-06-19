@@ -188,6 +188,7 @@ class SDEHandler(BaseHandler):
         if coeffs is None:
             raise ValueError("SDE models require interpolation coeffs.")
 
+        data = self.preprocess_input(seq, times)
         device = next(model.parameters()).device
         coeffs = coeffs.to(device)
         times = times.to(device)
@@ -233,8 +234,8 @@ class SDEHandler(BaseHandler):
         if out.dim() == 2:
             out = out.unsqueeze(1)
         if hn.dim() == 3:
-            hn = hn[:, -1, :]
+            hn = self.gather_output_at_index(hn, data["final_index"])
         elif hn.dim() != 2:
-            hn = out[:, -1, :]
+            hn = self.gather_output_at_index(out, data["final_index"])
 
         return out, hn

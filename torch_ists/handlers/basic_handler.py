@@ -229,15 +229,15 @@ class BasicHandler(BaseHandler):
 
         # Route to appropriate forward helper based on model_name
         if model_name == 'cnn':
-            return self._forward_cnn(model, x)
+            return self._forward_cnn(model, x, data['final_index'])
         elif model_name == 'gru-simple':
-            return self._forward_gru_simple(model, seq, strategy)
+            return self._forward_gru_simple(model, seq, data['final_index'], strategy)
         elif model_name in ('plstm', 'tlstm'):
-            return self._forward_time_aware(model, x, data['seq_delta'])
+            return self._forward_time_aware(model, x, data['seq_delta'], data['final_index'])
         elif model_name == 'tglstm':
-            return self._forward_tglstm(model, x, data['seq_delta'])
+            return self._forward_tglstm(model, x, data['seq_delta'], data['final_index'])
         else:  # rnn, lstm, gru, bilstm
-            return self._forward_rnn(model, x)
+            return self._forward_rnn(model, x, data['final_index'])
 
     # ══════════════════════════════════════════════════════════════════
     # Forward Pass Helpers
@@ -275,7 +275,7 @@ class BasicHandler(BaseHandler):
 
         return hn
 
-    def _forward_cnn(self, model, x):
+    def _forward_cnn(self, model, x, final_index):
         """Forward pass for CNN models.
 
         Args:
@@ -286,10 +286,10 @@ class BasicHandler(BaseHandler):
             tuple: (out, hn) where out is [N, L, H] and hn is [N, H]
         """
         out = model(x)  # CNNBackbone returns out only
-        hn = out[:, -1, :]  # Handler extracts hn
+        hn = self.gather_output_at_index(out, final_index)
         return out, hn
 
-    def _forward_rnn(self, model, x):
+    def _forward_rnn(self, model, x, final_index):
         """Forward pass for RNN/LSTM/GRU/BiLSTM models.
 
         Args:
@@ -300,11 +300,10 @@ class BasicHandler(BaseHandler):
             tuple: (out, hn) where out is [N, L, H] and hn is [N, H]
         """
         out, hn = model(x)
-        bidirectional = getattr(model, 'bidirectional', False)
-        hn = self._normalize_hidden(hn, bidirectional)
+        hn = self.gather_output_at_index(out, final_index)
         return out, hn
 
-    def _forward_gru_simple(self, model, seq, strategy="zero"):
+    def _forward_gru_simple(self, model, seq, final_index, strategy="zero"):
         """Forward pass for gru-simple (concatenated input).
 
         gru-simple concatenates all 3 channels [N, 3, D, L] → [N, L, 3*D]
@@ -329,10 +328,10 @@ class BasicHandler(BaseHandler):
 
         # Forward pass
         out, hn = model(x_concat)
-        hn = self._normalize_hidden(hn)
+        hn = self.gather_output_at_index(out, final_index)
         return out, hn
 
-    def _forward_time_aware(self, model, x, seq_delta):
+    def _forward_time_aware(self, model, x, seq_delta, final_index):
         """Forward pass for TLSTM/PLSTM models.
 
         Args:
@@ -347,10 +346,10 @@ class BasicHandler(BaseHandler):
 
         seq_delta = apply_imputation(seq_delta, "zero")
         out, (hn, _cn) = model(x, seq_delta)
-        hn = self._normalize_hidden(hn)
+        hn = self.gather_output_at_index(out, final_index)
         return out, hn
 
-    def _forward_tglstm(self, model, x, seq_delta):
+    def _forward_tglstm(self, model, x, seq_delta, final_index):
         """Forward pass for TGLSTM with sequence-first input contract.
 
         TGLSTM expects [L, N, D] input and [L, N, 1] time input.
@@ -362,7 +361,7 @@ class BasicHandler(BaseHandler):
             x.permute(1, 0, 2),
             seq_delta.unsqueeze(-1).permute(1, 0, 2),
         )
-        hn = self._normalize_hidden(hn)
+        hn = self.gather_output_at_index(out, final_index)
         return out, hn
 
 

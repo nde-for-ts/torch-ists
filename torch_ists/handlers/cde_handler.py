@@ -333,6 +333,7 @@ class CDEHandler(BaseHandler):
         hn: torch.Tensor,
         batch_size: int,
         time_steps: int,
+        final_index: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         out = self._normalize_sequence_layout(out, batch_size, time_steps)
         hn = self._normalize_sequence_layout(hn, batch_size, time_steps)
@@ -340,9 +341,9 @@ class CDEHandler(BaseHandler):
         if out.dim() == 2:
             out = out.unsqueeze(1)
         if hn.dim() == 3:
-            hn = hn[:, -1, :]
+            hn = self.gather_output_at_index(hn, final_index)
         elif hn.dim() != 2:
-            hn = out[:, -1, :]
+            hn = self.gather_output_at_index(out, final_index)
         return out, hn
 
     def forward(
@@ -365,12 +366,16 @@ class CDEHandler(BaseHandler):
             # package builds coeffs on normalized [0, 1] times. Keep forward-time
             # semantics aligned with the packaged coeffs here.
             out, hn, loss = model(times, coeffs, data["final_index"], **call_kwargs)
-            out, hn = self._normalize_outputs(out, hn, seq.shape[0], data["x"].shape[1])
+            out, hn = self._normalize_outputs(
+                out, hn, seq.shape[0], data["x"].shape[1], data["final_index"]
+            )
             return out, hn, loss
 
         if model_name == "exit":
             out, hn, reg = model(times, coeffs, data["final_index"], **call_kwargs)
-            out, hn = self._normalize_outputs(out, hn, seq.shape[0], data["x"].shape[1])
+            out, hn = self._normalize_outputs(
+                out, hn, seq.shape[0], data["x"].shape[1], data["final_index"]
+            )
             return out, hn, reg
 
         if model_name.startswith("neuralrde-"):
@@ -384,9 +389,13 @@ class CDEHandler(BaseHandler):
                 depth=depth,
                 **call_kwargs,
             )
-            out, hn = self._normalize_outputs(out, hn, seq.shape[0], data["x"].shape[1])
+            out, hn = self._normalize_outputs(
+                out, hn, seq.shape[0], data["x"].shape[1], data["final_index"]
+            )
             return out, hn
 
         out, hn = model(times, coeffs, data["final_index"], **call_kwargs)
-        out, hn = self._normalize_outputs(out, hn, seq.shape[0], data["x"].shape[1])
+        out, hn = self._normalize_outputs(
+            out, hn, seq.shape[0], data["x"].shape[1], data["final_index"]
+        )
         return out, hn

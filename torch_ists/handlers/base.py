@@ -313,5 +313,25 @@ class BaseHandler(ABC):
         final_index = torch.where(observed, time_index, missing_index).amax(dim=1)
         return torch.clamp(final_index, min=0)
 
+    @staticmethod
+    def gather_output_at_index(
+        out: torch.Tensor,
+        final_index: torch.Tensor,
+    ) -> torch.Tensor:
+        """Gather a batch of sequence outputs at last observed indices."""
+        if out.dim() != 3:
+            raise ValueError(f"Expected [N, L, H] output, got shape {tuple(out.shape)}")
+        if final_index.dim() != 1:
+            final_index = final_index.reshape(-1)
+        if final_index.shape[0] != out.shape[0]:
+            raise ValueError(
+                "final_index batch size does not match output batch size: "
+                f"{final_index.shape[0]} != {out.shape[0]}"
+            )
+        index = final_index.to(device=out.device, dtype=torch.long)
+        index = torch.clamp(index, min=0, max=out.shape[1] - 1)
+        batch = torch.arange(out.shape[0], device=out.device)
+        return out[batch, index, :]
+
 
 __all__ = ['BaseHandler']

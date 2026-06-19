@@ -129,9 +129,13 @@ class AttentionHandler(BaseHandler):
                 result = model(x)
             if isinstance(result, tuple) and len(result) == 2:
                 out, hn = result
+                if hn.dim() == 3:
+                    hn = self.gather_output_at_index(hn, data["final_index"])
+                elif hn.dim() != 2 and out.dim() == 3:
+                    hn = self.gather_output_at_index(out, data["final_index"])
             else:
                 out = result
-                hn = out[:, -1, :] if out.dim() == 3 else out
+                hn = self.gather_output_at_index(out, data["final_index"]) if out.dim() == 3 else out
             return out, hn
 
         if model_name in {"mtan", "miam"}:
