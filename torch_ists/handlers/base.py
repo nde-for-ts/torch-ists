@@ -269,8 +269,9 @@ class BaseHandler(ABC):
         # Create timestamps: [L] -> [N, L]
         seq_ts = times.unsqueeze(0).repeat(N, 1)
 
-        # Use the terminal sequence index. Missingness is represented by mask/delta
-        # channels; it must not shorten the continuous-time evaluation horizon.
+        # Use the last observed timestep. This preserves ragged NaN-padding
+        # boundaries while avoiding the old count-1 compression bug under
+        # internal missingness.
         final_index = self.get_final_index(seq_mask, L)
 
         return {
@@ -286,25 +287,31 @@ class BaseHandler(ABC):
         seq_mask: torch.Tensor,
         seq_len: Optional[int] = None
     ) -> torch.Tensor:
-        """Compute the terminal sequence index for each sample.
+        """Compute the last observed sequence index for each sample.
 
-        Reference: torch_ists/_layer.py L542
+        This uses observed positions, not observed-count indexing. That keeps
+        ragged tail-NaN padding and scattered internal missingness consistent.
 
         Args:
             seq_mask: [N, L] Observation mask (1=observed, 0=missing)
             seq_len: Optional sequence length
 
         Returns:
-            torch.Tensor: [N] Terminal sequence index for each sample
+            torch.Tensor: [N] Last observed sequence index for each sample
         """
         resolved_len = int(seq_len) if seq_len is not None else int(seq_mask.shape[1])
-        terminal_index = max(resolved_len - 1, 0)
-        return torch.full(
-            (int(seq_mask.shape[0]),),
-            terminal_index,
-            dtype=torch.long,
-            device=seq_mask.device,
-        )
+        if resolved_len <= 0:
+            return torch.zeros((int(seq_mask.shape[0]),), dtype=torch.long, device=seq_mask.device)
+
+        effective_len = min(resolved_len, int(seq_mask.shape[1]))
+        if effective_len <= 0:
+            return torch.zeros((int(seq_mask.shape[0]),), dtype=torch.long, device=seq_mask.device)
+
+        observed = seq_mask[:, :effective_len] > 0
+        time_index = torch.arange(effective_len, dtype=torch.long, device=seq_mask.device).unsqueeze(0)
+        missing_index = torch.full_like(time_index, -1)
+        final_index = torch.where(observed, time_index, missing_index).amax(dim=1)
+        return torch.clamp(final_index, min=0)
 
 
 __all__ = ['BaseHandler']

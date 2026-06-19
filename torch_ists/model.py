@@ -155,6 +155,30 @@ class ists_model(nn.Module):
         """Compatibility alias for older checkpoint layouts."""
         return ists_model._map_checkpoint_keys(state_dict)
 
+    @staticmethod
+    def _last_observed_readout(out: torch.Tensor, seq: torch.Tensor) -> torch.Tensor:
+        """Gather the output state at the last observed timestep per sample."""
+        if out.dim() != 3 or seq.dim() != 4 or seq.shape[1] < 2:
+            return out[:, -1, :] if out.dim() == 3 else out
+
+        time_steps = int(out.shape[1])
+        if time_steps <= 0:
+            raise ValueError("Backbone output must contain at least one timestep.")
+
+        seq_mask = seq[:, 1, :time_steps, :]
+        observed = seq_mask > 0
+        if observed.dim() == 3:
+            observed = observed.any(dim=-1)
+        if observed.shape[1] != time_steps:
+            time_steps = int(observed.shape[1])
+
+        time_index = torch.arange(time_steps, device=observed.device).unsqueeze(0)
+        missing_index = torch.full_like(time_index, -1)
+        final_index = torch.where(observed, time_index, missing_index).amax(dim=1).clamp(min=0)
+        final_index = final_index.to(device=out.device, dtype=torch.long)
+        gather_index = final_index.view(-1, 1, 1).expand(-1, 1, out.size(-1))
+        return out[:, :time_steps, :].gather(dim=1, index=gather_index).squeeze(1)
+
     def load_state_dict(self, state_dict, strict: bool = True):
         remapped = self._map_checkpoint_keys(state_dict)
         return super().load_state_dict(remapped, strict=strict)
@@ -179,17 +203,19 @@ class ists_model(nn.Module):
                 f"got: {type(result).__name__}"
             )
 
+        last_observed = self._last_observed_readout(out, seq)
+
         if self.task == "classification":
-            pred = self.head(out[:, -1, :])
+            pred = self.head(last_observed)
         elif self.task == "regression":
-            pred = self.head(out[:, -1, :])
+            pred = self.head(last_observed)
         elif self.task == "forecasting":
             horizon = min(self.forecast_horizon, out.shape[1])
             pred = self.head(out[:, -horizon:, :])
         elif self.task == "imputation":
             pred = self.head(out)
         elif self.task == "outlier_detection":
-            pred = self.head(out[:, -1, :])
+            pred = self.head(last_observed)
         elif self.task == "change_detection":
             pred = self.head(out)
         else:  # pragma: no cover - guarded by _normalize_task

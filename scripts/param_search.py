@@ -1001,6 +1001,10 @@ def _trial_reported_loss(trial) -> float | None:
     return loss if np.isfinite(loss) else None
 
 
+class SearchNoCompletedTrialError(RuntimeError):
+    """Raised when ASHA prunes every single-repeat trial before max_t."""
+
+
 def _select_best_ray_trial(result, *, max_num_epochs: int, require_completed: bool):
     if not require_completed:
         return result.get_best_trial("loss", "min", "last")
@@ -1744,21 +1748,25 @@ def optimize(
     )
     if best_trial is None:
         if require_completed_trial:
-            LOGGER.error(
+            message = (
                 "No successful Ray trial reached max_t=%d with finite loss dataset=%s model=%s. "
-                "Check ASHA pruning/resource failures or lower --max-num-epochs.",
+                "Check ASHA pruning/resource failures or lower --max-num-epochs."
+            ) % (
                 max_num_epochs,
                 data_name,
                 model_name,
             )
-            return None
-        LOGGER.error(
+            LOGGER.error(message)
+            raise SearchNoCompletedTrialError(message)
+        message = (
             "No successful trial with finite loss dataset=%s model=%s. "
-            "Check --device/--ray-gpu and runtime resources.",
+            "Check --device/--ray-gpu and runtime resources."
+        ) % (
             data_name,
             model_name,
         )
-        return None
+        LOGGER.error(message)
+        raise RuntimeError(message)
     if best_trial.last_result is None or "loss" not in best_trial.last_result:
         LOGGER.error(
             "Best trial exists but no loss is reported dataset=%s model=%s.",
@@ -2113,6 +2121,12 @@ def main():
                         "best_loss": float(search_result["best_loss"]),
                     }
                 )
+            except SearchNoCompletedTrialError as e:
+                reason = str(e)
+                LOGGER.error("[FAIL] %s/%s: %s", data_name, model_name, reason)
+                skipped.append({"dataset": data_name, "model": model_name, "task": args.task, "reason": reason})
+                policy_violations.append(f"{data_name}/{model_name}: {reason}")
+                continue
             except Exception as e:
                 LOGGER.warning("[SKIP] %s/%s: %s", data_name, model_name, e)
                 skipped.append({"dataset": data_name, "model": model_name, "task": args.task, "reason": str(e)})
