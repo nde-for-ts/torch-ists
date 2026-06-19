@@ -352,12 +352,12 @@ def _finalize_preprocess_outputs(
     return X_missing, X_mask, X_delta, coeffs
 
 
-def apply_missingness_refactoring_compat(
+def apply_missingness_compat(
     X: np.ndarray,
     rate: float,
     seed: int = 0,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Reproduce root-refactoring missingness semantics for parity diagnosis only."""
+    """Reproduce reference missingness semantics for compatibility checks only."""
     import torch
 
     _validate_inputs(X, rate)
@@ -573,14 +573,14 @@ def preprocess(
     )
 
 
-def preprocess_refactoring_compat(
+def preprocess_compat(
     X: Any,
     missing_rate: Optional[float] = None,
     interpolate: str = "natural",
     use_intensity: bool = True,
     seed: int = 0,
 ):
-    """Parity-only preprocess helper that matches root-refactoring semantics."""
+    """Compatibility preprocess helper that matches reference semantics."""
     import torch
 
     if isinstance(X, torch.Tensor):
@@ -592,7 +592,7 @@ def preprocess_refactoring_compat(
     _validate_inputs(X_np, rate)
 
     if rate > 0.0:
-        X_missing_np, mask_ndl, delta_ndl = apply_missingness_refactoring_compat(
+        X_missing_np, mask_ndl, delta_ndl = apply_missingness_compat(
             X_np,
             rate=rate,
             seed=seed,
@@ -611,5 +611,5 @@ def preprocess_refactoring_compat(
     )
 
 
-apply_missingness_compat = apply_missingness_refactoring_compat
-preprocess_compat = preprocess_refactoring_compat
+apply_missingness_refactoring_compat = apply_missingness_compat
+preprocess_refactoring_compat = preprocess_compat
