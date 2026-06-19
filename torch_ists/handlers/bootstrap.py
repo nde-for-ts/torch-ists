@@ -23,6 +23,7 @@ _OPTIONAL_DEPENDENCY_HINTS = {
     "torchcde": "Install `torchcde` or use `pip install \"torch-ists[all]\"`.",
     "torchsde": "Install `torchsde` or use `pip install \"torch-ists[all]\"`.",
     "torchdyn": "Install `torchdyn` or use `pip install \"torch-ists[ode]\"`.",
+    "signatory": "Install from source with `pip install -e .[signatory]`; the PyPI wheel is torch-version-pinned.",
     "stribor": "Install `stribor==0.1.0` only for guarded flow-family NFE backends.",
 }
 
@@ -69,22 +70,37 @@ class _LazyHandlerProxy(BaseHandler):
     def can_handle(self, model_name: str) -> bool:
         return model_name in self._supported_models
 
+    def _call_handler(self, method_name: str, *args, **kwargs):
+        try:
+            return getattr(self._load_handler(), method_name)(*args, **kwargs)
+        except ModuleNotFoundError as exc:
+            raise _build_optional_dependency_error(self.name, exc) from exc
+
     def create_model(self, model_name, config, device):
-        return self._load_handler().create_model(model_name, config, device)
+        return self._call_handler("create_model", model_name, config, device)
 
     def forward(self, model, seq, coeffs, times, **kwargs):
-        return self._load_handler().forward(model, seq, coeffs, times, **kwargs)
+        return self._call_handler("forward", model, seq, coeffs, times, **kwargs)
 
     @property
     def returns_loss(self) -> bool:
-        return self._load_handler().returns_loss
+        try:
+            return self._load_handler().returns_loss
+        except ModuleNotFoundError as exc:
+            raise _build_optional_dependency_error(self.name, exc) from exc
 
     @property
     def uses_filled(self) -> bool:
-        return bool(getattr(self._load_handler(), "uses_filled", False))
+        try:
+            return bool(getattr(self._load_handler(), "uses_filled", False))
+        except ModuleNotFoundError as exc:
+            raise _build_optional_dependency_error(self.name, exc) from exc
 
     def __getattr__(self, name: str):
-        return getattr(self._load_handler(), name)
+        try:
+            return getattr(self._load_handler(), name)
+        except ModuleNotFoundError as exc:
+            raise _build_optional_dependency_error(self.name, exc) from exc
 
 
 def bootstrap_handler_registry() -> None:

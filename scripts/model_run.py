@@ -20,11 +20,14 @@ import urllib.request
 import zipfile
 
 import numpy as np
-import pandas as pd
 import sklearn.model_selection
 from sklearn.metrics import *
 
-from tqdm import tqdm
+try:
+    from tqdm import tqdm
+except ModuleNotFoundError:  # pragma: no cover - exercised in minimal installs
+    def tqdm(iterable, *args, **kwargs):
+        return iterable
 
 import torch
 import torch.nn.functional as F
@@ -1231,6 +1234,7 @@ def _build_result_payload(
     robustness_axes=None,
     output_contract=None,
     timestamp_summary=None,
+    aux_nan_event_count=0,
 ):
     resolved_regime = str(evaluation_regime or mode)
     resolved_mode = resolved_regime if str(mode).strip().lower() == "standard" else str(mode)
@@ -1249,6 +1253,7 @@ def _build_result_payload(
         "lr_policy": lr_policy,
         "robustness_axes": robustness_axes,
         "timestamp_summary": timestamp_summary,
+        "aux_nan_event_count": int(aux_nan_event_count),
     }
     if output_contract is not None:
         meta["output_contract"] = output_contract
@@ -1266,6 +1271,11 @@ def _build_result_payload(
         "evaluations": evaluations,
         "meta": meta,
     }
+
+
+def _get_aux_nan_event_count(model):
+    seq_layer = getattr(model, "seq_layer", None)
+    return int(getattr(seq_layer, "aux_nan_event_count", 0))
 
 
 def run_model(
@@ -1639,6 +1649,12 @@ def run_model(
                 valid_loss,
             )
 
+        if not np.isfinite(valid_loss):
+            raise RuntimeError(
+                f"Validation loss became non-finite for {data_name}/{model_name} "
+                f"at epoch {e}: {valid_loss!r}."
+            )
+
         if valid_loss < best_loss:
             best_loss = valid_loss
             best_model_wts = copy.deepcopy(model.state_dict())
@@ -1711,6 +1727,7 @@ def run_model(
             robustness_axes=robustness_axes,
             output_contract=output_contract,
             timestamp_summary=timestamp_summary,
+            aux_nan_event_count=_get_aux_nan_event_count(model),
         )
         payload.update(param_search_contract)
 
@@ -1933,6 +1950,7 @@ def run_model(
         lr_policy=lr_policy,
         output_contract=output_contract,
         timestamp_summary=timestamp_summary,
+        aux_nan_event_count=_get_aux_nan_event_count(model),
     )
     payload.update(param_search_contract)
     with open(output_path, 'wb') as f:

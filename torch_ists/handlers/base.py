@@ -262,9 +262,14 @@ class BaseHandler(ABC):
         # Extract data: [N, D, L] -> [N, L, D]
         x = seq[:, 0, :, :].permute(0, 2, 1)
 
-        # Extract mask and delta: [N, D, L] -> [N, L] (take first dim)
-        seq_mask = seq[:, 1, 0, :]
-        seq_delta = seq[:, 2, 0, :]
+        # Collapse per-channel observation metadata to a sequence-level view.
+        # Older code used channel 0, but public task heads use any-channel
+        # last-observed readout; keeping these aligned avoids silent truncation
+        # on asynchronous multivariate inputs.
+        mask_nld = seq[:, 1, :, :].permute(0, 2, 1)
+        delta_nld = seq[:, 2, :, :].permute(0, 2, 1)
+        seq_mask = (mask_nld > 0).any(dim=-1).to(seq.dtype)
+        seq_delta = self.reduce_sequence_delta(delta_nld)
 
         # Create timestamps: [L] -> [N, L]
         seq_ts = times.unsqueeze(0).repeat(N, 1)
@@ -312,6 +317,20 @@ class BaseHandler(ABC):
         missing_index = torch.full_like(time_index, -1)
         final_index = torch.where(observed, time_index, missing_index).amax(dim=1)
         return torch.clamp(final_index, min=0)
+
+    @staticmethod
+    def reduce_sequence_delta(delta: torch.Tensor) -> torch.Tensor:
+        """Collapse channel-wise deltas to a sequence-level scalar delta."""
+        if delta.dim() != 3:
+            return delta
+        finite_delta = torch.nan_to_num(
+            delta,
+            nan=float("inf"),
+            posinf=float("inf"),
+            neginf=0.0,
+        ).clamp_min(0.0)
+        seq_delta = finite_delta.amin(dim=-1)
+        return torch.where(torch.isfinite(seq_delta), seq_delta, torch.zeros_like(seq_delta))
 
     @staticmethod
     def gather_output_at_index(

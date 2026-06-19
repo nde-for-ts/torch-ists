@@ -15,9 +15,9 @@ def TLSTM(input_size, hidden_size, num_layers,
         assert batch_first
         assert not bidirectional
         
-        return StackedLSTM(num_layers, TimeLSTM, 
-                          first_layer_args=[input_size, hidden_size, dropout],
-                          other_layer_args=[hidden_size, hidden_size, dropout]
+        return StackedLSTM(num_layers, TimeLSTM,
+                          first_layer_args=[input_size, hidden_size, False, dropout],
+                          other_layer_args=[hidden_size, hidden_size, False, dropout]
                           )
 
 class TimeLSTM(nn.Module):
@@ -30,7 +30,8 @@ class TimeLSTM(nn.Module):
         self.U_all = nn.Linear(input_size, hidden_size * 4)
         self.W_d = nn.Linear(hidden_size, hidden_size)
         self.bidirectional = bidirectional
-        self.dropout = dropout
+        self.dropout = float(dropout) if dropout else 0.0
+        self.dropout_layer = nn.Dropout(self.dropout) if self.dropout else None
 
     def forward(self, inputs, timestamps, state=None, reverse=False):
         # inputs: [b, seq, embed]
@@ -63,10 +64,10 @@ class TimeLSTM(nn.Module):
             outputs.reverse()
         outputs = torch.stack(outputs, 1)
         
-        if self.dropout:
-            outputs = nn.Dropout(self.dropout)(outputs)
-            h = nn.Dropout(self.dropout)(h)
-            c = nn.Dropout(self.dropout)(c)
+        if self.dropout_layer is not None:
+            outputs = self.dropout_layer(outputs)
+            h = self.dropout_layer(h)
+            c = self.dropout_layer(c)
                 
         return outputs, (h, c)
     

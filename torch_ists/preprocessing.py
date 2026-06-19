@@ -131,10 +131,15 @@ def _build_mar_probability(
     feature_mean = _safe_nanmean_array(X, axis=2, keepdims=True)
     reference_feature_mean = _safe_nanmean_array(reference, axis=2, keepdims=True)
     centered = feature_mean - _safe_nanmean_scalar(reference_feature_mean)
-    logits = centered / (_safe_nanstd_scalar(reference_feature_mean) + 1e-8)
+    reference_centered = reference_feature_mean - _safe_nanmean_scalar(reference_feature_mean)
+    reference_scale = _safe_nanstd_scalar(reference_feature_mean) + 1e-8
+    logits = centered / reference_scale
+    reference_logits = reference_centered / reference_scale
     probs = _sigmoid(logits)
+    reference_probs = _sigmoid(reference_logits)
     probs = np.nan_to_num(probs, nan=0.0, posinf=0.99, neginf=0.0)
-    probs = probs / (_safe_nanmean_scalar(probs, default=1.0) + 1e-8) * rate
+    reference_probs = np.nan_to_num(reference_probs, nan=0.0, posinf=0.99, neginf=0.0)
+    probs = probs / (_safe_nanmean_scalar(reference_probs, default=1.0) + 1e-8) * rate
     return np.clip(probs, 0.0, 0.99)
 
 
@@ -145,10 +150,15 @@ def _build_mnar_probability(
 ) -> np.ndarray:
     # Value-dependent missingness probability.
     reference = X if reference_X is None else np.asarray(reference_X, dtype=np.float32)
-    norm = (X - _safe_nanmean_scalar(reference)) / (_safe_nanstd_scalar(reference) + 1e-8)
+    reference_mean = _safe_nanmean_scalar(reference)
+    reference_scale = _safe_nanstd_scalar(reference) + 1e-8
+    norm = (X - reference_mean) / reference_scale
+    reference_norm = (reference - reference_mean) / reference_scale
     probs = _sigmoid(norm)
+    reference_probs = _sigmoid(reference_norm)
     probs = np.nan_to_num(probs, nan=0.0, posinf=0.99, neginf=0.0)
-    probs = probs / (_safe_nanmean_scalar(probs, default=1.0) + 1e-8) * rate
+    reference_probs = np.nan_to_num(reference_probs, nan=0.0, posinf=0.99, neginf=0.0)
+    probs = probs / (_safe_nanmean_scalar(reference_probs, default=1.0) + 1e-8) * rate
     return np.clip(probs, 0.0, 0.99)
 
 

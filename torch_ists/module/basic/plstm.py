@@ -69,7 +69,8 @@ class PLSTM_cell(nn.Module):
         self.W = nn.Parameter(torch.Tensor(input_sz, hidden_sz * 4))
         self.U = nn.Parameter(torch.Tensor(hidden_sz, hidden_sz * 4))
         self.bias = nn.Parameter(torch.Tensor(hidden_sz * 4))
-        self.dropout = dropout
+        self.dropout = float(dropout) if dropout else 0.0
+        self.dropout_layer = nn.Dropout(self.dropout) if self.dropout else None
         self.init_weights()
                 
     def init_weights(self):
@@ -153,10 +154,10 @@ class PLSTM_cell(nn.Module):
         # reshape from shape (sequence, batch, feature) to (batch, sequence, feature)
         hidden_seq = hidden_seq.transpose(0, 1).contiguous()
         
-        if self.dropout:
-            hidden_seq = nn.Dropout(self.dropout)(hidden_seq)
-            h_t = nn.Dropout(self.dropout)(h_t)
-            c_t = nn.Dropout(self.dropout)(c_t)
+        if self.dropout_layer is not None:
+            hidden_seq = self.dropout_layer(hidden_seq)
+            h_t = self.dropout_layer(h_t)
+            c_t = self.dropout_layer(c_t)
         
         return hidden_seq, (h_t, c_t)
     

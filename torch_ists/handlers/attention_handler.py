@@ -140,6 +140,10 @@ class AttentionHandler(BaseHandler):
 
         if model_name in {"mtan", "miam"}:
             out, hn = model(x, seq, seq_ts)
+            if out.dim() == 3:
+                hn = self.gather_output_at_index(out, data["final_index"])
+            elif hn.dim() == 3:
+                hn = self.gather_output_at_index(hn, data["final_index"])
             return out, hn
 
         raise ValueError(f"Unknown attention model in forward: {model_name}")

@@ -19,11 +19,14 @@ import urllib.request
 import zipfile
 
 import numpy as np
-import pandas as pd
 import sklearn.model_selection
 from sklearn.metrics import *
 
-from tqdm import tqdm
+try:
+    from tqdm import tqdm
+except ModuleNotFoundError:  # pragma: no cover - exercised in minimal installs
+    def tqdm(iterable, *args, **kwargs):
+        return iterable
 
 import torch
 import torch.nn.functional as F

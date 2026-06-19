@@ -34,6 +34,14 @@ class SourceODEHandler(BaseHandler):
         "fixed_rk4": "rk4",
         "dopri": "dopri5",
     }
+    DOPRI5_MAX_NUM_STEPS = 10_000
+
+    @classmethod
+    def _with_operational_solver_options(cls, method: str, options: Dict[str, Any]) -> Dict[str, Any]:
+        resolved = dict(options)
+        if method == "dopri5" and "max_num_steps" not in resolved:
+            resolved["max_num_steps"] = cls.DOPRI5_MAX_NUM_STEPS
+        return resolved
 
     def can_handle(self, model_name: str) -> bool:
         return model_name in self.SOURCE_MODELS
@@ -60,6 +68,10 @@ class SourceODEHandler(BaseHandler):
             for key in ("rtol", "atol", "adjoint", "dt")
             if solver[key] is not None
         }
+        solver_options = self._with_operational_solver_options(
+            solver["method"],
+            dict(solver["options"]),
+        )
         family = self.SOURCE_MODELS[model_name]
         if family == "odernn":
             model = SourceODERNNBackbone(input_dim, hidden_dim, hidden_dim, num_layers)
@@ -71,7 +83,7 @@ class SourceODEHandler(BaseHandler):
             raise ValueError(f"Unsupported source ODE family: {family}")
         model.model_name = model_name
         model.solver_method = solver["method"]
-        model.solver_options = dict(solver["options"])
+        model.solver_options = solver_options
         model.solver_kwargs = solver_kwargs
         return model
 
@@ -100,8 +112,12 @@ class SourceODEHandler(BaseHandler):
             for key in ("rtol", "atol", "adjoint", "dt")
             if solver[key] is not None
         }
+        solver_options = self._with_operational_solver_options(
+            solver["method"],
+            dict(solver["options"]),
+        )
         model.solver_method = solver["method"]
-        model.solver_options = dict(solver["options"])
+        model.solver_options = solver_options
         model.solver_kwargs = runtime_solver_kwargs
 
         x = data["x"]
@@ -114,7 +130,7 @@ class SourceODEHandler(BaseHandler):
             step_times,
             final_index,
             method=solver["method"],
-            options=dict(solver["options"]),
+            options=solver_options,
             rtol=solver["rtol"],
             atol=solver["atol"],
             adjoint=solver["adjoint"],

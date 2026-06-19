@@ -33,6 +33,9 @@ def _require_signatory_logsignature_channels():
     return logsignature_channels
 
 
+MAX_NEURALRDE_LOGSIGNATURE_CHANNELS = 100_000
+
+
 class CDEHandler(BaseHandler):
     """Handler for CDE-family paper models.
 
@@ -261,6 +264,19 @@ class CDEHandler(BaseHandler):
             logsignature_channels = _require_signatory_logsignature_channels()
             depth = int(spec["depth"])
             signature_channels = logsignature_channels(in_channels=control_channels, depth=depth)
+            max_signature_channels = int(
+                model_params.get(
+                    "max_logsignature_channels",
+                    MAX_NEURALRDE_LOGSIGNATURE_CHANNELS,
+                )
+            )
+            if max_signature_channels > 0 and signature_channels > max_signature_channels:
+                raise ValueError(
+                    f"{model_name} requires {signature_channels} logsignature channels "
+                    f"for input_dim={input_dim}, depth={depth}, which exceeds the "
+                    f"operational cap {max_signature_channels}. Exclude this "
+                    "model/data setting or lower rde depth before allocation."
+                )
             func = NeuralCDEFinalTanh(
                 input_channels=signature_channels,
                 hidden_channels=hidden_dim,

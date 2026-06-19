@@ -825,6 +825,13 @@ def _avoid_singleton_last_batch(
     upper = max(2, min(train_n, int(max_allowed_batch_size)))
     candidates = [candidate for candidate in range(2, upper + 1) if train_n % candidate != 1]
     if not candidates:
+        fallback_upper = max(upper, min(train_n, max(upper + 8, upper * 2)))
+        candidates = [
+            candidate
+            for candidate in range(upper + 1, fallback_upper + 1)
+            if train_n % candidate != 1
+        ]
+    if not candidates:
         return batch_size, False
     selected = min(candidates, key=lambda candidate: (abs(candidate - target_batch_size), abs(candidate - batch_size)))
     return int(selected), selected != batch_size
