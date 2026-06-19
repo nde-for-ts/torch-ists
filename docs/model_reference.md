@@ -173,7 +173,7 @@ For missing-data handling, use `preprocess(X, model_name=...)` to build matching
 
 All five use cubic-spline interpolation via `torchcde`.
 
-Continuous-time models in this section need `preprocess(X, model_name=...)`. See [API Reference §7.1](api_reference.md#71-get_data_config) for the full per-model policy.
+Continuous-time models in this section need `preprocess(X, model_name=...)`. See [API Reference §7.1](api_reference.md#71-get_data_config) for the full per-model settings.
 
 ---
 

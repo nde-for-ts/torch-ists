@@ -33,6 +33,7 @@ from torch import nn, Tensor
 from torch.utils.data import Dataset, DataLoader
 
 from _common import (
+    CONSTRAINED_CAPACITY_POLICY_NAME,
     CONSTRAINED_MATCHED_CAPACITY_TARGET_NAME,
     DEFAULT_SEARCH_PROFILE,
     apply_model_scope_variant,
@@ -41,6 +42,7 @@ from _common import (
     default_method_for_model,
     describe_search_profile,
     infer_param_search_profile,
+    LEGACY_ICLR2024_SEARCH_PROFILE,
     normalize_search_profile,
     resolve_dataset_fixed_batch_policy,
     resolve_learning_rate_policy,
@@ -253,7 +255,7 @@ def _validate_param_search_profile(
             "Param artifact search_profile mismatch: "
             f"{param_path} has {actual!r}, expected {expected!r}. "
             "Regenerate params with the current default search, or use an "
-            "internal compatibility profile only for intentional migration checks."
+            "compatibility profile only for intentional migration checks."
         )
     actual_policy = _infer_cli_search_policy(model_config)
     actual_repeat = _infer_cli_search_repeat(model_config, os.path.basename(param_path))
@@ -263,7 +265,15 @@ def _validate_param_search_profile(
             f"{param_path} has policy={actual_policy!r}, repeat={actual_repeat!r}; "
             f"expected policy={expected_param_policy!r}, repeat={expected_param_repeat!r}."
         )
-    if not (allow_legacy_search_profile and actual == "legacy-iclr2024-v0"):
+    if expected_param_policy == CONSTRAINED_SEARCH_POLICY:
+        capacity_policy = str(model_config.get("capacity_policy", "")).strip()
+        if capacity_policy != CONSTRAINED_CAPACITY_POLICY_NAME:
+            raise ValueError(
+                "Constrained param artifact is missing current capacity metadata: "
+                f"{param_path} has capacity_policy={capacity_policy!r}. "
+                "Regenerate params with scripts/param_search.py --search-policy constrained."
+            )
+    if not (allow_legacy_search_profile and actual == LEGACY_ICLR2024_SEARCH_PROFILE):
         validate_param_artifact_identity(
             model_config,
             data_name=expected_data_name,
@@ -289,25 +299,25 @@ def _param_search_contract_metadata(model_config: dict, search_profile: str) -> 
     }
     for key in (
         "search_policy_axis",
-        "matched_capacity_policy",
-        "matched_capacity_target",
-        "matched_capacity_target_name",
-        "matched_capacity_label",
-        "matched_capacity_tolerance",
-        "matched_capacity_lower",
-        "matched_capacity_upper",
-        "matched_capacity",
-        "matched_capacity_distance",
-        "matched_capacity_in_band",
-        "matched_capacity_overshoot",
-        "matched_capacity_undershoot",
-        "matched_hidden_dim",
-        "matched_depth_level",
-        "matched_flow_depth",
+        "capacity_policy",
+        "capacity_target",
+        "capacity_target_name",
+        "capacity_label",
+        "capacity_tolerance",
+        "capacity_lower",
+        "capacity_upper",
+        "capacity_param_count",
+        "capacity_distance",
+        "capacity_in_band",
+        "capacity_overshoot",
+        "capacity_undershoot",
+        "capacity_hidden_dim",
+        "capacity_depth_level",
+        "capacity_flow_depth",
         "params_at_min_carrier",
         "params_at_max_carrier",
         "candidate_count",
-        "matched_capacity_config",
+        "capacity_config",
         "param_hash",
         "search_algorithm",
         "search_algorithm_seed",
@@ -483,6 +493,13 @@ def parse_cli_args():
     )
     parser.add_argument("--epochs", type=int, default=100, help="Epochs per run.")
     parser.add_argument(
+        "--device",
+        type=str,
+        choices=["auto", "cpu", "cuda"],
+        default="auto",
+        help="Device selection. auto uses CUDA when available, cpu forces CPU, cuda requires CUDA.",
+    )
+    parser.add_argument(
         "--max-runs",
         type=int,
         default=None,
@@ -500,13 +517,13 @@ def parse_cli_args():
         type=str,
         choices=["reuse", "fail"],
         default="reuse",
-        help="Behavior when --check finds an output artifact: reuse verifies the stored run contract; fail treats it as a policy violation.",
+        help="Behavior when --check finds an output artifact: reuse verifies stored output details; fail raises an error.",
     )
     parser.add_argument(
         "--skip-policy",
         type=str,
         choices=["allow", "fail"],
-        default="allow",
+        default="fail",
         help="Whether skipped dataset/model cells keep exit status zero or fail the run.",
     )
     parser.add_argument(
@@ -608,13 +625,13 @@ def parse_cli_args():
         "--contract-dir",
         type=str,
         default="evidence",
-        help="Directory for run manifests.",
+        help="Directory for JSON run logs.",
     )
     parser.add_argument(
         "--run-id",
         type=str,
         default=None,
-        help="Run identifier for related artifacts.",
+        help="Run identifier for related outputs.",
     )
     parser.add_argument(
         "--save-predictions",
@@ -700,6 +717,19 @@ seed_everything(SEED)
 
 use_cuda = torch.cuda.is_available()
 device = torch.device("cuda" if use_cuda else "cpu")
+
+
+def _resolve_run_device(device_mode: str) -> torch.device:
+    normalized = str(device_mode).strip().lower()
+    if normalized == "auto":
+        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if normalized == "cpu":
+        return torch.device("cpu")
+    if normalized == "cuda":
+        if not torch.cuda.is_available():
+            raise RuntimeError("--device cuda was requested, but CUDA is not available.")
+        return torch.device("cuda")
+    raise ValueError("device must be one of {'auto', 'cpu', 'cuda'}")
 
 # Import from the packaged torch_ists runtime.
 from torch_ists.preprocessing import preprocess
@@ -887,7 +917,7 @@ def _validate_existing_output_contract(output_path, expected_contract):
     actual_hash = meta.get("output_contract_hash")
     if not isinstance(actual_contract, dict) or not actual_hash:
         raise OutputArtifactContractError(
-            f"Output artifact {output_path} cannot be reused: missing output contract metadata. "
+            f"Output artifact {output_path} cannot be reused: missing stored output details. "
             "Remove the artifact or rerun with --no-check to overwrite."
         )
     recomputed_hash = _output_contract_hash(actual_contract)
@@ -899,7 +929,7 @@ def _validate_existing_output_contract(output_path, expected_contract):
         )
     if str(actual_hash) != expected_hash:
         raise OutputArtifactContractError(
-            f"Output artifact {output_path} cannot be reused: run contract mismatch "
+            f"Output artifact {output_path} cannot be reused: stored output details mismatch "
             f"(stored={actual_hash}, expected={expected_hash}). "
             "Remove the artifact or rerun with --no-check to overwrite."
         )
@@ -2139,6 +2169,9 @@ def _evaluate_robustness(
 
 def main():
     args = parse_cli_args()
+    global device, use_cuda
+    device = _resolve_run_device(args.device)
+    use_cuda = device.type == "cuda"
     if (
         args.task == "forecasting"
         and getattr(args, "target_source", "surrogate") == "surrogate"
@@ -2153,6 +2186,7 @@ def main():
     apply_model_scope_variant(scope_override)
     seed = int(args.seed)
     seed_everything(seed)
+    LOGGER.info("Run device resolved mode=%s device=%s", args.device, device)
     run_id = args.run_id or generate_run_id("run")
     records = []
     reused_records = []
@@ -2532,7 +2566,7 @@ def main():
             },
         },
     )
-    LOGGER.info("Run manifest written: %s", manifest_path)
+    LOGGER.info("Run log written: %s", manifest_path)
     return exit_code
 
 

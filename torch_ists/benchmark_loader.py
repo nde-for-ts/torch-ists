@@ -138,6 +138,13 @@ def _pad(channel, max_len, *, padding: str = "nan"):
     return out
 
 
+def _validate_padding(padding: str) -> str:
+    normalized = str(padding).strip().lower()
+    if normalized not in {"nan", "last", "zero"}:
+        raise ValueError("padding must be one of {'nan', 'last', 'zero'}")
+    return normalized
+
+
 def _panel_lengths(panel):
     lengths = []
     for i in range(panel.shape[0]):
@@ -150,10 +157,12 @@ def get_data(dataname, *, label_policy: str = "pooled", padding: str = "nan"):
     """Load a benchmark dataset and return tensor X and label array y.
 
     ``label_policy="pooled"`` and ``padding="nan"`` are the runtime defaults.
-    Use ``label_policy="train"`` or ``padding="last"`` only to reproduce older
-    benchmark preprocessing.
+    Variable-length series are padded with NaN by default so downstream
+    preprocessing can see the observation mask. Use ``label_policy="train"``
+    or ``padding="last"`` only to reproduce older benchmark preprocessing.
     """
     pd = _require_pandas()
+    padding = _validate_padding(padding)
     load_UCR_UEA_dataset, load_from_tsfile_to_dataframe = _require_sktime_loaders()
     primary_error = None
     try:
@@ -205,7 +214,7 @@ def get_data(dataname, *, label_policy: str = "pooled", padding: str = "nan"):
 
     len_list = _panel_lengths(X_train) + _panel_lengths(X_test)
 
-    if min(len_list) != max(len_list):
+    if min(len_list) != max(len_list) and padding == "last":
         max_len = max(len_list)
 
         def get_same_len(series):

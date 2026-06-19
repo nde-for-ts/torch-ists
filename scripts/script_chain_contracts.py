@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Utilities for run manifests and related artifacts."""
+"""Utilities for JSON run logs and related artifacts."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 
-# Public schema token for packaged run manifests.
+# Schema token for packaged JSON run logs.
 SCHEMA_VERSION = "run_manifest_v1"
 SUPPORTED_TASKS = frozenset(
     {

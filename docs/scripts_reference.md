@@ -1,11 +1,11 @@
 # torch-ists Scripts Reference
 
 > **Type**: Reference
-> **Scope**: Source-checkout command-line entry points to the benchmark pipeline.
+> **Scope**: Included command-line scripts for the benchmark pipeline.
 
 **Related docs**: [Package overview](../README.md) · [Docs index](README.md) · [API Reference](api_reference.md) · [Model Reference](model_reference.md) · [Custom Data Guide](custom_data_guide.md) · [Custom Model Guide](custom_model_guide.md) · [Third-Party Notices](third_party_notices.md) · [CIKM 2025 Tutorial site](https://nde-for-ts.github.io/)
 
-This document covers the three source-checkout scripts: [`scripts/set_splits.py`](../scripts/set_splits.py), [`scripts/param_search.py`](../scripts/param_search.py), and [`scripts/model_run.py`](../scripts/model_run.py). Built wheels do not install these files or expose console entry points.
+This document covers the three included scripts: [`scripts/set_splits.py`](../scripts/set_splits.py), [`scripts/param_search.py`](../scripts/param_search.py), and [`scripts/model_run.py`](../scripts/model_run.py). Built wheels do not install these files or expose console entry points.
 
 ---
 
@@ -25,10 +25,10 @@ The three scripts run in this order:
 ```
 set_splits.py  →  param_search.py  →  model_run.py
    split/            params/             out/
-                                     evidence/  (run manifests, all stages)
+                                     evidence/  (JSON run logs, all stages)
 ```
 
-**Install requirement.** The scripts call `preprocess`, whose finalization imports `torchcde` before building interpolation coefficients — this runs for **every** model, including basic baselines such as `cnn`. So the source-checkout script workflow needs `torchcde` even when the selected model is not a continuous-time method. Install `.[all]` (recommended) or at least `.[tune,cde]`; `.[tune]` alone can fail with `No module named 'torchcde'`.
+**Install requirement.** The scripts call `preprocess`, which imports `torchcde` before building interpolation coefficients. This applies even to basic baselines such as `cnn`. Install `.[all]` (recommended) or at least `.[tune,cde]`; `.[tune]` alone can fail with `No module named 'torchcde'`.
 
 Each step writes to a dedicated root directory and reads from the previous step's output:
 
@@ -38,28 +38,28 @@ Each step writes to a dedicated root directory and reads from the previous step'
 | `param_search.py` | `split/` | `params/<dataset>/<dataset>_<model>[_aggregated]` |
 | `model_run.py` | `split/`, `params/` | `out/<dataset>/<missing_rate>/<name>` (standard/missingness); `out/<dataset>/robustness/<name>__rates_..__types_..__sync_..` (robustness) |
 
-All three scripts also append a JSON manifest to `evidence/` for run tracking.
+All three scripts also write JSON run logs under `evidence/`.
 
-**Seed policy** (default: hyperparameter search and evaluation seeds are disjoint):
+**Seed usage**:
 - `set_splits.py --seed` default = `42` — the hyperparameter search split.
-- `param_search.py --seed` default = `42` — selects hyperparameters on the split at seed `42`. **The search seed is held at `42` by policy**: the param artifact filename (`<dataset>_<model>[_aggregated]`) does not encode the search seed, so overriding `--seed` silently reuses or overwrites the seed-42 artifact. Override only after backing up or deleting `params/` and passing `--existing-policy fail`.
+- `param_search.py --seed` default = `42` — selects hyperparameters on the split at seed `42`. The parameter filename (`<dataset>_<model>[_aggregated]`) does not include the search seed. If you override `--seed`, first back up or delete `params/` and use `--existing-policy fail`.
 - `model_run.py --seed` is passed explicitly per evaluation point; the reported standard evaluation uses seeds `0`, `1`, `2`, `3`, `4`.
-- With the default `--search-repeat single`, the hyperparameter search seed (`42`) is disjoint from the evaluation seeds (`0-4`), so reported numbers are out-of-sample with respect to hyperparameter selection. **This does not hold for `--search-repeat aggregated`**, which tunes by averaging over the evaluation seed set `0-4` — treat aggregated search as diagnostic, not as out-of-sample official evaluation over `0-4`.
-- Reproducing the ICLR 2024 evaluation seed: after generating the fixed search split at seed `42`, pass `--seed 0` to `set_splits.py` and `model_run.py`. Keep `param_search.py --seed` at its default `42` — the search seed is fixed by policy (see above).
+- With the default `--search-repeat single`, the search seed (`42`) is separate from evaluation seeds (`0-4`). `--search-repeat aggregated` averages over `0-4` and is diagnostic.
+- Reproducing the ICLR 2024 evaluation seed: after generating the search split at seed `42`, pass `--seed 0` to `set_splits.py` and `model_run.py`. Keep `param_search.py --seed` at its default `42`.
 
 **Batch size**:
 - `param_search.py` and `model_run.py` do not search `batch_size`; they determine it automatically from the loaded training split and sample footprint.
-- The resolved batch-size metadata is recorded in search/run manifests and run payload metadata.
+- The resolved batch size is recorded in the search and run outputs.
 
-**Search contract**:
-- `param_search.py` uses the package default search contract and records search metadata in parameter artifacts and manifests.
-- Historical width/depth-only profiles are internal compatibility metadata, not part of the public workflow.
+**Search settings**:
+- `param_search.py` uses the default search settings and records the selected parameters.
+- Older width/depth-only settings are accepted only for compatibility.
 
 **Environment variable**:
 - `TORCH_ISTS_RUNTIME_ROOT` (optional) — override the runtime root when running the scripts from outside the package directory.
 - `TORCH_ISTS_DATA_ROOT` (optional) — override the built-in UCR/UEA archive root used by `--dataset-source default`.
 
-- `--help` works from a source checkout with `PYTHONPATH=.`.
+- `--help` works from a repository checkout with `PYTHONPATH=.`.
 
 ---
 
@@ -83,14 +83,14 @@ PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/set_splits.py --dataset-name Basi
 | `--seed` | `int` | `42` | Random seed for the stratified split. Default `42` is the hyperparameter search seed (disjoint from evaluation seeds `0-4`); pass `--seed 0..4` to generate the evaluation splits, or `--seed 0` for ICLR 2024 reproducibility. |
 | `--if-exists` | `{reuse, fail}` | `reuse` | Behavior when the split artifact already exists. `reuse` keeps the existing file; `fail` raises. |
 | `--out-dir` (alias `--output-dir`) | `str` | `split` | Root directory for split artifacts. |
-| `--contract-dir` | `str` | `evidence` | Directory for run manifests (stage = `split`). |
-| `--run-id` | `str` | (auto) | Run identifier for cross-stage manifest correlation. Auto-generated if omitted. |
+| `--contract-dir` | `str` | `evidence` | Directory for JSON run logs (stage = `split`). |
+| `--run-id` | `str` | (auto) | Run identifier for related outputs. Auto-generated if omitted. |
 | `--dry-run` | flag | `False` | Validate inputs and compute the split summary without writing the artifact. |
 
 ### Output
 
 - **Split file** (pickle): `<out-dir>/<dataset-name>/<dataset-name>_<seed>` containing `(train_idx, valid_idx, test_idx)`.
-- **Run manifest**: `<contract-dir>/<run-id>/split.manifest.json`.
+- **Run log**: `<contract-dir>/<run-id>/split.manifest.json`.
 
 ---
 
@@ -106,31 +106,31 @@ PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/param_search.py \
     --num-samples 1 --max-num-epochs 1
 ```
 
-This is a bounded smoke run; the full defaults (`--num-samples 20 --max-num-epochs 10`) are the production settings documented in the flags table below.
+This is a bounded smoke run; the full defaults (`--num-samples 50 --max-num-epochs 10`) are documented in the flags table below.
 
 ### Flags
 
 | Flag | Type | Default | Description |
 |---|---|---|---|
-| `--seed` | `int` | `42` | Global seed for split selection and reproducibility. Default `42` is the fixed search seed by policy (the param artifact filename does not encode the search seed, so overriding silently reuses or overwrites the seed-42 artifact). For `--search-repeat single` (default), disjoint from evaluation seeds `0-4` so reported numbers are out-of-sample w.r.t. HPO; `--search-repeat aggregated` tunes over `0-4` and is therefore not out-of-sample (diagnostic). |
+| `--seed` | `int` | `42` | Seed for split selection and hyperparameter search. The default `42` is disjoint from evaluation seeds `0-4` for `--search-repeat single`; `--search-repeat aggregated` averages over `0-4` and is diagnostic. |
 | `--datasets` | `str` | `BasicMotions` | Comma-separated dataset list. Pass a comma-separated list to run additional datasets. |
 | `--dataset-source` | `{default,npz}` | `default` | Dataset source backend. `default` loads benchmark archive data by dataset name through `torch_ists.benchmark_loader.get_data`; `npz` loads one local file through `--dataset-npz`. |
 | `--dataset-npz` | `str` | `None` | Required when `--dataset-source npz`; `--datasets` must contain exactly one dataset name. |
 | `--models` | `str` | `cnn` | Comma-separated model list. Pass a comma-separated list to run additional models. |
-| `--num-samples` | `int` | `20` | Ray Tune `num_samples` — hyperparameter trial budget. Saved parameter artifacts record this value and mark `--num-samples 1` artifacts as smoke/local artifacts. |
+| `--num-samples` | `int` | `50` | Ray Tune `num_samples` — hyperparameter trial budget. Saved parameter artifacts record this value and mark `--num-samples 1` artifacts as smoke/local artifacts. |
 | `--max-num-epochs` | `int` | `10` | Per-trial training budget. |
 | `--max-runs` | `int` | `None` | Stop after this many runs across the dataset × model grid. |
 | `--max-runs-mode` | `{completed, new}` | `completed` | What counts toward `--max-runs`: `completed` (executed + reused) or `new` (executed only). |
-| `--existing-policy` | `{reuse, fail}` | `reuse` | Behavior when a param artifact already exists. **Note**: the artifact filename (`<dataset>_<model>[_aggregated]`) does not encode the search seed; the search seed is held at `42` by policy. If you override `--seed`, delete or back up the existing `params/` directory and pass `--existing-policy fail` to surface any silently-reused artifact. |
-| `--skip-policy` | `{allow, fail}` | `allow` | Whether skipped dataset/model cells keep exit status zero or fail the run. Use `fail` for CI or benchmark completeness gates. |
-| `--search-policy` | `{default, constrained}` | `default` | Search policy. `default` is the package search. `constrained` is an experimental capacity-controlled search. |
-| `--search-repeat` | `{single, aggregated}` | `single` | Repeat policy. `single` uses search seed `42`; `aggregated` averages the fixed seed set `0-4` and uses about 5x compute. |
+| `--existing-policy` | `{reuse, fail}` | `reuse` | Behavior when a param artifact already exists. The filename does not include the search seed; if you override `--seed`, back up or delete `params/` and use `--existing-policy fail`. |
+| `--skip-policy` | `{allow, fail}` | `fail` | Whether skipped dataset/model cells fail the run or keep exit status zero. Use `allow` only for exploratory partial runs. |
+| `--search-policy` | `{default, constrained}` | `default` | Search setting. `default` is the package search. `constrained` is an experimental capacity-controlled search. |
+| `--search-repeat` | `{single, aggregated}` | `single` | Repeat setting. `single` uses the search seed; `aggregated` averages seeds `0-4` and uses about 5x compute. |
 | `--ray-cpu` | `float` | `16.0` | CPU per Ray trial. |
 | `--ray-gpu` | `float` | `0.5` | GPU per Ray trial (`0` for CPU-only). |
 | `--device` | `{auto, cpu, cuda}` | `auto` | Per-trial device selection. |
 | `--split-root` | `str` | `split` | Input split artifact root. |
 | `--param-root` | `str` | `params` | Output parameter artifact root. |
-| `--contract-dir` | `str` | `evidence` | Directory for run manifests (stage = `search`). |
+| `--contract-dir` | `str` | `evidence` | Directory for JSON run logs (stage = `search`). |
 | `--run-id` | `str` | (auto) | Run identifier. |
 | `--task` | `{classification}` | `classification` | Task head. Only `classification` is stable. |
 | `--targets-root` | `str` | `targets` | Root directory for dataset target bundles when a task uses external targets. |
@@ -139,8 +139,8 @@ This is a bounded smoke run; the full defaults (`--num-samples 20 --max-num-epoc
 
 - **`default + single`** — default model-specific search on seed `42`. Output filename: `<dataset>_<model>`.
 - **`default + aggregated`** — repeats search over the fixed seed set `0-4` and averages trial scores. Output filename: `<dataset>_<model>_aggregated`.
-- **`constrained + single`** — experimental capacity-controlled search. Output filename uses the constrained-policy suffix.
-- **`constrained + aggregated`** — same constrained policy with fixed seed aggregation. Output filename uses the constrained-policy suffix plus `_aggregated`.
+- **`constrained + single`** — experimental capacity-controlled search. Output filename uses the capacity-controlled suffix.
+- **`constrained + aggregated`** — same capacity-controlled search with seed aggregation. Output filename uses the capacity-controlled suffix plus `_aggregated`.
 
 The default search uses model-specific axes where relevant, such as attention `n_heads`, flow `flow_depth`, and fixed Neural RDE depth by model name. Batch size and learning rate are resolved outside architecture search.
 
@@ -148,8 +148,8 @@ Parameter search runs the standard search without synthetic missingness injectio
 
 ### Output
 
-- **Param file** (pickle): `<param-root>/<dataset>/<dataset>_<model>` with optional constrained-policy and repeat suffixes, containing the best hyperparameter dict, resolved effective model parameters, and machine-readable search-contract provenance. Older `_cv` aggregated artifacts are read as a compatibility fallback.
-- **Run manifest**: `<contract-dir>/<run-id>/search.manifest.json` (records, reused records, skipped, summary). Executed records include resolved batch-size and search-contract metadata.
+- **Param file** (pickle): `<param-root>/<dataset>/<dataset>_<model>` with optional capacity-controlled and repeat suffixes, containing the selected hyperparameters, effective model parameters, and run details. Older `_cv` aggregated artifacts are read as a compatibility fallback.
+- **Run log**: `<contract-dir>/<run-id>/search.manifest.json` (records, reused records, skipped, summary). Executed records include resolved batch size and search settings.
 
 ### Workflow Dependencies
 
@@ -191,22 +191,23 @@ PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/model_run.py \
 | `--models` | `str` | `cnn` | Comma-separated model list. Pass a comma-separated list to run additional models. |
 | `--missing-rates` | `str` | `0.0` | Comma-separated missing rates for standard/missingness evaluation. `0.0` is standard; positive rates are missingness. Ignored in robustness mode. |
 | `--epochs` | `int` | `100` | Epochs per (dataset, missing-rate, model) run. |
+| `--device` | `{auto, cpu, cuda}` | `auto` | Device selection. `auto` uses CUDA when available; `cpu` forces CPU; `cuda` requires CUDA. |
 | `--max-runs` | `int` | `None` | Stop after this many runs across the run grid. |
 | `--max-runs-mode` | `{completed, new}` | `completed` | What counts toward `--max-runs`. |
-| `--existing-policy` | `{reuse, fail}` | `reuse` | Behavior when `--check` finds an output artifact: reuse validates the stored run contract; fail treats it as a policy violation. |
-| `--skip-policy` | `{allow, fail}` | `allow` | Whether skipped dataset/model cells keep exit status zero or fail the run. Use `fail` for CI or benchmark completeness gates. |
+| `--existing-policy` | `{reuse, fail}` | `reuse` | Behavior when `--check` finds an output artifact: reuse checks stored output details; fail raises an error. |
+| `--skip-policy` | `{allow, fail}` | `fail` | Whether skipped dataset/model cells fail the run or keep exit status zero. Use `allow` only for exploratory partial runs. |
 | `--check` / `--no-check` | flag | `True` | Validate and reuse an existing output file when present; `--existing-policy` controls reuse vs fail behavior. |
-| `--param-policy` | `{default, constrained}` | `default` | Parameter artifact policy to consume. Must match `param_search.py --search-policy`; constrained loads artifacts generated with the same constrained policy. |
-| `--param-repeat` | `{single, aggregated}` | `single` | Parameter artifact repeat policy to consume. Must match `param_search.py --search-repeat`. |
+| `--param-policy` | `{default, constrained}` | `default` | Parameter search setting to consume. Must match `param_search.py --search-policy`. |
+| `--param-repeat` | `{single, aggregated}` | `single` | Parameter repeat setting to consume. Must match `param_search.py --search-repeat`. |
 | `--robustness-mode` | flag | `False` | Robustness evaluation: train on `missing=0.0`, evaluate on configured test rates. |
 | `--robustness-test-rates` | `str` | `0.0` | Positive test missing rates for robustness mode; the clean `0.0` `STANDARD` anchor is always included. |
 | `--robustness-test-mechanisms` | `str` | `MCAR` | Test missingness mechanisms for robustness mode: `MCAR`, `MAR`, `MNAR`, `BLOCK`, `BURST`. |
 | `--robustness-channel-sync-options` | `str` | `false` | Test channel synchronization options. `false` masks channels independently; `true` shares missing time indices across channels. |
-| `--save-predictions` | `{full, summary}` | `full` | `full` stores prediction arrays; `summary` stores only shape/dtype metadata. |
+| `--save-predictions` | `{full, summary}` | `full` | `full` stores prediction arrays; `summary` stores only shape and dtype. |
 | `--split-root` | `str` | `split` | Input split artifact root. |
 | `--param-root` | `str` | `params` | Input parameter artifact root. |
 | `--out-root` | `str` | `out` | Output prediction artifact root. |
-| `--contract-dir` | `str` | `evidence` | Directory for run manifests (stage = `run`). |
+| `--contract-dir` | `str` | `evidence` | Directory for JSON run logs (stage = `run`). |
 | `--run-id` | `str` | (auto) | Run identifier. |
 | `--task` | `{classification}` | `classification` | Task head. Only `classification` is stable. |
 | `--targets-root` | `str` | `targets` | Root directory for dataset target bundles. |
@@ -229,14 +230,14 @@ PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/model_run.py \
    "meta": {...}}
   ```
 
-  The robustness runner records the clean anchor with `STANDARD` missingness type, plus missingness mechanism (`MCAR`, `MAR`, `MNAR`, `BLOCK`, `BURST`), `channel_sync`, seed, and `robustness_axes`. This schema is experimental. The robustness `missing_seed` is the run `--seed` (provenance, not an independent axis): a single `--seed` run fixes the model, split, and missingness mask together, so to isolate sensitivity to the missingness mask, run multiple `--seed` jobs and aggregate across them.
+  The robustness output records the clean anchor, missingness mechanism (`MCAR`, `MAR`, `MNAR`, `BLOCK`, `BURST`), `channel_sync`, and `missing_seed`. `missing_seed` is the run `--seed`; run multiple seeds to average over split/model/mask variation.
 
 ### Task Support Tiers
 
 - **Stable**: `classification` (default).
 - **Experimental**: `regression`, `forecasting`, `imputation`, `outlier_detection`, `change_detection` (available through `ists_model`).
 
-The task and metric tables in this document describe `ists_model` API outputs. The public source-checkout script workflow (`scripts/param_search.py`, `scripts/model_run.py`) accepts `--task classification` only in this package; the experimental tasks are reached through the `ists_model` API, not the scripts.
+The task and metric tables in this document describe `ists_model` API outputs. The included scripts (`scripts/param_search.py`, `scripts/model_run.py`) accept `--task classification` only; experimental tasks are reached through the `ists_model` API.
 
 ### Metrics
 
@@ -250,13 +251,13 @@ The task and metric tables in this document describe `ists_model` API outputs. T
 ### Output
 
 - **Prediction file** (pickle): standard/missingness `<out-root>/<dataset>/<missing_rate>/<dataset>_<missing_rate>_<model>_<seed>`; robustness `<out-root>/<dataset>/robustness/<dataset>_robustness_<model>_<seed>__rates_<...>__types_<...>__sync_<...>`. The robustness path has **no** `<missing_rate>` segment — the test axes are encoded in the filename suffix.
-- **Run manifest**: `<contract-dir>/<run-id>/run.manifest.json`. Executed records include resolved batch-size metadata.
+- **Run log**: `<contract-dir>/<run-id>/run.manifest.json`. Executed records include resolved batch size.
 
 ### Workflow Dependencies
 
 Requires:
 - Split files from `set_splits.py` for every dataset at every reported evaluation seed (`--seed 0..4` for the standard evaluation; the `param_search.py` step additionally needs the configured search seed, default `--seed 42`).
-- Param files from `param_search.py --search-policy` and `--search-repeat` matching `model_run.py --param-policy` and `--param-repeat`. The run step validates the parameter artifact search contract before reuse.
+- Param files from `param_search.py --search-policy` and `--search-repeat` matching `model_run.py --param-policy` and `--param-repeat`. The run step checks that the parameter file matches the requested run before reuse.
 
 ---
 
@@ -271,9 +272,9 @@ Path patterns produced by the three scripts:
 | Params (default aggregated) | `<param-root>/<dataset>/<dataset>_<model>_aggregated` |
 | Predictions (standard/missingness) | `<out-root>/<dataset>/<missing_rate>/<dataset>_<missing_rate>_<model>_<seed>` |
 | Predictions (robustness) | `<out-root>/<dataset>/robustness/<dataset>_robustness_<model>_<seed>__rates_<...>__types_<...>__sync_<...>` |
-| Run manifest | `<contract-dir>/<run-id>/{split,search,run}.manifest.json` |
+| Run log | `<contract-dir>/<run-id>/{split,search,run}.manifest.json` |
 
-Run manifests record the stage, run id, records executed/reused/skipped, and a stage-specific summary.
+JSON run logs record the stage, run id, executed/reused/skipped records, and a stage summary.
 
 ---
 

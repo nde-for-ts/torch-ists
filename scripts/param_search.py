@@ -32,11 +32,15 @@ from torch import nn, Tensor
 from torch.utils.data import Dataset, DataLoader
 
 from _common import (
+    CONSTRAINED_CAPACITY_POLICY_NAME,
     CONSTRAINED_MATCHED_CAPACITY_DEPTH_LEVEL_VALUES,
     CONSTRAINED_MATCHED_CAPACITY_HIDDEN_DIM_VALUES,
     CONSTRAINED_MATCHED_CAPACITY_LABEL,
     CONSTRAINED_MATCHED_CAPACITY_TARGET,
     CONSTRAINED_MATCHED_CAPACITY_TARGET_NAME,
+    CONSTRAINED_PUBLIC_SEARCH_NAME,
+    CONSTRAINED_SEARCH_CONTRACT_NAME,
+    CONSTRAINED_SEARCH_FAMILY,
     DEFAULT_SEARCH_PROFILE,
     apply_model_scope_variant,
     build_param_artifact_identity,
@@ -46,6 +50,7 @@ from _common import (
     default_method_for_model,
     describe_search_profile,
     infer_param_search_profile,
+    LEGACY_ICLR2024_SEARCH_PROFILE,
     normalize_search_profile,
     resolve_dataset_fixed_batch_policy,
     resolve_effective_param_config,
@@ -87,15 +92,6 @@ def _normalize_dataset_source_arg(raw: str) -> str:
         raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
-def _normalize_search_mode(raw: str) -> str:
-    normalized = str(raw).strip().lower()
-    if normalized in {"default", "legacy"}:
-        return "default"
-    if normalized in {"cv", "improved"}:
-        return "cv"
-    raise argparse.ArgumentTypeError("search mode must be one of {'default', 'cv'}.")
-
-
 def _normalize_search_profile_arg(raw: str) -> str:
     try:
         return normalize_search_profile(raw)
@@ -133,10 +129,6 @@ def _normalize_search_mode_alias(raw: str) -> tuple[str, str]:
         "--search-mode is deprecated; use --search-policy {default,constrained} "
         "and --search-repeat {single,aggregated}."
     )
-
-
-def _search_mode_from_repeat(search_repeat: str) -> str:
-    return "improved" if search_repeat == AGGREGATED_SEARCH_REPEAT else "legacy"
 
 
 def _fixed_search_seed_set(search_repeat: str, search_seed: int) -> list[int]:
@@ -199,7 +191,7 @@ def _validate_existing_param_artifact_for_reuse(
         allow_legacy_search_profile=allow_legacy_search_profile,
         require_lr=True,
     )
-    if not (allow_legacy_search_profile and existing_profile == "legacy-iclr2024-v0"):
+    if not (allow_legacy_search_profile and existing_profile == LEGACY_ICLR2024_SEARCH_PROFILE):
         validate_param_artifact_identity(
             model_config,
             data_name=data_name,
@@ -259,7 +251,7 @@ def parse_cli_args():
         help="Comma-separated model list. Default: cnn.",
     )
     parser.add_argument("--missing-rate", type=float, default=0.0, help=argparse.SUPPRESS)
-    parser.add_argument("--num-samples", type=int, default=20, help="Ray Tune num_samples.")
+    parser.add_argument("--num-samples", type=int, default=50, help="Ray Tune num_samples.")
     parser.add_argument("--max-num-epochs", type=int, default=10, help="Ray Tune max epochs.")
     parser.add_argument(
         "--max-runs",
@@ -279,13 +271,13 @@ def parse_cli_args():
         type=str,
         choices=["reuse", "fail"],
         default="reuse",
-        help="Behavior when a param artifact already exists. The artifact filename does NOT encode the search seed; by policy the default search seed is 42. If you override --seed, delete or back up params/ and pass --existing-policy fail to surface any silently reused artifact.",
+        help="Behavior when a param artifact already exists. The filename does not include the search seed; if you override --seed, back up or delete params/ and pass --existing-policy fail.",
     )
     parser.add_argument(
         "--skip-policy",
         type=str,
         choices=["allow", "fail"],
-        default="allow",
+        default="fail",
         help="Whether skipped dataset/model cells keep exit status zero or fail the run.",
     )
     parser.add_argument("--ray-cpu", type=float, default=16.0, help="CPU per Ray trial.")
@@ -348,13 +340,13 @@ def parse_cli_args():
         "--contract-dir",
         type=str,
         default="evidence",
-        help="Directory for run manifests.",
+        help="Directory for JSON run logs.",
     )
     parser.add_argument(
         "--run-id",
         type=str,
         default=None,
-        help="Run identifier for related artifacts.",
+        help="Run identifier for related outputs.",
     )
     parser.add_argument(
         "--task",
@@ -402,7 +394,6 @@ def parse_cli_args():
             "Provided datasets may still contain NaNs; use model_run.py --missing-rates or --robustness-mode for injected-missingness evaluation."
         )
     args.missing_rate = 0.0
-    args.search_mode = _search_mode_from_repeat(args.search_repeat)
     args.datasets = _parse_csv_list(args.datasets)
     args.models = _parse_csv_list(args.models)
     args.dataset_source = normalize_dataset_source(args.dataset_source)
@@ -629,6 +620,10 @@ def _normalize_param_config_for_save(
         model_config,
         search_profile=search_profile,
     )
+    if _infer_cli_search_policy(model_config) == CONSTRAINED_SEARCH_POLICY:
+        saved["search_contract"] = model_config.get("search_contract", CONSTRAINED_SEARCH_CONTRACT_NAME)
+        saved["search_family"] = model_config.get("search_family", CONSTRAINED_SEARCH_FAMILY)
+        saved["public_search_name"] = model_config.get("public_search_name", CONSTRAINED_PUBLIC_SEARCH_NAME)
     if artifact_identity is not None:
         saved["artifact_identity"] = dict(artifact_identity)
     if search_provenance is not None:
@@ -817,27 +812,27 @@ def _resolve_constrained_capacity_config(
     in_band = lower <= selected["param_count"] <= upper
     metadata = {
         "search_policy_axis": CONSTRAINED_SEARCH_POLICY,
-        "matched_capacity_policy": "matched-capacity-200k-v1",
-        "matched_capacity_target": target,
-        "matched_capacity_target_name": CONSTRAINED_MATCHED_CAPACITY_TARGET_NAME,
-        "matched_capacity_label": CONSTRAINED_MATCHED_CAPACITY_LABEL,
-        "matched_capacity_tolerance": 0.5,
-        "matched_capacity_lower": lower,
-        "matched_capacity_upper": upper,
-        "matched_hidden_dim_grid": list(hidden_dim_values),
-        "matched_depth_level_grid": list(depth_level_values),
-        "matched_flow_depth_grid": [
+        "capacity_policy": CONSTRAINED_CAPACITY_POLICY_NAME,
+        "capacity_target": target,
+        "capacity_target_name": CONSTRAINED_MATCHED_CAPACITY_TARGET_NAME,
+        "capacity_label": CONSTRAINED_MATCHED_CAPACITY_LABEL,
+        "capacity_tolerance": 0.5,
+        "capacity_lower": lower,
+        "capacity_upper": upper,
+        "capacity_hidden_dim_grid": list(hidden_dim_values),
+        "capacity_depth_level_grid": list(depth_level_values),
+        "capacity_flow_depth_grid": [
             None if value is None else int(value)
             for value in flow_values
         ],
-        "matched_capacity": int(selected["param_count"]),
-        "matched_capacity_distance": int(selected["distance"]),
-        "matched_capacity_in_band": bool(in_band),
-        "matched_capacity_overshoot": bool(min_candidate["param_count"] > upper),
-        "matched_capacity_undershoot": bool(max_candidate["param_count"] < lower),
-        "matched_hidden_dim": int(selected["hidden_dim"]),
-        "matched_depth_level": int(selected["depth_level"]),
-        "matched_flow_depth": selected["flow_depth"],
+        "capacity_param_count": int(selected["param_count"]),
+        "capacity_distance": int(selected["distance"]),
+        "capacity_in_band": bool(in_band),
+        "capacity_overshoot": bool(min_candidate["param_count"] > upper),
+        "capacity_undershoot": bool(max_candidate["param_count"] < lower),
+        "capacity_hidden_dim": int(selected["hidden_dim"]),
+        "capacity_depth_level": int(selected["depth_level"]),
+        "capacity_flow_depth": selected["flow_depth"],
         "params_at_min_carrier": int(min_candidate["param_count"]),
         "params_at_max_carrier": int(max_candidate["param_count"]),
         "candidate_count": int(len(candidates)),
@@ -867,6 +862,9 @@ def _apply_constrained_capacity_to_search_space(search_space: dict, capacity_con
     constrained["depth_level_values"] = [int(selected["depth_level"])]
     constrained["sampled_axes"] = ["lr"]
     constrained["candidate_axes"] = ["lr"]
+    constrained["search_contract"] = CONSTRAINED_SEARCH_CONTRACT_NAME
+    constrained["search_family"] = CONSTRAINED_SEARCH_FAMILY
+    constrained["public_search_name"] = CONSTRAINED_PUBLIC_SEARCH_NAME
     fixed_extra = dict(capacity_config["extra_params"])
     constrained["default_extra_params"] = fixed_extra
     constrained["extra_param_values"] = {
@@ -886,34 +884,33 @@ def _attach_constrained_capacity_metadata(model_config: dict, capacity_config: d
     updated = dict(model_config)
     updated.update(capacity_config["metadata"])
     updated["search_policy_axis"] = CONSTRAINED_SEARCH_POLICY
-    updated["matched_capacity_config"] = dict(capacity_config["selected"])
+    updated["capacity_config"] = dict(capacity_config["selected"])
     return updated
 
 
 _CONSTRAINED_CAPACITY_METADATA_KEYS = (
     "search_policy_axis",
-    "matched_capacity_policy",
-    "matched_capacity_target",
-    "matched_capacity_target_name",
-    "matched_capacity_label",
-    "matched_capacity_tolerance",
-    "matched_capacity_lower",
-    "matched_capacity_upper",
-    "matched_hidden_dim_grid",
-    "matched_depth_level_grid",
-    "matched_flow_depth_grid",
-    "matched_capacity",
-    "matched_capacity_distance",
-    "matched_capacity_in_band",
-    "matched_capacity_overshoot",
-    "matched_capacity_undershoot",
-    "matched_hidden_dim",
-    "matched_depth_level",
-    "matched_flow_depth",
+    "capacity_policy",
+    "capacity_target",
+    "capacity_target_name",
+    "capacity_label",
+    "capacity_tolerance",
+    "capacity_lower",
+    "capacity_upper",
+    "capacity_hidden_dim_grid",
+    "capacity_depth_level_grid",
+    "capacity_flow_depth_grid",
+    "capacity_param_count",
+    "capacity_distance",
+    "capacity_in_band",
+    "capacity_overshoot",
+    "capacity_undershoot",
+    "capacity_hidden_dim",
+    "capacity_depth_level",
+    "capacity_flow_depth",
     "params_at_min_carrier",
     "params_at_max_carrier",
     "candidate_count",
-    "matched_capacity_config",
 )
 
 
@@ -949,7 +946,7 @@ def _build_task_targets(task, x_missing_norm, y, forecast_horizon=None):
 
 
 def report_tune_loss(loss_value):
-    _ray, _tune, _ = _load_ray_tune()
+    _ray, _tune, *_ = _load_ray_tune()
     metric = float(loss_value)
     try:
         _tune.report(loss=metric)
@@ -981,7 +978,7 @@ def resolve_trial_device(device_mode, ray_gpu):
         return torch.device("cuda")
     return torch.device("cpu")
 
-# Helper function for single-seed training (used by both default and cv modes)
+# Helper function for one split seed (used by both single and aggregated repeats)
 def _train_single_seed(
     data_name,
     missing_rate,
@@ -1261,7 +1258,7 @@ def tune_model(
     SEED=SEED,
     device_mode="auto",
     ray_gpu=0.0,
-    search_mode="default",
+    search_repeat=SINGLE_SEARCH_REPEAT,
     split_root="split",
     task="classification",
     forecast_horizon=None,
@@ -1272,7 +1269,7 @@ def tune_model(
     trial_seed=None,
 ):
     trial_device = resolve_trial_device(device_mode, ray_gpu)
-    LOGGER.info("Tune start dataset=%s model=%s mode=%s", data_name, model_name, search_mode)
+    LOGGER.info("Tune start dataset=%s model=%s repeat=%s", data_name, model_name, search_repeat)
     LOGGER.info(
         "Trial device resolved mode=%s ray_gpu=%s device=%s",
         device_mode,
@@ -1285,8 +1282,7 @@ def tune_model(
     interpolate = data_config['interpolation']
     use_intensity = data_config['use_intensity']
 
-    if search_mode == "default":
-        # Default mode: single-seed search on the requested seed
+    if search_repeat == SINGLE_SEARCH_REPEAT:
         seed_everything(SEED if trial_seed is None else trial_seed)
         best_loss = _train_single_seed(
             data_name=data_name,
@@ -1306,13 +1302,12 @@ def tune_model(
             dataset_source=dataset_source,
             dataset_npz=dataset_npz,
         )
-        LOGGER.info("Default mode finished dataset=%s model=%s best_loss=%.6f", data_name, model_name, best_loss)
+        LOGGER.info("Single repeat finished dataset=%s model=%s best_loss=%.6f", data_name, model_name, best_loss)
         report_tune_loss(best_loss)
 
-    elif search_mode == "cv":
-        # CV mode: average SEED=0~4 results at higher compute cost
-        cv_losses = []
-        for seed in range(5):
+    elif search_repeat == AGGREGATED_SEARCH_REPEAT:
+        repeat_losses = []
+        for seed in _fixed_search_seed_set(search_repeat, SEED):
             fold_trial_seed = seed if trial_seed is None else _derive_trial_seed(trial_seed, seed)
             seed_everything(fold_trial_seed)
             loss = _train_single_seed(
@@ -1333,26 +1328,25 @@ def tune_model(
                 dataset_source=dataset_source,
                 dataset_npz=dataset_npz,
             )
-            cv_losses.append(loss)
-            LOGGER.info("CV mode seed=%d dataset=%s model=%s loss=%.6f", seed, data_name, model_name, loss)
+            repeat_losses.append(loss)
+            LOGGER.info("Aggregated repeat seed=%d dataset=%s model=%s loss=%.6f", seed, data_name, model_name, loss)
 
-        # Report average loss to Ray Tune
-        avg_loss = np.mean(cv_losses)
-        std_loss = np.std(cv_losses)
+        avg_loss = np.mean(repeat_losses)
+        std_loss = np.std(repeat_losses)
         LOGGER.info(
-            "CV mode finished dataset=%s model=%s avg_loss=%.6f±%.6f (seeds=%s)",
+            "Aggregated repeat finished dataset=%s model=%s avg_loss=%.6f±%.6f (seeds=%s)",
             data_name,
             model_name,
             avg_loss,
             std_loss,
-            cv_losses,
+            repeat_losses,
         )
         report_tune_loss(avg_loss)
 
     else:
-        raise ValueError(f"Unknown search_mode: {search_mode}. Expected 'default' or 'cv'.")
+        raise ValueError(f"Unknown search_repeat: {search_repeat}. Expected 'single' or 'aggregated'.")
 
-    LOGGER.info("Finished training dataset=%s model=%s mode=%s", data_name, model_name, search_mode)
+    LOGGER.info("Finished training dataset=%s model=%s repeat=%s", data_name, model_name, search_repeat)
 
 
 def optimize(
@@ -1362,12 +1356,11 @@ def optimize(
     split_path,
     split_root="split",
     param_root="params",
-    num_samples=20,
+    num_samples=50,
     max_num_epochs=10,
     ray_cpu=16.0,
     ray_gpu=0.5,
     device_mode="auto",
-    search_mode="default",
     search_policy=STANDARD_SEARCH_POLICY,
     search_repeat=SINGLE_SEARCH_REPEAT,
     search_profile=DEFAULT_SEARCH_PROFILE,
@@ -1415,11 +1408,11 @@ def optimize(
             CONSTRAINED_MATCHED_CAPACITY_TARGET_NAME,
             data_name,
             model_name,
-            constrained_capacity_config["metadata"]["matched_hidden_dim"],
-            constrained_capacity_config["metadata"]["matched_depth_level"],
-            constrained_capacity_config["metadata"]["matched_flow_depth"],
-            constrained_capacity_config["metadata"]["matched_capacity"],
-            constrained_capacity_config["metadata"]["matched_capacity_target"],
+            constrained_capacity_config["metadata"]["capacity_hidden_dim"],
+            constrained_capacity_config["metadata"]["capacity_depth_level"],
+            constrained_capacity_config["metadata"]["capacity_flow_depth"],
+            constrained_capacity_config["metadata"]["capacity_param_count"],
+            constrained_capacity_config["metadata"]["capacity_target"],
         )
     metadata_seed = _fixed_search_seed_set(search_repeat, SEED)[0]
     artifact_identity = build_param_artifact_identity(
@@ -1458,7 +1451,7 @@ def optimize(
         )
         split_root_local = split_root
 
-        if search_mode == "default":
+        if search_repeat == SINGLE_SEARCH_REPEAT:
             best_loss = _train_single_seed(
                 data_name=data_name,
                 missing_rate=missing_rate,
@@ -1477,9 +1470,9 @@ def optimize(
                 dataset_source=dataset_source,
                 dataset_npz=dataset_npz,
             )
-        elif search_mode == "cv":
+        elif search_repeat == AGGREGATED_SEARCH_REPEAT:
             losses = []
-            for seed in range(5):
+            for seed in _fixed_search_seed_set(search_repeat, SEED):
                 losses.append(
                     _train_single_seed(
                         data_name=data_name,
@@ -1502,7 +1495,7 @@ def optimize(
                 )
             best_loss = float(np.mean(losses))
         else:
-            raise ValueError(f"Unknown search_mode: {search_mode}")
+            raise ValueError(f"Unknown search_repeat: {search_repeat}")
 
         saved_model_config = _normalize_param_config_for_save(
             model_name,
@@ -1646,7 +1639,7 @@ def optimize(
         trial_seed = _derive_trial_seed(SEED, _current_tune_trial_token(model_config))
         tune_model(data_name=data_name, missing_rate=missing_rate, model_name=model_name,
                    model_config=model_config, EPOCHS=max_num_epochs, SEED=SEED,
-                   device_mode=device_mode, ray_gpu=ray_gpu, search_mode=search_mode,
+                   device_mode=device_mode, ray_gpu=ray_gpu, search_repeat=search_repeat,
                    split_root=split_root, task=task, forecast_horizon=forecast_horizon,
                    target_source=target_source, targets_root=targets_root,
                    dataset_source=dataset_source, dataset_npz=dataset_npz,
@@ -1712,7 +1705,7 @@ def optimize(
     with open(param_path, 'wb') as f:
         pickle.dump(saved_param_config, f)
 
-    LOGGER.info("Params saved to %s (mode=%s)", param_path, search_mode)
+    LOGGER.info("Params saved to %s (repeat=%s)", param_path, search_repeat)
 
     metadata = _collect_task_metadata(
         data_name=data_name,
@@ -1844,13 +1837,13 @@ def main():
                     skipped.append({"dataset": data_name, "model": model_name, "task": args.task, "reason": reason})
                     policy_violations.append(f"{data_name}/{model_name}: {reason}")
                 else:
-                    LOGGER.info("Params file already exists: %s/%s (checking reuse contract)", data_name, out_name)
+                    LOGGER.info("Params file already exists: %s/%s (checking reuse details)", data_name, out_name)
                     try:
                         with open(existing_param_path, "rb") as f:
                             existing_cfg = pickle.load(f)
                         param_hash = existing_cfg.get("param_hash")
                     except Exception as exc:
-                        reason = f"failed to load existing params for reuse contract: {exc}"
+                        reason = f"failed to load existing params for reuse check: {exc}"
                         LOGGER.error("[FAIL] %s/%s: %s", data_name, model_name, reason)
                         skipped.append({"dataset": data_name, "model": model_name, "task": args.task, "reason": reason})
                         policy_violations.append(f"{data_name}/{model_name}: {reason}")
@@ -1865,7 +1858,7 @@ def main():
                             allow_legacy_search_profile=args.allow_legacy_search_profile,
                         )
                     except ValueError as exc:
-                        reason = f"param artifact reuse contract violation: {exc}"
+                        reason = f"param artifact reuse check failed: {exc}"
                         LOGGER.error("[FAIL] %s/%s: %s", data_name, model_name, reason)
                         skipped.append({"dataset": data_name, "model": model_name, "task": args.task, "reason": reason})
                         policy_violations.append(f"{data_name}/{model_name}: {reason}")
@@ -1943,7 +1936,6 @@ def main():
                     ray_cpu=args.ray_cpu,
                     ray_gpu=args.ray_gpu,
                     device_mode=args.device,
-                    search_mode=args.search_mode,
                     search_policy=args.search_policy,
                     search_repeat=args.search_repeat,
                     search_profile=args.search_profile,
@@ -2027,7 +2019,7 @@ def main():
     exit_code = 0
     if policy_violations:
         LOGGER.error(
-            "Parameter artifact policy violations=%d. First violation: %s",
+            "Parameter artifact errors=%d. First error: %s",
             len(policy_violations),
             policy_violations[0],
         )
@@ -2045,6 +2037,17 @@ def main():
         )
         exit_code = 2
 
+    search_contract_metadata = describe_search_profile(args.search_profile)
+    if args.search_policy == CONSTRAINED_SEARCH_POLICY:
+        search_contract_metadata = dict(search_contract_metadata)
+        search_contract_metadata.update(
+            {
+                "search_contract": CONSTRAINED_SEARCH_CONTRACT_NAME,
+                "search_family": CONSTRAINED_SEARCH_FAMILY,
+                "public_search_name": CONSTRAINED_PUBLIC_SEARCH_NAME,
+            }
+        )
+
     manifest_path, _manifest = write_manifest(
         stage="search",
         contract_dir=args.contract_dir,
@@ -2060,19 +2063,24 @@ def main():
             "search_policy": args.search_policy,
             "search_policy_axis": args.search_policy,
             "search_repeat": args.search_repeat,
-            "matched_capacity_target": (
+            "capacity_target": (
                 int(CONSTRAINED_MATCHED_CAPACITY_TARGET)
                 if args.search_policy == CONSTRAINED_SEARCH_POLICY
                 else None
             ),
-            "matched_capacity_target_name": (
+            "capacity_target_name": (
                 CONSTRAINED_MATCHED_CAPACITY_TARGET_NAME
+                if args.search_policy == CONSTRAINED_SEARCH_POLICY
+                else None
+            ),
+            "capacity_policy": (
+                CONSTRAINED_CAPACITY_POLICY_NAME
                 if args.search_policy == CONSTRAINED_SEARCH_POLICY
                 else None
             ),
             "search_seed_set": _fixed_search_seed_set(args.search_repeat, SEED),
             "search_profile": args.search_profile,
-            **describe_search_profile(args.search_profile),
+            **search_contract_metadata,
             "split_root": str(args.split_root),
             "param_root": str(args.param_root),
             "records": records,
@@ -2093,7 +2101,7 @@ def main():
             },
         },
     )
-    LOGGER.info("Search manifest written: %s", manifest_path)
+    LOGGER.info("Search run log written: %s", manifest_path)
     return exit_code
 
 

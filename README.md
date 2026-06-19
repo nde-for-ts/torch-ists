@@ -1,6 +1,6 @@
 # torch-ists
 
-[![Version](https://img.shields.io/badge/version-0.3.3-blue)](pyproject.toml) [![Python](https://img.shields.io/badge/python-%3E%3D3.10-blue)](pyproject.toml) [![PyTorch](https://img.shields.io/badge/PyTorch-%3E%3D2.0-ee4c2c)](pyproject.toml) [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![Package status](https://img.shields.io/badge/status-preview-orange)](#project-status)
+[![Version](https://img.shields.io/badge/version-0.3.4-blue)](pyproject.toml) [![Python](https://img.shields.io/badge/python-%3E%3D3.10-blue)](pyproject.toml) [![PyTorch](https://img.shields.io/badge/PyTorch-%3E%3D2.0-ee4c2c)](pyproject.toml) [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![Package status](https://img.shields.io/badge/status-preview-orange)](#project-status)
 
 **PyTorch toolkit for irregularly sampled multivariate time series with continuous-time methods (Neural ODE/CDE/SDE) and discrete-time baselines.**
 
@@ -104,6 +104,8 @@ Direct sequence and attention baselines take `coeffs=None`, while continuous-tim
 
 See [Model Reference](docs/model_reference.md) for which models need `preprocess(X, model_name=...)` versus the direct sequence stack.
 
+Benchmark loader note: variable-length UCR/UEA panels are padded to the pooled train+test maximum length with `NaN` by default. Use `padding="last"` only when reproducing the older interpolation path.
+
 Missing-value handling:
 
 - `preprocess(...)` preserves missing values as `NaN` in `X_missing` and derives `X_mask`, `X_delta`, and interpolation coefficients from that path.
@@ -135,7 +137,7 @@ User-owned `nn.Module` models can compose with packaged data, split, and preproc
 - `docs/README.md` — docs index for the current package
 - `docs/api_reference.md` — exported runtime API
 - `docs/model_reference.md` — per-model origin paper, canonical repo, and implementation note
-- `docs/scripts_reference.md` — source-checkout CLI scripts: flags, outputs, and pipeline order
+- `docs/scripts_reference.md` — included scripts: flags, outputs, and pipeline order
 - `docs/custom_data_guide.md` — guidance for adding user-provided datasets through the Python API
 - `docs/custom_model_guide.md` — guidance for using custom models alongside the package
 - `docs/third_party_notices.md` — upstream sources and licenses for third-party code in the package

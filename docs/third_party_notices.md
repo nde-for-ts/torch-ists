@@ -23,7 +23,7 @@
 | TorchDiffEqPack | `exit`, `leap` | `cde/{exit,leap}/_controldiffeq/TorchDiffEqPack/` | [juntang-zhuang/TorchDiffEqPack](https://github.com/juntang-zhuang/TorchDiffEqPack) | MIT |
 | NeuralFlow NFE backend (optional) | `neuralflow-r/g/c` when `flow_backend='nfe'` | `flow/_neural_flows/` | [mbilos/neural-flows-experiments](https://github.com/mbilos/neural-flows-experiments) | None |
 
-**None** means the upstream publishes no LICENSE file. Such code is all-rights-reserved by default; confirm redistribution rights with the original authors. Included files preserve the upstream URL and author in their headers (the NeuralFlow snapshot instead records its provenance in `flow/_neural_flows/PROVENANCE.json`).
+**None** means the upstream publishes no LICENSE file. Such code is all-rights-reserved by default; confirm redistribution rights with the original authors. Included files preserve the upstream URL and author in their headers (the NeuralFlow snapshot records source details in `flow/_neural_flows/PROVENANCE.json`).
 
 NeuralFlow defaults to the package's own MIT-licensed operators in `flow/operators_native.py`. The NFE snapshot is the optional backend selected only via `flow_backend='nfe'` (requires manual `stribor` install) and is the only path that runs the no-license NFE code; its pinned commit and file hashes are recorded in `flow/_neural_flows/PROVENANCE.json`.
 

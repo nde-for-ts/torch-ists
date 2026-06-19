@@ -46,7 +46,7 @@ All supported data paths use this array format:
 |---|---|---|---|
 | `X` | `[N, D, L]` | yes | `N` samples, `D` feature channels, `L` time steps. Use `float32` where possible. |
 | `y` | `[N]` | yes | One label per sample for the stable classification workflow. Integer labels are recommended. |
-| `timestamps` | `[N, L]` | optional | Stored by `DataLoader`, but not consumed by the source-checkout script pipeline. |
+| `timestamps` | `[N, L]` | optional | Stored by `DataLoader`, but not consumed by the included script pipeline. |
 
 Missing values should be represented as `NaN`. For variable-length series, pad shorter series to a fixed `L` with `NaN`; `preprocess` builds the observed-value mask from those `NaN` positions.
 
@@ -137,7 +137,7 @@ Before using a new dataset:
 - Confirm `X.shape == (N, D, L)` and `y.shape == (N,)`.
 - Use numeric labels for classification, preferably 0-based contiguous integers.
 - Use `NaN` for missing or padded values; do not use a numeric sentinel such as `-999`.
-- Ensure each class has enough samples for the split policy used by your training code.
+- Ensure each class has enough samples for the split method used by your training code.
 
 ---
 

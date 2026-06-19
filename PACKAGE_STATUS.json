@@ -1,8 +1,8 @@
 {
   "package_stage": "preview",
-  "package_version": "0.3.3",
-  "canonical_profile": "preview-v033-public0303-dimension-adaptive-feasibility",
-  "profile_alias": "preview-public0303-dimension-adaptive-feasibility",
-  "scope": "dimension-adaptive feasibility checkpoint on top of the 0.3.2 benchmark-integrity line: 50 packaged models unchanged; default parameter search uses model-specific candidate axes; constrained search remains experimental and auxiliary; resolver-only feasibility evidence is maintained in the deployment/release workflow before optional constrained training; parameter search is standard/no-synthetic-missingness with independent search seed 42; standard, missingness, and robustness evaluation remain model_run.py regimes; legacy width/depth-only profiles remain internal compatibility/repro metadata and are not public-facing",
+  "package_version": "0.3.4",
+  "canonical_profile": "preview-v034-public0304-external-benchmark-handoff",
+  "profile_alias": "preview-public0304-external-benchmark-handoff",
+  "scope": "external benchmark handoff checkpoint on top of the 0.3.3 public payload line: 50 packaged models unchanged; default parameter search remains model-specific and standard/no-synthetic-missingness with independent search seed 42; standard evaluation seeds are 0-4; artifacts carry identity, self-hash, search-budget, skip/failure, and output-contract metadata; model_run.py exposes explicit device selection; variable-length benchmark-loader inputs preserve NaN padding by default; constrained search remains experimental and auxiliary",
   "included_models": ["cnn", "rnn", "lstm", "gru", "bilstm", "gru-simple", "plstm", "tlstm", "tglstm", "transformer", "transformer-mask", "sand", "mtan", "miam", "neuralflow-r", "neuralflow-g", "neuralflow-c", "dualdynamics-r", "dualdynamics-g", "dualdynamics-c", "flowpath-r", "flowpath-g", "flowpath-c", "neuralcde", "neuralcde-l", "neuralcde-r", "neuralcde-c", "neuralcde-h", "neuralrde-1", "neuralrde-2", "neuralrde-3", "gru-dt", "gru-d", "gru-ode", "ode-rnn-spline", "ode-lstm", "ode-rnn", "latentode", "gru-ode-bayes", "naive_cde", "neural_ode", "neural_ode_t", "neural_sde", "neural_sde_t", "neural_lsde", "neural_lnsde", "neural_gsde", "ancde", "exit", "leap"]
 }

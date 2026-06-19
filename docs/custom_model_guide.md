@@ -13,7 +13,7 @@ This reference shows how to use `torch-ists` data utilities with your own PyTorc
 
 1. [What This Reference Covers](#1-what-this-reference-covers)
 2. [Sequence Wrapper Pattern](#2-sequence-wrapper-pattern)
-3. [Missing-Value Policy](#3-missing-value-policy)
+3. [Missing-Value Handling](#3-missing-value-handling)
 4. [NDE Wrapper Pattern with Coeffs](#4-nde-wrapper-pattern-with-coeffs)
 5. [Using Packaged Splits](#5-using-packaged-splits)
 
@@ -39,7 +39,7 @@ class ExternalSequenceClassifier(nn.Module):
         self.head = nn.Linear(hidden_dim, num_class)
 
     def forward(self, seq: torch.Tensor) -> torch.Tensor:
-        # Naive baseline only: see the missing-value policy below.
+        # Naive baseline only: see the missing-value handling below.
         values = torch.nan_to_num(seq[:, 0], nan=0.0)
         _, hidden = self.encoder(values)
         return self.head(hidden[-1])
@@ -53,13 +53,13 @@ logits = model(seq)
 
 The sequence stack is `[batch, channels, length, features]`; channel 0 contains values. Missing-value handling belongs to your model or training loop unless you call `preprocess(...)`.
 
-## 3. Missing-Value Policy
+## 3. Missing-Value Handling
 
-`torch.nan_to_num(seq[:, 0], nan=0.0)` is a naive baseline policy. It cannot distinguish a true zero from a missing value unless your model also consumes mask or delta channels.
+`torch.nan_to_num(seq[:, 0], nan=0.0)` is a simple baseline fill. It cannot distinguish a true zero from a missing value unless your model also consumes mask or delta channels.
 
 Recommended custom-model paths:
 
-- Use `coeffs=None` plus your own imputation policy, keeping mask and time-delta channels if your architecture can consume them.
+- Use `coeffs=None` plus your own imputation strategy, keeping mask and time-delta channels if your architecture can consume them.
 - Consume the `(values, mask, delta)` stack directly instead of reading only `seq[:, 0]`.
 - Use `preprocess(...)` to build interpolation `coeffs` and pass those coefficients into the custom model.
 

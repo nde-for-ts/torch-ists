@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import torch
 
@@ -46,3 +48,16 @@ def test_missingness_and_split_helpers_smoke():
     assert masked.shape == X.shape
     assert mask.shape == X.shape
     assert np.isnan(masked[mask == 0]).any()
+
+
+def test_param_search_uses_repeat_axis_for_internal_branching():
+    script = Path(__file__).resolve().parents[1] / "scripts" / "param_search.py"
+    source = script.read_text()
+
+    assert "def _search_mode_from_repeat" not in source
+    assert "args.search_mode =" not in source
+    assert "search_mode=" not in source
+    assert "search_mode ==" not in source
+    assert "Unknown search_mode" not in source
+    assert "search_repeat == SINGLE_SEARCH_REPEAT" in source
+    assert "search_repeat == AGGREGATED_SEARCH_REPEAT" in source

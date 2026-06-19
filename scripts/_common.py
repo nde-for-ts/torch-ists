@@ -12,37 +12,44 @@ import sys
 from pathlib import Path
 
 MODEL_SCOPE_VARIANT_ENV = "TORCH_ISTS_MODEL_SCOPE_VARIANT"
-BATCH_SIZE_POLICY_NAME = "dataset-derived-fixed-v1"
-LEARNING_RATE_POLICY_NAME = "fixed-lr-fallback-v1"
-WEIGHT_DECAY_POLICY_NAME = "lr-proportional-weight-decay-v1"
-LEGACY_ICLR2024_SEARCH_PROFILE = "legacy-iclr2024-v0"
-LEGACY_EXPANDED_SEARCH_PROFILE = "legacy-expanded-v1"
-MODEL_NATIVE_SEARCH_PROFILE = "model-native-v1"
+BATCH_SIZE_POLICY_NAME = "dataset-derived-fixed"
+LEARNING_RATE_POLICY_NAME = "fixed-lr-fallback"
+WEIGHT_DECAY_POLICY_NAME = "lr-proportional-weight-decay"
+LEGACY_ICLR2024_SEARCH_PROFILE = "legacy-iclr2024"
+LEGACY_EXPANDED_SEARCH_PROFILE = "legacy-expanded"
+MODEL_NATIVE_SEARCH_PROFILE = "model-native"
 DEFAULT_SEARCH_PROFILE = MODEL_NATIVE_SEARCH_PROFILE
-MODEL_SPECIFIC_SEARCH_POLICY_NAME = "model-native-effective-params-v1"
+MODEL_SPECIFIC_SEARCH_POLICY_NAME = "model-native-effective-params"
 STANDARD_SEARCH_POLICY = "default"
 SINGLE_SEARCH_REPEAT = "single"
 DEFAULT_MODEL_NATIVE_HIDDEN_DIM_VALUES = [32, 64, 96, 128, 160, 192, 224, 256]
 CONSTRAINED_MATCHED_CAPACITY_HIDDEN_DIM_VALUES = list(range(16, 257, 16))
 CONSTRAINED_MATCHED_CAPACITY_DEPTH_LEVEL_VALUES = [1, 2, 3, 4, 5]
 CONSTRAINED_MATCHED_CAPACITY_TARGET = 200_000
-CONSTRAINED_MATCHED_CAPACITY_TARGET_NAME = "matched200k"
+CONSTRAINED_MATCHED_CAPACITY_TARGET_NAME = "constrained"
 CONSTRAINED_MATCHED_CAPACITY_LABEL = "capacity-controlled"
-DEFAULT_SEARCH_CONTRACT_NAME = "model-specific-default-v1"
-HISTORICAL_SEARCH_CONTRACT_NAME = "historical-reproducibility-v1"
+CONSTRAINED_CAPACITY_POLICY_NAME = "capacity-controlled"
+CONSTRAINED_SEARCH_CONTRACT_NAME = "capacity-controlled-search"
+CONSTRAINED_SEARCH_FAMILY = "capacity-controlled"
+CONSTRAINED_PUBLIC_SEARCH_NAME = "experimental capacity-controlled search"
+DEFAULT_SEARCH_CONTRACT_NAME = "model-specific-default"
+HISTORICAL_SEARCH_CONTRACT_NAME = "historical-reproducibility"
 INTERNAL_SEARCH_PROFILE_VISIBILITY = "internal"
 
 _SEARCH_PROFILE_ALIASES = {
     "default": MODEL_NATIVE_SEARCH_PROFILE,
     "model-native": MODEL_NATIVE_SEARCH_PROFILE,
+    "model-native-v1": MODEL_NATIVE_SEARCH_PROFILE,
     "model-specific": MODEL_NATIVE_SEARCH_PROFILE,
     MODEL_NATIVE_SEARCH_PROFILE: MODEL_NATIVE_SEARCH_PROFILE,
     "legacy": LEGACY_EXPANDED_SEARCH_PROFILE,
     "expanded": LEGACY_EXPANDED_SEARCH_PROFILE,
     "legacy-expanded": LEGACY_EXPANDED_SEARCH_PROFILE,
+    "legacy-expanded-v1": LEGACY_EXPANDED_SEARCH_PROFILE,
     LEGACY_EXPANDED_SEARCH_PROFILE: LEGACY_EXPANDED_SEARCH_PROFILE,
     "iclr2024": LEGACY_ICLR2024_SEARCH_PROFILE,
     "legacy-iclr2024": LEGACY_ICLR2024_SEARCH_PROFILE,
+    "legacy-iclr2024-v0": LEGACY_ICLR2024_SEARCH_PROFILE,
     LEGACY_ICLR2024_SEARCH_PROFILE: LEGACY_ICLR2024_SEARCH_PROFILE,
 }
 
@@ -279,7 +286,7 @@ def normalize_search_profile(raw: str | None) -> str:
 
 
 def describe_search_profile(raw: str | None) -> dict:
-    """Return public contract metadata for an internal artifact profile."""
+    """Return public search details for a saved artifact profile."""
     profile = normalize_search_profile(raw)
     if profile == LEGACY_ICLR2024_SEARCH_PROFILE:
         return {
@@ -433,7 +440,7 @@ def validate_param_artifact_metadata(
     if missing_fields and not (allow_legacy_search_profile and profile == LEGACY_ICLR2024_SEARCH_PROFILE):
         missing = ", ".join(missing_fields)
         raise ValueError(
-            f"{context} is missing required search-contract field(s): {missing}. "
+            f"{context} is missing required search detail field(s): {missing}. "
             "Regenerate params with scripts/param_search.py."
         )
 

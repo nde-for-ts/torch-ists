@@ -63,12 +63,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--contract-dir",
         default="evidence",
-        help="Directory for run manifests.",
+        help="Directory for JSON run logs.",
     )
     parser.add_argument(
         "--run-id",
         default=None,
-        help="Run identifier for related artifacts.",
+        help="Run identifier for related outputs.",
     )
     parser.add_argument(
         "--dry-run",

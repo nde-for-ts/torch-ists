@@ -2,7 +2,7 @@
 
 > **Type**: Reference
 > **Scope**: Exported runtime APIs for the current package
-> **Note**: Built wheels install the `torch_ists` runtime package only; top-level `docs/` and `PACKAGE_STATUS.json` are source-checkout assets.
+> **Note**: Built wheels install the `torch_ists` runtime package only; top-level `docs/` and `PACKAGE_STATUS.json` are available in the repository checkout.
 
 ---
 
@@ -273,11 +273,11 @@ X, y = benchmark_loader.get_data("BasicMotions")
 
 Install `.[data]` for the optional `pandas` and `sktime` dependencies. The loader stores and searches UCR/UEA archives under `TORCH_ISTS_DATA_ROOT` when set, otherwise under `<package checkout>/data`. Fallback search checks `Univariate_ts/<dataset>/<dataset>_{TRAIN,TEST}.ts` and `Multivariate_ts/<dataset>/<dataset>_{TRAIN,TEST}.ts`.
 
-Benchmark loader behavior: the packaged benchmark loader pools the original UCR/UEA train and test partitions before project splits are applied. Variable-length resampling uses the pooled train+test maximum length, labels default to pooled train+test encoding, and ragged padding uses `NaN`. Use `get_data(..., label_policy="train", padding="last")` only to reproduce older benchmark preprocessing.
+Benchmark loader behavior: the packaged benchmark loader pools the original UCR/UEA train and test partitions before project splits are applied. Variable-length series are padded to the pooled train+test maximum length with `NaN` by default, and labels default to pooled train+test encoding. Use `get_data(..., label_policy="train", padding="last")` only to reproduce older benchmark preprocessing.
 
 #### Legacy-mode caveats
 
-`label_policy="train"` raises `ValueError` when `y_test` contains a class not seen in `y_train`. `padding="last"` reproduces the legacy forward-fill of the last observed value and returns no companion mask, so downstream models cannot distinguish padded positions from real observations. Use both only for legacy reproducibility.
+`label_policy="train"` raises `ValueError` when `y_test` contains a class not seen in `y_train`. `padding="last"` uses the legacy equal-length interpolation path and forward-fills the last observed value when padding remains, returning no companion mask; downstream models cannot distinguish padded positions from real observations. Use both only for legacy reproducibility.
 
 #### Train/test split behavior
 
@@ -555,7 +555,7 @@ print(np.isnan(X_missing).mean())  # ~0.3
 | **BLOCK** | One contiguous temporal gap per sample/channel | Experimental |
 | **BURST** | Several short contiguous temporal gaps per sample/channel | Experimental |
 
-**Feature flag**: `MISSINGNESS_EXPERIMENTAL = True` marks MAR/MNAR/BLOCK/BURST and robustness result schemas as experimental.
+**Missingness support**: `MISSINGNESS_EXPERIMENTAL = True` marks MAR/MNAR/BLOCK/BURST and robustness result schemas as experimental.
 
 Missingness caveats:
 
@@ -724,7 +724,7 @@ Behavior notes:
 - For sequence baselines, `transformer`, and `sand`, the packaged runtime applies `torch.nan_to_num(..., nan=0.0)` before the backbone call and does not pass a padding mask into the attention backbone.
 - `transformer-mask` uses the same zero-filled values, but it also applies `src_key_padding_mask` derived from the packaged observation mask.
 - `mtan` and `miam` consume zero-filled values together with the original sequence stack and normalized timestamps; they do not use interpolation coefficients.
-- `imputation_strategy` selects how missing entries are filled for direct value-channel backbones: `"zero"` (default), `"last_observed"`, and `"channel_mean"`. Strict raw-missing rows (`neuralflow-*`, `flowpath-*`) keep raw `NaN` until their mask-aware internal fill; coefficient-driven rows consume the `coeffs` built by `preprocess(...)`.
+- `imputation_strategy` selects how missing entries are filled for direct value-channel backbones: `"zero"` (default), `"last_observed"`, and `"channel_mean"`. Strict raw-missing rows (`neuralflow-*`, `flowpath-*`) keep raw `NaN` until mask-aware filling; coefficient-driven rows consume the `coeffs` built by `preprocess(...)`.
 - Non-finite backbone outputs, hidden states, or logits raise `RuntimeError`; the package does not silently zero-fill them.
 
 ### 6.2 `ists_model`
@@ -817,7 +817,7 @@ The config API provides model metadata, model-specific preprocessing settings, a
 
 **Location**: `torch_ists.config`
 
-**Exported**: `MODEL_REGISTRY`, config helpers, and runtime policy helpers are available from `torch_ists.config`. Additional model metadata constants are available from `torch_ists.config.models`.
+**Exported**: `MODEL_REGISTRY`, config helpers, and runtime setting helpers are available from `torch_ists.config`. Additional model metadata constants are available from `torch_ists.config.models`.
 
 ---
 
@@ -877,9 +877,9 @@ config = get_data_config('cnn')
 print(config)  # {'interpolation': 'cubic', 'use_intensity': False}
 ```
 
-If `ists_classifier()` or `ists_model()` is called with `use_intensity=None`, the runtime resolves the flag from this policy.
+If `ists_classifier()` or `ists_model()` is called with `use_intensity=None`, the runtime resolves the flag from these defaults.
 
-For sequence baselines, `transformer`, `transformer-mask`, `sand`, `mtan`, `miam`, and `neuralflow`, the `'cubic'` policy applies only when you explicitly call `preprocess(X, model_name=...)`; the packaged forward path itself uses `coeffs=None` and zero-fills `NaN`. `transformer-mask` additionally applies `src_key_padding_mask`.
+For sequence baselines, `transformer`, `transformer-mask`, `sand`, `mtan`, `miam`, and `neuralflow`, the `'cubic'` setting applies only when you explicitly call `preprocess(X, model_name=...)`; the packaged forward path itself uses `coeffs=None` and zero-fills `NaN`. `transformer-mask` additionally applies `src_key_padding_mask`.
 
 ---
 
