@@ -202,33 +202,12 @@ def _read_public_mirror_head(root: Path) -> str | None:
         return None
 
 
-def build_runtime_provenance(runtime_baseline_id: str | None = None) -> dict:
-    """Return portable runtime metadata without recording local filesystem paths."""
-    try:
-        import torch_ists
-
-        package_version = str(getattr(torch_ists, "__version__", "unknown"))
-        package_file = Path(getattr(torch_ists, "__file__", "")).resolve()
-        runtime_root = package_file.parents[1] if package_file else Path(__file__).resolve().parents[1]
-    except Exception:
-        package_version = "unknown"
-        runtime_root = Path(__file__).resolve().parents[1]
-
-    status = _read_json_file(runtime_root / "PACKAGE_STATUS.json") or {}
-    mirror_commit_sha = (
-        os.environ.get("TORCH_ISTS_MIRROR_COMMIT_SHA")
-        or status.get("mirror_commit_sha")
-        or (_read_public_mirror_head(runtime_root) if (runtime_root / "PACKAGE_STATUS.json").exists() else None)
-    )
-    archive_checksum = os.environ.get("TORCH_ISTS_ARCHIVE_SHA256") or status.get("mirror_archive_checksum")
-
-    return {
-        "package_version": package_version,
-        "mirror_commit_sha": None if mirror_commit_sha is None else str(mirror_commit_sha),
-        "mirror_archive_checksum": None if archive_checksum is None else str(archive_checksum),
-        "runtime_baseline_id": None if runtime_baseline_id is None else str(runtime_baseline_id),
-        "wheel_or_source_checkout": "source_checkout" if (runtime_root / "scripts").exists() else "installed_package",
-    }
+def normalize_runtime_baseline_id(runtime_baseline_id: str | None = None) -> str | None:
+    """Return a caller-provided runtime label without adding package internals."""
+    if runtime_baseline_id is None:
+        return None
+    value = str(runtime_baseline_id).strip()
+    return value or None
 
 
 def _path_is_under(path: Path, roots: list[Path]) -> bool:

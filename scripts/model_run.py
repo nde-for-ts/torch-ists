@@ -42,13 +42,13 @@ from _common import (
     CONSTRAINED_MATCHED_CAPACITY_TARGET_NAME,
     DEFAULT_SEARCH_PROFILE,
     apply_model_scope_variant,
-    build_runtime_provenance,
     build_model_kwargs_from_config,
     configure_runtime_paths,
     default_method_for_model,
     describe_search_profile,
     infer_param_search_profile,
     LEGACY_ICLR2024_SEARCH_PROFILE,
+    normalize_runtime_baseline_id,
     normalize_search_profile,
     resolve_dataset_fixed_batch_policy,
     resolve_learning_rate_policy,
@@ -790,7 +790,7 @@ def parse_cli_args():
         "--runtime-baseline-id",
         type=str,
         default=None,
-        help="Optional runtime baseline label copied into manifests and output metadata.",
+        help="Optional user-provided run label copied into manifests and output metadata.",
     )
     parser.add_argument(
         "--manifest-existing-policy",
@@ -1548,7 +1548,7 @@ def _build_result_payload(
     output_contract=None,
     timestamp_summary=None,
     aux_nan_event_count=0,
-    runtime_provenance=None,
+    runtime_baseline_id=None,
     training_loop=None,
     coeff_cache=None,
 ):
@@ -1570,7 +1570,7 @@ def _build_result_payload(
         "robustness_axes": robustness_axes,
         "timestamp_summary": timestamp_summary,
         "aux_nan_event_count": int(aux_nan_event_count),
-        "runtime_provenance": runtime_provenance,
+        "runtime_baseline_id": runtime_baseline_id,
         "training_loop": training_loop,
         "coeff_cache": coeff_cache,
     }
@@ -1619,7 +1619,7 @@ def run_model(
     targets_root="targets",
     dataset_source="default",
     dataset_npz=None,
-    runtime_provenance=None,
+    runtime_baseline_id=None,
     coeff_cache_dir=None,
     no_coeff_cache=False,
     solver_budget_policy="allow",
@@ -2059,7 +2059,7 @@ def run_model(
             output_contract=output_contract,
             timestamp_summary=timestamp_summary,
             aux_nan_event_count=_get_aux_nan_event_count(model),
-            runtime_provenance=runtime_provenance,
+            runtime_baseline_id=runtime_baseline_id,
             training_loop=training_loop_metadata,
             coeff_cache=coeff_cache_summary,
         )
@@ -2133,7 +2133,7 @@ def run_model(
             "mode": "robustness",
             "evaluation_regime": "robustness",
             "output_contract_hash": output_contract_hash,
-            "runtime_provenance": runtime_provenance,
+            "runtime_baseline_id": runtime_baseline_id,
             "training_loop": training_loop_metadata,
             "coeff_cache": coeff_cache_summary,
         }
@@ -2289,7 +2289,7 @@ def run_model(
         output_contract=output_contract,
         timestamp_summary=timestamp_summary,
         aux_nan_event_count=_get_aux_nan_event_count(model),
-        runtime_provenance=runtime_provenance,
+        runtime_baseline_id=runtime_baseline_id,
         training_loop=training_loop_metadata,
         coeff_cache=coeff_cache_summary,
     )
@@ -2320,7 +2320,7 @@ def run_model(
         "train_missing_type": train_missing_type,
         "train_channel_sync": train_channel_sync,
         "output_contract_hash": output_contract_hash,
-        "runtime_provenance": runtime_provenance,
+        "runtime_baseline_id": runtime_baseline_id,
         "training_loop": training_loop_metadata,
         "coeff_cache": coeff_cache_summary,
     }
@@ -2602,7 +2602,7 @@ def main():
     seed_everything(seed)
     LOGGER.info("Run device resolved mode=%s device=%s", args.device, device)
     run_id = args.run_id or generate_run_id("run")
-    runtime_provenance = build_runtime_provenance(args.runtime_baseline_id)
+    runtime_baseline_id = normalize_runtime_baseline_id(args.runtime_baseline_id)
     records = []
     reused_records = []
     skipped = []
@@ -2704,7 +2704,7 @@ def main():
                             targets_root=args.targets_root,
                             dataset_source=args.dataset_source,
                             dataset_npz=args.dataset_npz,
-                            runtime_provenance=runtime_provenance,
+                            runtime_baseline_id=runtime_baseline_id,
                             coeff_cache_dir=args.coeff_cache_dir,
                             no_coeff_cache=args.no_coeff_cache,
                             solver_budget_policy=args.solver_budget_policy,
@@ -2762,7 +2762,7 @@ def main():
                                     "output_path": str(output_path),
                                     "output_contract_hash": _read_output_contract_hash(output_path),
                                     "reason": "output artifact already exists (--check)",
-                                    "runtime_provenance": runtime_provenance,
+                                    "runtime_baseline_id": runtime_baseline_id,
                                     "runtime_status": "reused",
                                 }
                             )
@@ -2878,7 +2878,7 @@ def main():
                                 targets_root=args.targets_root,
                                 dataset_source=args.dataset_source,
                                 dataset_npz=args.dataset_npz,
-                                runtime_provenance=runtime_provenance,
+                                runtime_baseline_id=runtime_baseline_id,
                                 coeff_cache_dir=args.coeff_cache_dir,
                                 no_coeff_cache=args.no_coeff_cache,
                                 solver_budget_policy=args.solver_budget_policy,
@@ -2927,7 +2927,7 @@ def main():
                                         "output_path": str(output_path),
                                         "output_contract_hash": _read_output_contract_hash(output_path),
                                         "reason": "output artifact already exists (--check)",
-                                        "runtime_provenance": runtime_provenance,
+                                        "runtime_baseline_id": runtime_baseline_id,
                                         "runtime_status": "reused",
                                     }
                                 )
@@ -3040,7 +3040,7 @@ def main():
             "existing_policy": args.existing_policy,
             "skip_policy": args.skip_policy,
             "max_runs_mode": args.max_runs_mode,
-            "runtime_provenance": runtime_provenance,
+            "runtime_baseline_id": runtime_baseline_id,
             "summary": {
                 "completed_run_calls": run_count,
                 "executed_runs": run_count,

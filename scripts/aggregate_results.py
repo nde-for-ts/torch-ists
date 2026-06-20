@@ -11,13 +11,6 @@ from pathlib import Path
 from typing import Any
 
 
-PUBLIC_RUNTIME_KEYS = {
-    "package_version",
-    "mirror_commit_sha",
-    "mirror_archive_checksum",
-    "runtime_baseline_id",
-    "wheel_or_source_checkout",
-}
 INTERNAL_FIELD_FRAGMENTS = (
     "hash",
     "backend",
@@ -79,14 +72,11 @@ def _resolve_output_path(value: Any, out_root: Path) -> Path:
     return candidates[0]
 
 
-def _flatten_runtime_provenance(payload: dict[str, Any] | None) -> dict[str, Any]:
-    if not isinstance(payload, dict):
-        return {}
-    return {
-        f"runtime_{key}": payload.get(key)
-        for key in sorted(PUBLIC_RUNTIME_KEYS)
-        if key in payload
-    }
+def _copy_runtime_baseline_id(row: dict[str, Any], *payloads: dict[str, Any] | None) -> None:
+    for payload in payloads:
+        if isinstance(payload, dict) and payload.get("runtime_baseline_id"):
+            row["runtime_baseline_id"] = payload.get("runtime_baseline_id")
+            return
 
 
 def _flatten_timestamp_summary(payload: dict[str, Any] | None) -> dict[str, Any]:
@@ -138,7 +128,6 @@ def _evaluation_rows_from_output(
     if not isinstance(evaluations, list):
         return rows
     meta = payload.get("meta") if isinstance(payload.get("meta"), dict) else {}
-    runtime_provenance = meta.get("runtime_provenance") or manifest.get("runtime_provenance")
     timestamp_summary = meta.get("timestamp_summary") or record.get("timestamp_summary")
     for index, evaluation in enumerate(evaluations):
         if not isinstance(evaluation, dict):
@@ -181,7 +170,7 @@ def _evaluation_rows_from_output(
             ],
         )
         _copy_metrics(row, evaluation.get("metrics"))
-        row.update(_flatten_runtime_provenance(runtime_provenance))
+        _copy_runtime_baseline_id(row, evaluation, payload, meta, record, manifest)
         row.update(_flatten_timestamp_summary(timestamp_summary))
         rows.append(row)
     return rows
@@ -214,7 +203,7 @@ def _run_record_row(record: dict[str, Any], manifest: dict[str, Any], *, kind: s
         ],
     )
     _copy_metrics(row, record.get("metrics"))
-    row.update(_flatten_runtime_provenance(record.get("runtime_provenance") or manifest.get("runtime_provenance")))
+    _copy_runtime_baseline_id(row, record, manifest)
     row.update(_flatten_timestamp_summary(record.get("timestamp_summary")))
     return row
 
@@ -246,7 +235,7 @@ def _search_record_row(record: dict[str, Any], manifest: dict[str, Any], *, kind
             "reason",
         ],
     )
-    row.update(_flatten_runtime_provenance(record.get("runtime_provenance") or manifest.get("runtime_provenance")))
+    _copy_runtime_baseline_id(row, record, manifest)
     row.update(_flatten_timestamp_summary(record.get("timestamp_summary")))
     return row
 

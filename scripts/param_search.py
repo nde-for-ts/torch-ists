@@ -47,7 +47,6 @@ from _common import (
     DEFAULT_SEARCH_PROFILE,
     apply_model_scope_variant,
     build_param_artifact_identity,
-    build_runtime_provenance,
     build_model_kwargs_from_config,
     compute_param_config_hash,
     configure_runtime_paths,
@@ -55,6 +54,7 @@ from _common import (
     describe_search_profile,
     infer_param_search_profile,
     LEGACY_ICLR2024_SEARCH_PROFILE,
+    normalize_runtime_baseline_id,
     normalize_search_profile,
     resolve_dataset_fixed_batch_policy,
     resolve_effective_param_config,
@@ -406,7 +406,7 @@ def parse_cli_args():
         "--runtime-baseline-id",
         type=str,
         default=None,
-        help="Optional runtime baseline label copied into manifests and parameter metadata.",
+        help="Optional user-provided run label copied into manifests and parameter metadata.",
     )
     parser.add_argument(
         "--manifest-existing-policy",
@@ -1613,7 +1613,7 @@ def optimize(
     targets_root="targets",
     dataset_source="default",
     dataset_npz=None,
-    runtime_provenance=None,
+    runtime_baseline_id=None,
 ):
     split_root = os.path.abspath(os.path.expanduser(str(split_root)))
     param_root = os.path.abspath(os.path.expanduser(str(param_root)))
@@ -1794,6 +1794,8 @@ def optimize(
             ),
         )
         saved_model_config["timestamp_summary"] = metadata["timestamp_summary"]
+        if runtime_baseline_id is not None:
+            saved_model_config["runtime_baseline_id"] = runtime_baseline_id
         saved_model_config["param_hash"] = compute_param_config_hash(saved_model_config)
         os.makedirs(os.path.join(param_root, data_name), exist_ok=True)
         out_name = _build_param_artifact_name(
@@ -1850,6 +1852,7 @@ def optimize(
             "timestamp_summary": metadata["timestamp_summary"],
             "dataset_source": str(dataset_source),
             "dataset_npz": None if dataset_npz is None else str(dataset_npz),
+            "runtime_baseline_id": runtime_baseline_id,
         }
 
     if device_mode == "cuda" and not torch.cuda.is_available():
@@ -2035,7 +2038,8 @@ def optimize(
         ),
     )
     saved_param_config["timestamp_summary"] = metadata["timestamp_summary"]
-    saved_param_config["runtime_provenance"] = runtime_provenance
+    if runtime_baseline_id is not None:
+        saved_param_config["runtime_baseline_id"] = runtime_baseline_id
     saved_param_config["param_hash"] = compute_param_config_hash(saved_param_config)
     with open(param_path, 'wb') as f:
         pickle.dump(saved_param_config, f)
@@ -2085,7 +2089,7 @@ def optimize(
         "timestamp_summary": metadata["timestamp_summary"],
         "dataset_source": str(dataset_source),
         "dataset_npz": None if dataset_npz is None else str(dataset_npz),
-        "runtime_provenance": runtime_provenance,
+        "runtime_baseline_id": runtime_baseline_id,
     }
 
 
@@ -2109,7 +2113,7 @@ def main():
     SEED = int(args.seed)
     seed_everything(SEED)
     run_id = args.run_id or generate_run_id("run")
-    runtime_provenance = build_runtime_provenance(args.runtime_baseline_id)
+    runtime_baseline_id = normalize_runtime_baseline_id(args.runtime_baseline_id)
     records = []
     reused_records = []
     skipped = []
@@ -2273,7 +2277,7 @@ def main():
                             "split_path": str(split_path),
                             "param_path": str(existing_param_path),
                             "param_hash": str(param_hash),
-                            "runtime_provenance": existing_cfg.get("runtime_provenance", runtime_provenance),
+                            "runtime_baseline_id": existing_cfg.get("runtime_baseline_id", runtime_baseline_id),
                             "reason": "param artifact already exists",
                         }
                     )
@@ -2306,7 +2310,7 @@ def main():
                     targets_root=args.targets_root,
                     dataset_source=args.dataset_source,
                     dataset_npz=args.dataset_npz,
-                    runtime_provenance=runtime_provenance,
+                    runtime_baseline_id=runtime_baseline_id,
                 )
                 if search_result is None:
                     LOGGER.warning(
@@ -2371,7 +2375,7 @@ def main():
                         "architecture_axes": search_result["architecture_axes"],
                         "effective_params": search_result["effective_params"],
                         "capacity_metadata": search_result["capacity_metadata"],
-                        "runtime_provenance": search_result["runtime_provenance"],
+                        "runtime_baseline_id": search_result["runtime_baseline_id"],
                         "best_loss": float(search_result["best_loss"]),
                     }
                 )
@@ -2476,7 +2480,7 @@ def main():
             "existing_policy": args.existing_policy,
             "skip_policy": args.skip_policy,
             "max_runs_mode": args.max_runs_mode,
-            "runtime_provenance": runtime_provenance,
+            "runtime_baseline_id": runtime_baseline_id,
             "summary": {
                 "completed_optimize_calls": run_count,
                 "executed_runs": run_count,
