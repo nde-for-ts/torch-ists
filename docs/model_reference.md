@@ -3,7 +3,7 @@
 > **Type**: Reference
 > **Scope**: Origin papers, reference repositories, and implementation notes for packaged models.
 
-**Related docs**: [Package overview](../README.md) · [Docs index](README.md) · [API Reference](api_reference.md) · [Custom Data Guide](custom_data_guide.md) · [Custom Model Guide](custom_model_guide.md) · [Third-Party Notices](third_party_notices.md) · [CIKM 2025 Tutorial site](https://nde-for-ts.github.io/)
+**Related docs**: [Package overview](../README.md) · [Docs index](README.md) · [API Reference](api_reference.md) · [Scripts Reference](scripts_reference.md) · [Custom Data Guide](custom_data_guide.md) · [Custom Model Guide](custom_model_guide.md) · [Third-Party Notices](third_party_notices.md) · [CIKM 2025 Tutorial site](https://nde-for-ts.github.io/)
 
 Use the API reference for class signatures and call patterns; use this document for model origins and reference implementations.
 
@@ -40,6 +40,8 @@ Use the API reference for class signatures and call patterns; use this document 
 
 These models use the sequence stack directly with `coeffs=None`; `NaN` is replaced by `0.0` at the backbone input.
 
+**PLSTM numerical note.** The packaged `plstm` clamps the phased time-gate denominator factors at `1e-3`. This intentionally differs from the unclamped reference implementation to avoid float32 sub-normal denominator underflow observed in long final-training runs.
+
 **Limitation.** `cnn`, `rnn`, `lstm`, `gru`, and `bilstm` do not use the mask channel. After zero-fill, they cannot distinguish a true zero from a missing value. When missingness awareness matters, prefer rows that use mask, delta, or interpolation coefficients.
 
 ---
@@ -54,7 +56,7 @@ These models use the sequence stack directly with `coeffs=None`; `NaN` is replac
 | `mtan` | [Shukla and Marlin, *Multi-Time Attention Networks for Irregularly Sampled Time Series* (ICLR 2021)](https://arxiv.org/abs/2101.10318) | Multi-time attention; consumes values, sequence stack, and normalized timestamps. |
 | `miam` | [Lee et al., *Multi-View Integrative Attention-Based Deep Representation Learning for Irregular Clinical Time-Series Data* (IEEE J-BHI 2022)](https://arxiv.org/abs/2101.09986) | Time-aware attention; consumes values, sequence stack, and normalized timestamps. |
 
-**Mask notes.** `transformer` and `sand` zero-fill missing values and do not apply a padding mask. `transformer-mask` keeps the same Transformer backbone but applies `src_key_padding_mask`.
+**Mask notes.** `transformer` and `sand` zero-fill missing values and do not apply a padding mask. `transformer-mask` keeps the same Transformer backbone but applies `src_key_padding_mask`; fully masked rows use a zero-valued anchor timestep to keep the encoder output finite.
 
 ---
 

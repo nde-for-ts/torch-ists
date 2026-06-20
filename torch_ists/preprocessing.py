@@ -162,6 +162,36 @@ def _build_mnar_probability(
     return np.clip(probs, 0.0, 0.99)
 
 
+def _enforce_sequence_observation_floor(
+    existing_missing: np.ndarray,
+    sampled_missing: np.ndarray,
+    rng: np.random.Generator,
+    *,
+    channel_sync: bool,
+) -> np.ndarray:
+    """Keep synthetic missingness from removing a sample's last observed value."""
+    observed_before = ~existing_missing
+    observed_after = ~(existing_missing | sampled_missing)
+    has_native_observation = observed_before.any(axis=(1, 2))
+    emptied_by_sampling = has_native_observation & ~observed_after.any(axis=(1, 2))
+    if not np.any(emptied_by_sampling):
+        return sampled_missing
+
+    sampled_missing = sampled_missing.copy()
+    for sample_idx in np.flatnonzero(emptied_by_sampling):
+        candidate_channels, candidate_times = np.where(observed_before[sample_idx])
+        if candidate_times.size == 0:
+            continue
+        choice = int(rng.integers(candidate_times.size))
+        channel = int(candidate_channels[choice])
+        time_idx = int(candidate_times[choice])
+        if channel_sync:
+            sampled_missing[sample_idx, :, time_idx] = False
+        else:
+            sampled_missing[sample_idx, channel, time_idx] = False
+    return sampled_missing
+
+
 def _sample_block_indices(rng: np.random.Generator, length: int, count: int) -> np.ndarray:
     if count <= 0:
         return np.empty((0,), dtype=np.int64)
@@ -357,7 +387,7 @@ def apply_missingness_compat(
     rate: float,
     seed: int = 0,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Reproduce reference missingness semantics for compatibility checks only."""
+    """Apply random per-sample missingness using the alternative (compatibility) removal scheme."""
     import torch
 
     _validate_inputs(X, rate)
@@ -460,6 +490,12 @@ def apply_missingness(
         else:
             sampled_missing = rng.random((n, d, l), dtype=np.float32) < prob.astype(np.float32)
 
+    sampled_missing = _enforce_sequence_observation_floor(
+        existing_missing,
+        sampled_missing,
+        rng,
+        channel_sync=channel_sync,
+    )
     missing = existing_missing | sampled_missing
     X_missing = X.copy()
     X_missing[missing] = np.nan
@@ -580,7 +616,7 @@ def preprocess_compat(
     use_intensity: bool = True,
     seed: int = 0,
 ):
-    """Compatibility preprocess helper that matches reference semantics."""
+    """Preprocess helper for the alternative (compatibility) missingness scheme."""
     import torch
 
     if isinstance(X, torch.Tensor):

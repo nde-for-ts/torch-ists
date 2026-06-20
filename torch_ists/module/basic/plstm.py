@@ -101,9 +101,10 @@ class PLSTM_cell(nn.Module):
         # -----------------------------------------------------
         # Precalculate some useful vars
         shift_broadcast = self.Shifts.view(1, -1)
-        period_broadcast = abs(self.Periods.view(1, -1))
-        on_mid_broadcast = abs(self.On_End.view(1, -1)) * 0.5 * period_broadcast
-        on_end_broadcast = abs(self.On_End.view(1, -1)) * period_broadcast                       
+        period_broadcast = abs(self.Periods.view(1, -1)).clamp_min(1e-3)
+        on_end_abs = abs(self.On_End.view(1, -1)).clamp_min(1e-3)
+        on_mid_broadcast = on_end_abs * 0.5 * period_broadcast
+        on_end_broadcast = on_end_abs * period_broadcast
         
         def calc_time_gate(time_input_n):
             # Broadcast the time across all units

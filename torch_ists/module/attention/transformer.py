@@ -57,11 +57,23 @@ class TransformerBackbone(nn.Module):
         self.seq_layer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
         self.transformer_out = nn.Linear(hidden_dim, hidden_dim)
 
+    @staticmethod
+    def _finite_safe_padding_mask(src_key_padding_mask: torch.Tensor | None) -> torch.Tensor | None:
+        if src_key_padding_mask is None or src_key_padding_mask.dim() != 2:
+            return src_key_padding_mask
+        fully_masked = src_key_padding_mask.all(dim=1)
+        if not bool(fully_masked.any()):
+            return src_key_padding_mask
+        safe_mask = src_key_padding_mask.clone()
+        safe_mask[fully_masked, 0] = False
+        return safe_mask
+
     def forward(
         self,
         x: torch.Tensor,
         src_key_padding_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
+        src_key_padding_mask = self._finite_safe_padding_mask(src_key_padding_mask)
         hn = self.transformer_in(x)
         hn = self.positional_encoding(hn)
         hn = self.seq_layer(hn, src_key_padding_mask=src_key_padding_mask)
