@@ -71,6 +71,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Run identifier for related outputs.",
     )
     parser.add_argument(
+        "--manifest-existing-policy",
+        choices=["fail", "reuse", "overwrite"],
+        default="fail",
+        help="Behavior when the stage manifest for --run-id already exists (default: fail).",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Validate inputs and compute split summary without writing split artifact.",
@@ -123,6 +129,7 @@ def main() -> int:
             stage="split",
             contract_dir=args.contract_dir,
             run_id=run_id,
+            existing_policy=args.manifest_existing_policy,
             payload={
                 "status": "pass",
                 "dataset": args.dataset_name,
@@ -164,6 +171,7 @@ def main() -> int:
             stage="split",
             contract_dir=args.contract_dir,
             run_id=run_id,
+            existing_policy=args.manifest_existing_policy,
             payload={
                 "status": "fail",
                 "dataset": args.dataset_name,

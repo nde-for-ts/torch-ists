@@ -57,17 +57,35 @@ def write_manifest(
     contract_dir: str | Path,
     run_id: str,
     payload: Dict[str, Any],
+    existing_policy: str = "fail",
 ) -> Tuple[Path, Dict[str, Any]]:
+    policy = str(existing_policy or "fail").strip().lower()
+    if policy not in {"fail", "reuse", "overwrite"}:
+        raise ValueError("existing_policy must be one of {'fail', 'reuse', 'overwrite'}")
+
+    out_dir = Path(contract_dir) / run_id
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"{stage}.manifest.json"
+    manifest_exists = out_path.exists()
+    if manifest_exists and policy == "fail":
+        raise FileExistsError(
+            f"manifest already exists: {out_path}. "
+            "Use --manifest-existing-policy reuse or overwrite to proceed intentionally."
+        )
+
     body = {
         "schema_version": SCHEMA_VERSION,
         "stage": stage,
         "run_id": run_id,
         "created_at": utc_now_iso(),
+        "manifest_existing_policy": policy,
         **payload,
     }
-    out_dir = Path(contract_dir) / run_id
-    out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / f"{stage}.manifest.json"
+    if manifest_exists and policy == "reuse":
+        body["resumed_from_run_id"] = run_id
+        body["reused_manifest_path"] = str(out_path)
+    elif manifest_exists and policy == "overwrite":
+        body["overwrote_existing_manifest"] = True
     out_path.write_text(json.dumps(body, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return out_path, body
 

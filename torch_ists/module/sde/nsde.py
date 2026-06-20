@@ -64,5 +64,4 @@ class NeuralSDE(torch.nn.Module):
         )
         z = z.permute(1, 0, 2)
         out = self.linear(z)
-        hn = z[:, -1, :]
-        return out, hn
+        return out, z

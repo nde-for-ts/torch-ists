@@ -200,6 +200,7 @@ def natural_cubic_spline_coeffs(t, X):
     for t_i in t:
         if t_i <= prev_t_i:
             raise ValueError("t must be monotonically increasing.")
+        prev_t_i = t_i
 
     if len(X.shape) < 2:
         raise ValueError("X must have at least two dimensions, corresponding to time and channels.")

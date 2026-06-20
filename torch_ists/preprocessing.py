@@ -261,8 +261,8 @@ def _validate_timestamps_for_preprocess(timestamps: Any, X_np: np.ndarray) -> np
         raise ValueError(f"timestamps shape mismatch: expected {expected_shape}, got {timestamps_np.shape}")
     for row in timestamps_np:
         finite_row = row[np.isfinite(row)]
-        if finite_row.size > 1 and np.any(np.diff(finite_row) < 0):
-            raise ValueError("timestamps must be non-decreasing within each sample")
+        if finite_row.size > 1 and np.any(np.diff(finite_row) <= 0):
+            raise ValueError("timestamps must be strictly increasing within each sample")
     return timestamps_np
 
 

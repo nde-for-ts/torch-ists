@@ -5,7 +5,7 @@
 
 **Related docs**: [Package overview](../README.md) · [Docs index](README.md) · [API Reference](api_reference.md) · [Model Reference](model_reference.md) · [Custom Data Guide](custom_data_guide.md) · [Custom Model Guide](custom_model_guide.md) · [Third-Party Notices](third_party_notices.md) · [CIKM 2025 Tutorial site](https://nde-for-ts.github.io/)
 
-This document covers the three included scripts: [`scripts/set_splits.py`](../scripts/set_splits.py), [`scripts/param_search.py`](../scripts/param_search.py), and [`scripts/model_run.py`](../scripts/model_run.py). Built wheels do not install these files or expose console entry points.
+This document covers the included scripts: [`scripts/set_splits.py`](../scripts/set_splits.py), [`scripts/param_search.py`](../scripts/param_search.py), [`scripts/model_run.py`](../scripts/model_run.py), and [`scripts/aggregate_results.py`](../scripts/aggregate_results.py). Built wheels do not install these files or expose console entry points.
 
 ---
 
@@ -15,17 +15,20 @@ This document covers the three included scripts: [`scripts/set_splits.py`](../sc
 2. [`set_splits.py`](#2-set_splitspy)
 3. [`param_search.py`](#3-param_searchpy)
 4. [`model_run.py`](#4-model_runpy)
-5. [Output Artifacts](#5-output-artifacts)
+5. [`aggregate_results.py`](#5-aggregate_resultspy)
+6. [Output Artifacts](#6-output-artifacts)
 ---
 
 ## 1. Pipeline Overview
 
-The three scripts run in this order:
+The main scripts run in this order:
 
 ```
 set_splits.py  →  param_search.py  →  model_run.py
    split/            params/             out/
                                      evidence/  (JSON run logs, all stages)
+                                            ↓
+                                    aggregate_results.py
 ```
 
 **Install requirement.** The scripts call `preprocess`, which imports `torchcde` before building interpolation coefficients. This applies even to basic baselines such as `cnn`. Install `.[all]` (recommended) or at least `.[tune,cde]`; `.[tune]` alone can fail with `No module named 'torchcde'`.
@@ -37,8 +40,9 @@ Each step writes to a dedicated root directory and reads from the previous step'
 | `set_splits.py` | (raw dataset) | `split/<dataset>/<dataset>_<seed>` |
 | `param_search.py` | `split/` | `params/<dataset>/<dataset>_<model>[_aggregated]` |
 | `model_run.py` | `split/`, `params/` | `out/<dataset>/<missing_rate>/<name>` (standard/missingness); `out/<dataset>/robustness/<name>__rates_..__types_..__sync_..` (robustness) |
+| `aggregate_results.py` | `evidence/`, `out/` | `aggregate/{runs,robustness_rows,search_cells,exclusions,fallbacks}.csv` |
 
-All three scripts also write JSON run logs under `evidence/`.
+The split/search/run scripts also write JSON run logs under `evidence/`.
 
 **Seed usage**:
 - `set_splits.py --seed` default = `42` — the hyperparameter search split.
@@ -268,9 +272,40 @@ Requires:
 
 ---
 
-## 5. Output Artifacts
+## 5. `aggregate_results.py`
 
-Path patterns produced by the three scripts:
+**Purpose**: Build compact CSV tables from script run logs and output payloads.
+
+**Usage**:
+
+```bash
+PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/aggregate_results.py \
+    --evidence-root evidence --out-root out --output-dir aggregate
+```
+
+### Flags
+
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--evidence-root` | `str` | `evidence` | Root containing `*.manifest.json` files from split/search/run scripts. |
+| `--out-root` | `str` | `out` | Root containing `model_run.py` output payloads. |
+| `--output-dir` | `str` | `aggregate` | Directory for aggregate CSV/JSON files. |
+| `--export-scope` | `{public, internal}` | `public` | `public` writes public-safe table fields and redacts local absolute path prefixes; `internal` keeps broader emitted metadata. |
+
+### Output
+
+- `runs.csv` — run-level executed/reused records.
+- `robustness_rows.csv` — one row per evaluation payload entry when output payloads are available.
+- `search_cells.csv` — search-level executed/reused records.
+- `exclusions.csv` — skipped or failed cells with reasons when present.
+- `fallbacks.csv` — search cells that used finite-trial fallback.
+- `aggregate_summary.json` — row counts and export metadata.
+
+---
+
+## 6. Output Artifacts
+
+Path patterns produced by the scripts:
 
 | Artifact | Path |
 |---|---|
@@ -280,6 +315,7 @@ Path patterns produced by the three scripts:
 | Predictions (standard/missingness) | `<out-root>/<dataset>/<missing_rate>/<dataset>_<missing_rate>_<model>_<seed>` |
 | Predictions (robustness) | `<out-root>/<dataset>/robustness/<dataset>_robustness_<model>_<seed>__rates_<...>__types_<...>__sync_<...>` |
 | Run log | `<contract-dir>/<run-id>/{split,search,run}.manifest.json` |
+| Aggregate tables | `<output-dir>/{runs,robustness_rows,search_cells,exclusions,fallbacks}.csv` |
 
 JSON run logs record the stage, run id, executed/reused/skipped records, and a stage summary.
 

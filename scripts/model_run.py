@@ -431,6 +431,7 @@ def _effective_robustness_test_rates(rates):
             continue
         if not any(abs(rate - existing) < 1e-12 for existing in positives):
             positives.append(rate)
+    positives = sorted(positives)
     return [0.0] + positives
 
 
@@ -652,6 +653,12 @@ def parse_cli_args():
         type=str,
         default=None,
         help="Optional runtime baseline label copied into manifests and output metadata.",
+    )
+    parser.add_argument(
+        "--manifest-existing-policy",
+        choices=["fail", "reuse", "overwrite"],
+        default="fail",
+        help="Behavior when the stage manifest for --run-id already exists (default: fail).",
     )
     parser.add_argument(
         "--save-predictions",
@@ -2740,6 +2747,7 @@ def main():
         stage="run",
         contract_dir=args.contract_dir,
         run_id=run_id,
+        existing_policy=args.manifest_existing_policy,
         payload={
             "status": "pass" if exit_code == 0 else "fail",
             "seed": seed,

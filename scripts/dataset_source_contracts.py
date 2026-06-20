@@ -67,9 +67,18 @@ def _count_monotonic_failures(timestamps: np.ndarray) -> int:
     failures = 0
     for row in timestamps:
         finite_row = row[np.isfinite(row)]
-        if finite_row.size > 1 and np.any(np.diff(finite_row) < 0):
+        if finite_row.size > 1 and np.any(np.diff(finite_row) <= 0):
             failures += 1
     return int(failures)
+
+
+def _count_duplicate_timestamp_steps(timestamps: np.ndarray) -> int:
+    duplicates = 0
+    for row in timestamps:
+        finite_row = row[np.isfinite(row)]
+        if finite_row.size > 1:
+            duplicates += int(np.sum(np.diff(finite_row) == 0))
+    return int(duplicates)
 
 
 def _is_common_finite_grid(timestamps: np.ndarray) -> bool:
@@ -160,6 +169,7 @@ def summarize_timestamps(
             "timestamp_mode": "absent",
             "timestamp_finite_ratio": None,
             "timestamp_monotonic_failures": 0,
+            "timestamp_duplicate_count": 0,
             "timestamp_degenerate_rows": 0,
             "timestamp_min": None,
             "timestamp_max": None,
@@ -186,6 +196,7 @@ def summarize_timestamps(
         "timestamp_mode": "common" if common_grid else "per_sample",
         "timestamp_finite_ratio": float(finite.mean()) if finite.size else 0.0,
         "timestamp_monotonic_failures": _count_monotonic_failures(timestamps),
+        "timestamp_duplicate_count": _count_duplicate_timestamp_steps(timestamps),
         "timestamp_degenerate_rows": int((finite_counts < 2).sum()),
         "timestamp_min": float(finite_values.min()) if finite_values.size else None,
         "timestamp_max": float(finite_values.max()) if finite_values.size else None,
@@ -213,7 +224,7 @@ def _validate_timestamps(timestamps: np.ndarray | None, X: np.ndarray) -> np.nda
         raise ValueError(f"timestamps shape mismatch: expected {expected_shape}, got {timestamps.shape}")
     failures = _count_monotonic_failures(timestamps)
     if failures:
-        raise ValueError("timestamps must be non-decreasing within each sample")
+        raise ValueError("timestamps must be strictly increasing within each sample")
     return timestamps
 
 

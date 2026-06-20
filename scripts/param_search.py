@@ -403,6 +403,12 @@ def parse_cli_args():
         help="Optional runtime baseline label copied into manifests and parameter metadata.",
     )
     parser.add_argument(
+        "--manifest-existing-policy",
+        choices=["fail", "reuse", "overwrite"],
+        default="fail",
+        help="Behavior when the stage manifest for --run-id already exists (default: fail).",
+    )
+    parser.add_argument(
         "--task",
         type=str,
         choices=["classification"],
@@ -2430,6 +2436,7 @@ def main():
         stage="search",
         contract_dir=args.contract_dir,
         run_id=run_id,
+        existing_policy=args.manifest_existing_policy,
         payload={
             "status": "pass" if exit_code == 0 else "fail",
             "seed": SEED,
