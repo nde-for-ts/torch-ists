@@ -65,7 +65,10 @@ class TransformerBackbone(nn.Module):
         if not bool(fully_masked.any()):
             return src_key_padding_mask
         safe_mask = src_key_padding_mask.clone()
-        safe_mask[fully_masked, 0] = False
+        # Values are already zero-filled before this backbone. For a fully
+        # masked row, treat the whole zero-valued sequence as an unmasked
+        # finite fallback instead of depending on a fixed anchor timestep.
+        safe_mask[fully_masked, :] = False
         return safe_mask
 
     def forward(

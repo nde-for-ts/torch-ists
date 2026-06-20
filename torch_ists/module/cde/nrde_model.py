@@ -37,9 +37,15 @@ class NeuralRDE(torch.nn.Module):
         return "input_channels={}, hidden_channels={}, output_channels={}, initial={}" \
                "".format(self.input_channels, self.hidden_channels, self.output_channels, self.initial)
 
-    def forward(self, x, times, coeffs, final_index=None, z0=None, stream=True, interpolation=True, depth=2, window_length=10, **kwargs):
+    def forward(self, x, times, coeffs, final_index=None, z0=None, stream=True, interpolation=True, depth=2, window_length=None, **kwargs):
         # not implemented
         assert stream
+        if window_length is None:
+            raise ValueError(
+                "NeuralRDE.forward requires an explicit log-signature window_length. "
+                "Set model_params['logsignature_window_length'] through the runtime handler."
+            )
+        window_length = max(1, int(window_length))
 
         # for new xx
         if interpolation:

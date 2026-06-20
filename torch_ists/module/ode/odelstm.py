@@ -14,10 +14,20 @@ from torchdyn.models import NeuralODE
 
 
 class ODELSTMCell(nn.Module):
-    def __init__(self, input_size: int, hidden_size: int, num_hidden_layers: int, solver_type: str = "dopri5"):
+    def __init__(
+        self,
+        input_size: int,
+        hidden_size: int,
+        num_hidden_layers: int,
+        solver_type: str = "dopri5",
+        solver_kwargs: dict | None = None,
+        fixed_step_count: int = 3,
+    ):
         super().__init__()
         self.solver_type = solver_type
         self.fixed_step_solver = solver_type.startswith("fixed_")
+        self.solver_kwargs = dict(solver_kwargs or {})
+        self.fixed_step_count = max(1, int(fixed_step_count))
         self.lstm = nn.LSTMCell(input_size, hidden_size)
 
         layers = [nn.Linear(hidden_size, hidden_size)]
@@ -31,7 +41,7 @@ class ODELSTMCell(nn.Module):
         self.input_size = input_size
         self.hidden_size = hidden_size
         if not self.fixed_step_solver:
-            self.node = NeuralODE(self.f_node, solver=solver_type)
+            self.node = NeuralODE(self.f_node, solver=solver_type, **self.solver_kwargs)
         else:
             options = {
                 "fixed_euler": self.euler,
@@ -58,8 +68,9 @@ class ODELSTMCell(nn.Module):
 
     def solve_fixed(self, x: torch.Tensor, ts: torch.Tensor) -> torch.Tensor:
         ts = ts.view(-1, 1)
-        for _ in range(3):
-            x = self.node(x, ts * (1.0 / 3))
+        step_count = max(1, int(self.fixed_step_count))
+        for _ in range(step_count):
+            x = self.node(x, ts * (1.0 / step_count))
         return x
 
     def euler(self, y: torch.Tensor, delta_t: torch.Tensor) -> torch.Tensor:
@@ -87,6 +98,8 @@ class ODELSTM(nn.Module):
         num_hidden_layers: int,
         out_feature: int,
         solver_type: str = "dopri5",
+        solver_kwargs: dict | None = None,
+        fixed_step_count: int = 3,
     ):
         super().__init__()
         self.in_features = in_features
@@ -98,6 +111,8 @@ class ODELSTM(nn.Module):
             hidden_size,
             num_hidden_layers,
             solver_type=solver_type,
+            solver_kwargs=solver_kwargs,
+            fixed_step_count=fixed_step_count,
         )
         self.fc = nn.Linear(self.hidden_size, self.out_feature)
 
@@ -130,4 +145,3 @@ class ODELSTM(nn.Module):
         outputs = torch.stack(outputs, dim=1)
         hiddens = torch.stack(hiddens, dim=1)
         return outputs, hiddens
-

@@ -56,7 +56,7 @@ These models use the sequence stack directly with `coeffs=None`; `NaN` is replac
 | `mtan` | [Shukla and Marlin, *Multi-Time Attention Networks for Irregularly Sampled Time Series* (ICLR 2021)](https://arxiv.org/abs/2101.10318) | Multi-time attention; consumes values, sequence stack, and normalized timestamps. |
 | `miam` | [Lee et al., *Multi-View Integrative Attention-Based Deep Representation Learning for Irregular Clinical Time-Series Data* (IEEE J-BHI 2022)](https://arxiv.org/abs/2101.09986) | Time-aware attention; consumes values, sequence stack, and normalized timestamps. |
 
-**Mask notes.** `transformer` and `sand` zero-fill missing values and do not apply a padding mask. `transformer-mask` keeps the same Transformer backbone but applies `src_key_padding_mask`; fully masked rows use a zero-valued anchor timestep to keep the encoder output finite.
+**Mask notes.** `transformer` and `sand` zero-fill missing values and do not apply a padding mask. `transformer-mask` keeps the same Transformer backbone but applies `src_key_padding_mask`; fully masked rows are handled as zero-filled finite fallback rows.
 
 ---
 

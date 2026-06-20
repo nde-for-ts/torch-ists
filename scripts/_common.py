@@ -143,6 +143,7 @@ _ODE_SOLVER_MODELS = frozenset(
 )
 _CDE_SOLVER_MODELS = frozenset(_CDE_CONTROL_BY_MODEL) | frozenset(_NEURALRDE_DEPTH)
 _FLOW_PREFIXES = ("neuralflow-", "dualdynamics-", "flowpath-")
+DEFAULT_NEURALRDE_LOGSIGNATURE_WINDOW_LENGTH = 10
 
 _MODEL_NATIVE_EXTRA_PARAM_CANDIDATES = {
     "transformer": {"n_heads": [1, 2, 4, 8]},
@@ -158,6 +159,9 @@ _MODEL_NATIVE_EXTRA_PARAM_DEFAULTS = {
     "sand": {"n_heads": 4, "factor": 16},
     "miam": {"n_heads": 1, "n_iter": 1},
     "mtan": {"n_heads": 1, "embed_time": 16},
+    "neuralrde-1": {"logsignature_window_length": DEFAULT_NEURALRDE_LOGSIGNATURE_WINDOW_LENGTH},
+    "neuralrde-2": {"logsignature_window_length": DEFAULT_NEURALRDE_LOGSIGNATURE_WINDOW_LENGTH},
+    "neuralrde-3": {"logsignature_window_length": DEFAULT_NEURALRDE_LOGSIGNATURE_WINDOW_LENGTH},
 }
 
 
@@ -580,13 +584,13 @@ def _default_method_for_axis(model_name: str) -> str | None:
 
 
 def _native_extra_param_space(normalized_model: str, profile: str, grid: dict) -> tuple[dict, dict]:
+    defaults = dict(_MODEL_NATIVE_EXTRA_PARAM_DEFAULTS.get(normalized_model, {}))
     if not _is_model_native_profile(profile):
-        return {}, {}
+        return {}, defaults
     values = {
         key: list(value)
         for key, value in _MODEL_NATIVE_EXTRA_PARAM_CANDIDATES.get(normalized_model, {}).items()
     }
-    defaults = dict(_MODEL_NATIVE_EXTRA_PARAM_DEFAULTS.get(normalized_model, {}))
     if _is_flow_model_name(normalized_model):
         values["flow_depth"] = list(grid["flow_depth_values"])
         defaults["flow_depth"] = int(_default_flow_depth_for_model(normalized_model))
@@ -633,6 +637,9 @@ def _resolve_native_axis_metadata(normalized_model: str, profile: str) -> dict:
         native_axes = ["hidden_dim", "num_layers"]
     elif normalized_model in _NEURALRDE_DEPTH:
         fixed_axes.append(f"model_params.rde_depth={_NEURALRDE_DEPTH[normalized_model]}")
+        fixed_axes.append(
+            f"model_params.logsignature_window_length={DEFAULT_NEURALRDE_LOGSIGNATURE_WINDOW_LENGTH}"
+        )
     elif normalized_model in _CDE_CONTROL_BY_MODEL:
         fixed_axes.append(f"model_params.control={_CDE_CONTROL_BY_MODEL[normalized_model]}")
     elif normalized_model in _SDE_MODELS:

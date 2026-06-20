@@ -732,7 +732,7 @@ Behavior notes:
 - If `use_intensity` is omitted (`None`), runtime resolves it from `get_data_config(model_name)`.
 - `method` is a solver argument for continuous-time methods. Effective solver behavior remains model-specific; the package does not promise one package-wide default across ODE/CDE/SDE methods.
 - For sequence baselines, `transformer`, and `sand`, the packaged runtime applies `torch.nan_to_num(..., nan=0.0)` before the backbone call and does not pass a padding mask into the attention backbone.
-- `transformer-mask` uses the same zero-filled values, but it also applies `src_key_padding_mask` derived from the packaged observation mask. If a sequence is fully masked, the runtime keeps a zero-valued anchor timestep unmasked so the Transformer encoder returns finite outputs.
+- `transformer-mask` uses the same zero-filled values, but it also applies `src_key_padding_mask` derived from the packaged observation mask. If a sequence is fully masked, the runtime treats that zero-filled row as an unmasked finite fallback so the Transformer encoder returns finite outputs.
 - `mtan` and `miam` consume zero-filled values together with the original sequence stack and normalized timestamps; they do not use interpolation coefficients.
 - Under the scripts' train-only z-score normalization, the zero-fill path becomes per-channel mean imputation in raw value space.
 - `imputation_strategy` selects how missing entries are filled for direct value-channel backbones: `"zero"` (default), `"last_observed"`, and `"channel_mean"`. Strict raw-missing rows (`neuralflow-*`, `flowpath-*`) keep raw `NaN` until mask-aware filling; coefficient-driven rows consume the `coeffs` built by `preprocess(...)`.

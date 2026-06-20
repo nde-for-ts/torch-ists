@@ -34,6 +34,7 @@ def _require_signatory_logsignature_channels():
 
 
 MAX_NEURALRDE_LOGSIGNATURE_CHANNELS = 100_000
+DEFAULT_NEURALRDE_LOGSIGNATURE_WINDOW_LENGTH = 10
 
 
 class CDEHandler(BaseHandler):
@@ -87,6 +88,21 @@ class CDEHandler(BaseHandler):
     @staticmethod
     def _control_channels(input_dim: int, use_intensity: bool) -> int:
         return 1 + input_dim * (2 if use_intensity else 1)
+
+    @staticmethod
+    def _resolve_neuralrde_window_length(model_params: Dict[str, Any], *, default: int | None = None) -> int:
+        fallback = DEFAULT_NEURALRDE_LOGSIGNATURE_WINDOW_LENGTH if default is None else int(default)
+        raw_value = model_params.get(
+            "logsignature_window_length",
+            model_params.get("nrde_window_length", fallback),
+        )
+        try:
+            value = int(raw_value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Neural RDE logsignature_window_length must be a positive integer.") from exc
+        if value < 1:
+            raise ValueError("Neural RDE logsignature_window_length must be a positive integer.")
+        return value
 
     @staticmethod
     def _normalize_sequence_layout(tensor: torch.Tensor, batch_size: int, time_steps: int) -> torch.Tensor:
@@ -270,6 +286,7 @@ class CDEHandler(BaseHandler):
                     MAX_NEURALRDE_LOGSIGNATURE_CHANNELS,
                 )
             )
+            window_length = self._resolve_neuralrde_window_length(model_params)
             if max_signature_channels > 0 and signature_channels > max_signature_channels:
                 raise ValueError(
                     f"{model_name} requires {signature_channels} logsignature channels "
@@ -291,6 +308,7 @@ class CDEHandler(BaseHandler):
                 initial=True,
             )
             model.rde_depth = depth
+            model.rde_window_length = window_length
         else:
             raise ValueError(f"Unsupported CDE family: {family}")
 
@@ -396,6 +414,11 @@ class CDEHandler(BaseHandler):
 
         if model_name.startswith("neuralrde-"):
             depth = int(getattr(model, "rde_depth", self.CDE_MODELS[model_name]["depth"]))
+            window_length = self._resolve_neuralrde_window_length(
+                model_params,
+                default=getattr(model, "rde_window_length", DEFAULT_NEURALRDE_LOGSIGNATURE_WINDOW_LENGTH),
+            )
+            model.rde_window_length = window_length
             out, hn = model(
                 data["x"],
                 times,
@@ -403,6 +426,7 @@ class CDEHandler(BaseHandler):
                 data["final_index"],
                 interpolation=True,
                 depth=depth,
+                window_length=window_length,
                 **call_kwargs,
             )
             out, hn = self._normalize_outputs(

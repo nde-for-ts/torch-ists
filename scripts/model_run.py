@@ -507,6 +507,7 @@ def _hash_array_for_cache(value):
 
 def _preprocess_cache_contract(
     *,
+    model_name,
     X,
     missing_rate,
     interpolate,
@@ -521,6 +522,7 @@ def _preprocess_cache_contract(
     return {
         "cache_contract": "torch-ists-preprocess-cache-v1",
         "package_version": str(globals().get("TORCH_ISTS_PACKAGE_VERSION", "unknown")),
+        "model_name": str(model_name),
         "x_hash": _hash_array_for_cache(X),
         "missing_rate": float(missing_rate),
         "interpolate": str(interpolate),
@@ -535,24 +537,31 @@ def _preprocess_cache_contract(
 
 
 def _preprocess_with_optional_cache(*, coeff_cache_dir=None, no_coeff_cache=False, cache_events=None, **kwargs):
+    model_name = kwargs.pop("model_name", "")
     cache_enabled = bool(coeff_cache_dir) and not bool(no_coeff_cache)
     if not cache_enabled:
         return preprocess(**kwargs)
     cache_root = Path(coeff_cache_dir).expanduser().resolve()
     cache_root.mkdir(parents=True, exist_ok=True)
-    contract = _preprocess_cache_contract(**kwargs)
+    contract = _preprocess_cache_contract(model_name=model_name, **kwargs)
     cache_key = hashlib.sha256(json.dumps(contract, sort_keys=True).encode("utf-8")).hexdigest()
     cache_path = cache_root / f"{cache_key}.pkl"
     event = {"enabled": True, "cache_key": cache_key, "hit": False}
     if cache_path.exists():
-        with cache_path.open("rb") as f:
-            cached = pickle.load(f)
-        if cached.get("contract") != contract:
-            raise ValueError(f"preprocess cache contract mismatch for key={cache_key}")
-        event["hit"] = True
-        if cache_events is not None:
-            cache_events.append(event)
-        return cached["payload"]
+        try:
+            with cache_path.open("rb") as f:
+                cached = pickle.load(f)
+            if not isinstance(cached, dict) or "contract" not in cached or "payload" not in cached:
+                raise ValueError("preprocess cache payload is malformed")
+            if cached.get("contract") != contract:
+                raise ValueError(f"preprocess cache contract mismatch for key={cache_key}")
+        except Exception:
+            event["corrupt"] = True
+        else:
+            event["hit"] = True
+            if cache_events is not None:
+                cache_events.append(event)
+            return cached["payload"]
     payload = preprocess(**kwargs)
     tmp_path = cache_path.with_name(f"{cache_path.name}.{os.getpid()}.tmp")
     with tmp_path.open("wb") as f:
@@ -570,6 +579,7 @@ def _summarize_cache_events(cache_events):
         "lookups": int(len(events)),
         "hits": int(sum(1 for event in events if event.get("hit"))),
         "misses": int(sum(1 for event in events if not event.get("hit"))),
+        "corrupt": int(sum(1 for event in events if event.get("corrupt"))),
     }
 
 
@@ -1807,6 +1817,7 @@ def run_model(
         coeff_cache_dir=coeff_cache_dir,
         no_coeff_cache=no_coeff_cache,
         cache_events=coeff_cache_events,
+        model_name=model_name,
         X=X,
         missing_rate=missing_rate,
         interpolate=interpolate,
@@ -2392,6 +2403,7 @@ def _evaluate_robustness(
         coeff_cache_dir=coeff_cache_dir,
         no_coeff_cache=no_coeff_cache,
         cache_events=coeff_cache_events,
+        model_name=model_name,
         X=X,
         missing_rate=0.0,
         interpolate=interpolate,
@@ -2447,6 +2459,7 @@ def _evaluate_robustness(
                         coeff_cache_dir=coeff_cache_dir,
                         no_coeff_cache=no_coeff_cache,
                         cache_events=coeff_cache_events,
+                        model_name=model_name,
                         X=X,
                         missing_rate=test_rate,
                         interpolate=interpolate,

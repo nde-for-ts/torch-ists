@@ -567,6 +567,27 @@ def _load_ray_tune():
     return ray, tune, ASHAScheduler, BasicVariantGenerator
 
 
+def _ray_worker_pythonpath(repo_root: str, *import_roots: str) -> str:
+    """Return a Ray-worker PYTHONPATH that remains valid inside working_dir."""
+    repo_root_abs = os.path.abspath(repo_root)
+    entries = []
+    for root in import_roots:
+        root_abs = os.path.abspath(root)
+        rel = os.path.relpath(root_abs, repo_root_abs)
+        if rel == ".":
+            entry = "."
+        elif rel == os.pardir or rel.startswith(os.pardir + os.sep):
+            raise RuntimeError(
+                "Ray worker import root must be inside the Ray working_dir: "
+                f"working_dir={repo_root_abs!r}, import_root={root_abs!r}"
+            )
+        else:
+            entry = rel
+        if entry not in entries:
+            entries.append(entry)
+    return os.pathsep.join(entries)
+
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
@@ -1861,11 +1882,11 @@ def optimize(
         raise RuntimeError("Requested --device cuda requires --ray-gpu > 0.")
     _load_ray_tune()
 
-    # Propagate runtime import context to Ray workers.
+    # Propagate a package-relative import context to Ray workers.
     repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-    pythonpath = os.environ.get("PYTHONPATH")
-    if not pythonpath:
-        pythonpath = repo_root
+    script_root = os.path.abspath(os.path.dirname(__file__))
+    package_root = repo_root
+    pythonpath = _ray_worker_pythonpath(repo_root, script_root, package_root)
     if not ray.is_initialized():
         runtime_env = {
             "working_dir": repo_root,

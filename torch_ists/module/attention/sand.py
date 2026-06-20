@@ -57,12 +57,10 @@ class DenseInterpolation(nn.Module):
         super().__init__()
         self.seq_len = seq_len
         self.factor = factor
-        w = torch.zeros(factor, seq_len)
-        for i in range(factor):
-            center = int((seq_len - 1) * i / (factor - 1)) if factor > 1 else 0
-            for j in range(seq_len):
-                w[i, j] = 1 / (1 + abs(center - j))
-        w = w / w.sum(dim=1, keepdim=True)
+        t = torch.arange(seq_len, dtype=torch.float32).unsqueeze(0)
+        m = torch.arange(factor, dtype=torch.float32).unsqueeze(1)
+        s = factor * t / float(seq_len)
+        w = torch.pow(1.0 - torch.abs(s - m) / float(factor), 2.0)
         self.register_buffer("w", w)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
