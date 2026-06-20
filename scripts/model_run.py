@@ -520,6 +520,7 @@ def _preprocess_cache_contract(
 ):
     return {
         "cache_contract": "torch-ists-preprocess-cache-v1",
+        "package_version": str(globals().get("TORCH_ISTS_PACKAGE_VERSION", "unknown")),
         "x_hash": _hash_array_for_cache(X),
         "missing_rate": float(missing_rate),
         "interpolate": str(interpolate),
@@ -940,7 +941,7 @@ def _resolve_run_device(device_mode: str) -> torch.device:
 
 # Import from the packaged torch_ists runtime.
 from torch_ists.preprocessing import apply_missingness, preprocess
-from torch_ists import ists_classifier, ists_model
+from torch_ists import __version__ as TORCH_ISTS_PACKAGE_VERSION, ists_classifier, ists_model
 from _training_runtime import (
     _align_prediction_target,
     apply_train_normalization_stats,

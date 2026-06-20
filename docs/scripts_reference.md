@@ -126,6 +126,7 @@ This is a bounded smoke run; the full defaults (`--num-samples 50 --max-num-epoc
 | `--max-num-epochs` | `int` | `20` | Per-trial training budget. |
 | `--search-warmup` | `int` | `5` | Minimum completed epochs before in-trial patience stopping may fire. |
 | `--search-patience` | `int` | `5` | Stop a search trial after this many non-improving validation epochs. |
+| `--search-scheduler-step-size` | `int` | `10` | StepLR step size for search trials. |
 | `--asha-grace-period` | `int` | `5` | Minimum epochs before ASHA may stop a Ray trial. |
 | `--allow-incomplete-ray-trial` / `--no-allow-incomplete-ray-trial` | flag | enabled | In single-repeat search, use the best finite terminated Ray trial if no finite trial reaches `--max-num-epochs`; disable to require full-budget completion. |
 | `--max-runs` | `int` | `None` | Stop after this many runs across the dataset × model grid. |
