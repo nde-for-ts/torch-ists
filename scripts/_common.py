@@ -34,7 +34,8 @@ CONSTRAINED_SEARCH_FAMILY = "capacity-controlled"
 CONSTRAINED_PUBLIC_SEARCH_NAME = "experimental capacity-controlled search"
 DEFAULT_SEARCH_CONTRACT_NAME = "model-specific-default"
 HISTORICAL_SEARCH_CONTRACT_NAME = "historical-reproducibility"
-INTERNAL_SEARCH_PROFILE_VISIBILITY = "internal"
+PUBLIC_SEARCH_PROFILE_VISIBILITY = "public"
+COMPATIBILITY_SEARCH_PROFILE_VISIBILITY = "compatibility"
 
 _SEARCH_PROFILE_ALIASES = {
     "default": MODEL_NATIVE_SEARCH_PROFILE,
@@ -158,6 +159,76 @@ _MODEL_NATIVE_EXTRA_PARAM_DEFAULTS = {
     "miam": {"n_heads": 1, "n_iter": 1},
     "mtan": {"n_heads": 1, "embed_time": 16},
 }
+
+
+def _read_json_file(path: Path) -> dict | None:
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            payload = json.load(f)
+    except Exception:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _read_public_mirror_head(root: Path) -> str | None:
+    git_dir = root / ".git"
+    if not git_dir.exists():
+        return None
+    try:
+        if git_dir.is_file():
+            raw = git_dir.read_text(encoding="utf-8").strip()
+            if not raw.startswith("gitdir:"):
+                return None
+            git_dir = (root / raw.split(":", 1)[1].strip()).resolve()
+        head_path = git_dir / "HEAD"
+        head = head_path.read_text(encoding="utf-8").strip()
+        if head.startswith("ref:"):
+            ref_path = git_dir / head.split(":", 1)[1].strip()
+            if ref_path.exists():
+                value = ref_path.read_text(encoding="utf-8").strip()
+                return value or None
+            packed_refs = git_dir / "packed-refs"
+            if packed_refs.exists():
+                ref_name = head.split(":", 1)[1].strip()
+                for line in packed_refs.read_text(encoding="utf-8").splitlines():
+                    if line.startswith("#") or not line.strip():
+                        continue
+                    parts = line.split()
+                    if len(parts) == 2 and parts[1] == ref_name:
+                        return parts[0]
+            return None
+        return head or None
+    except Exception:
+        return None
+
+
+def build_runtime_provenance(runtime_baseline_id: str | None = None) -> dict:
+    """Return portable runtime metadata without recording local filesystem paths."""
+    try:
+        import torch_ists
+
+        package_version = str(getattr(torch_ists, "__version__", "unknown"))
+        package_file = Path(getattr(torch_ists, "__file__", "")).resolve()
+        runtime_root = package_file.parents[1] if package_file else Path(__file__).resolve().parents[1]
+    except Exception:
+        package_version = "unknown"
+        runtime_root = Path(__file__).resolve().parents[1]
+
+    status = _read_json_file(runtime_root / "PACKAGE_STATUS.json") or {}
+    mirror_commit_sha = (
+        os.environ.get("TORCH_ISTS_MIRROR_COMMIT_SHA")
+        or status.get("mirror_commit_sha")
+        or (_read_public_mirror_head(runtime_root) if (runtime_root / "PACKAGE_STATUS.json").exists() else None)
+    )
+    archive_checksum = os.environ.get("TORCH_ISTS_ARCHIVE_SHA256") or status.get("mirror_archive_checksum")
+
+    return {
+        "package_version": package_version,
+        "mirror_commit_sha": None if mirror_commit_sha is None else str(mirror_commit_sha),
+        "mirror_archive_checksum": None if archive_checksum is None else str(archive_checksum),
+        "runtime_baseline_id": None if runtime_baseline_id is None else str(runtime_baseline_id),
+        "wheel_or_source_checkout": "source_checkout" if (runtime_root / "scripts").exists() else "installed_package",
+    }
 
 
 def _path_is_under(path: Path, roots: list[Path]) -> bool:
@@ -303,20 +374,20 @@ def describe_search_profile(raw: str | None) -> dict:
         return {
             "search_contract": HISTORICAL_SEARCH_CONTRACT_NAME,
             "search_family": "historical_reproducibility",
-            "search_profile_visibility": INTERNAL_SEARCH_PROFILE_VISIBILITY,
+            "search_profile_visibility": COMPATIBILITY_SEARCH_PROFILE_VISIBILITY,
             "public_search_name": "historical reproducibility",
         }
     if profile == LEGACY_EXPANDED_SEARCH_PROFILE:
         return {
             "search_contract": DEFAULT_SEARCH_CONTRACT_NAME,
             "search_family": "internal_reproducibility",
-            "search_profile_visibility": INTERNAL_SEARCH_PROFILE_VISIBILITY,
+            "search_profile_visibility": COMPATIBILITY_SEARCH_PROFILE_VISIBILITY,
             "public_search_name": "expanded internal search",
         }
     return {
         "search_contract": DEFAULT_SEARCH_CONTRACT_NAME,
         "search_family": "default",
-        "search_profile_visibility": INTERNAL_SEARCH_PROFILE_VISIBILITY,
+        "search_profile_visibility": PUBLIC_SEARCH_PROFILE_VISIBILITY,
         "public_search_name": "default model-specific search",
     }
 

@@ -33,6 +33,23 @@ def normalize_dataset_source(dataset_source: str) -> str:
     return normalized
 
 
+def _remap_labels_to_contiguous(y: np.ndarray) -> np.ndarray:
+    """Remap class labels to contiguous integer indices ``0..K-1``.
+
+    Mirrors the default-source loader (``benchmark_loader`` ``label_dict``) so the
+    npz / custom-data path produces the same contiguous integer targets. Handles
+    non-contiguous integer, float, or string labels deterministically (sorted
+    unique -> ``0..K-1``). Without this, a raw label value (e.g. ``5`` with only
+    3 classes) reaches ``nn.CrossEntropyLoss`` as a class index and silently
+    corrupts training: out-of-range ``IndexError``, float truncation via
+    ``.long()``, or a ``TypeError`` on string labels. Idempotent on already
+    contiguous ``0..K-1`` labels, so the built-in default source is unaffected.
+    """
+    classes = np.unique(y)
+    label_to_index = {label: index for index, label in enumerate(classes)}
+    return np.array([label_to_index[label] for label in y], dtype=np.int64)
+
+
 def _validate_xy(X: np.ndarray, y: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     X = np.asarray(X, dtype=np.float32)
     y = np.asarray(y)
@@ -42,6 +59,7 @@ def _validate_xy(X: np.ndarray, y: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         raise ValueError(f"y must be 1D [N], got shape {y.shape}")
     if X.shape[0] != y.shape[0]:
         raise ValueError(f"sample mismatch: X has {X.shape[0]}, y has {y.shape[0]}")
+    y = _remap_labels_to_contiguous(y)
     return X, y
 
 

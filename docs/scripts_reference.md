@@ -137,6 +137,7 @@ This is a bounded smoke run; the full defaults (`--num-samples 50 --max-num-epoc
 | `--param-root` | `str` | `params` | Output parameter artifact root. |
 | `--contract-dir` | `str` | `evidence` | Directory for JSON run logs (stage = `search`). |
 | `--run-id` | `str` | (auto) | Run identifier. |
+| `--runtime-baseline-id` | `str` | `None` | Optional runtime label copied into the search manifest and parameter metadata. |
 | `--task` | `{classification}` | `classification` | Task head. Only `classification` is stable. |
 | `--targets-root` | `str` | `targets` | Root directory for dataset target bundles when a task uses external targets. |
 
@@ -154,7 +155,7 @@ Parameter search runs the standard search without synthetic missingness injectio
 ### Output
 
 - **Param file** (pickle): `<param-root>/<dataset>/<dataset>_<model>` with optional capacity-controlled and repeat suffixes, containing the selected hyperparameters, effective model parameters, and run details. Older `_cv` aggregated artifacts are read as a compatibility fallback.
-- **Run log**: `<contract-dir>/<run-id>/search.manifest.json` (records, reused records, skipped, summary). Executed records include resolved batch size and search settings.
+- **Run log**: `<contract-dir>/<run-id>/search.manifest.json` (records, reused records, skipped, summary). Executed records include resolved batch size, search settings, and runtime provenance.
 
 ### Workflow Dependencies
 
@@ -214,6 +215,7 @@ PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/model_run.py \
 | `--out-root` | `str` | `out` | Output prediction artifact root. |
 | `--contract-dir` | `str` | `evidence` | Directory for JSON run logs (stage = `run`). |
 | `--run-id` | `str` | (auto) | Run identifier. |
+| `--runtime-baseline-id` | `str` | `None` | Optional runtime label copied into the run manifest and output metadata. |
 | `--task` | `{classification}` | `classification` | Task head. Only `classification` is stable. |
 | `--targets-root` | `str` | `targets` | Root directory for dataset target bundles. |
 
@@ -248,15 +250,15 @@ The task and metric tables in this document describe `ists_model` API outputs. T
 
 | Task | Metrics |
 |---|---|
-| `classification` | accuracy, macro F1 (`f1`), weighted F1 (`wf1`) |
+| `classification` | accuracy, balanced accuracy, precision/recall/F1, cross-entropy, Brier score, confidence summaries, confusion matrix |
 | `outlier_detection` | BCE, `outlier_acc` |
 | `change_detection` | BCE, `change_acc` |
 | `regression`, `forecasting`, `imputation` | MSE, MAE |
 
 ### Output
 
-- **Prediction file** (pickle): standard/missingness `<out-root>/<dataset>/<missing_rate>/<dataset>_<missing_rate>_<model>_<seed>`; robustness `<out-root>/<dataset>/robustness/<dataset>_robustness_<model>_<seed>__rates_<...>__types_<...>__sync_<...>`. The robustness path has **no** `<missing_rate>` segment — the test axes are encoded in the filename suffix.
-- **Run log**: `<contract-dir>/<run-id>/run.manifest.json`. Executed records include resolved batch size.
+- **Prediction file** (pickle): standard/missingness `<out-root>/<dataset>/<missing_rate>/<dataset>_<missing_rate>_<model>_<seed>`; robustness `<out-root>/<dataset>/robustness/<dataset>_robustness_<model>_<seed>__rates_<...>__types_<...>__sync_<...>`. The robustness path has **no** `<missing_rate>` segment — the test axes are encoded in the filename suffix. Output metadata includes runtime provenance; classification metrics use schema version 2.
+- **Run log**: `<contract-dir>/<run-id>/run.manifest.json`. Executed records include resolved batch size and runtime provenance.
 
 ### Workflow Dependencies
 

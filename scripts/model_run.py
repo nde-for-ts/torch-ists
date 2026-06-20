@@ -40,6 +40,7 @@ from _common import (
     CONSTRAINED_MATCHED_CAPACITY_TARGET_NAME,
     DEFAULT_SEARCH_PROFILE,
     apply_model_scope_variant,
+    build_runtime_provenance,
     build_model_kwargs_from_config,
     configure_runtime_paths,
     default_method_for_model,
@@ -647,6 +648,12 @@ def parse_cli_args():
         help="Run identifier for related outputs.",
     )
     parser.add_argument(
+        "--runtime-baseline-id",
+        type=str,
+        default=None,
+        help="Optional runtime baseline label copied into manifests and output metadata.",
+    )
+    parser.add_argument(
         "--save-predictions",
         type=str,
         choices=["full", "summary"],
@@ -981,16 +988,90 @@ def _build_output_path(
     return os.path.join(out_root, data_name, str(missing_rate), out_name)
 
 
-def _compute_metrics(y_true, y_pred):
-    accuracy = _validate_bounded_metric("accuracy", accuracy_score(y_true, y_pred))
-    f1_macro = _validate_bounded_metric("f1", f1_score(y_true, y_pred, average="macro"))
-    wf1 = _validate_bounded_metric("wf1", f1_score(y_true, y_pred, average="weighted"))
-    return {
+def _compute_metrics(y_true, y_pred, logit_list=None):
+    y_true_np = np.asarray(y_true)
+    y_pred_np = np.asarray(y_pred)
+    labels = sorted(set(np.asarray(y_true_np).tolist()) | set(np.asarray(y_pred_np).tolist()))
+    logit_np = None
+    if logit_list is not None:
+        logit_np = np.asarray(logit_list, dtype=np.float64)
+        if logit_np.ndim == 2 and logit_np.shape[1] > 0:
+            max_label_count = (int(max(labels)) + 1) if labels else 0
+            labels = list(range(max(int(logit_np.shape[1]), max_label_count)))
+
+    accuracy = _validate_bounded_metric("accuracy", accuracy_score(y_true_np, y_pred_np))
+    balanced_accuracy = _validate_bounded_metric(
+        "balanced_accuracy",
+        balanced_accuracy_score(y_true_np, y_pred_np),
+    )
+    f1_macro = _validate_bounded_metric("f1", f1_score(y_true_np, y_pred_np, average="macro", zero_division=0))
+    wf1 = _validate_bounded_metric("wf1", f1_score(y_true_np, y_pred_np, average="weighted", zero_division=0))
+    precision_macro = _validate_bounded_metric(
+        "precision_macro",
+        precision_score(y_true_np, y_pred_np, average="macro", zero_division=0),
+    )
+    recall_macro = _validate_bounded_metric(
+        "recall_macro",
+        recall_score(y_true_np, y_pred_np, average="macro", zero_division=0),
+    )
+    precision_weighted = _validate_bounded_metric(
+        "precision_weighted",
+        precision_score(y_true_np, y_pred_np, average="weighted", zero_division=0),
+    )
+    recall_weighted = _validate_bounded_metric(
+        "recall_weighted",
+        recall_score(y_true_np, y_pred_np, average="weighted", zero_division=0),
+    )
+    confusion = confusion_matrix(y_true_np, y_pred_np, labels=labels)
+
+    cross_entropy = None
+    brier_score = None
+    mean_confidence = None
+    mean_confidence_correct = None
+    mean_confidence_incorrect = None
+    if logit_np is not None and logit_np.ndim == 2 and logit_np.shape[0] == y_true_np.shape[0]:
+        max_logit = np.max(logit_np, axis=1, keepdims=True)
+        exp_shifted = np.exp(logit_np - max_logit)
+        probs = exp_shifted / np.sum(exp_shifted, axis=1, keepdims=True)
+        y_true_int = y_true_np.astype(np.int64)
+        if np.all((0 <= y_true_int) & (y_true_int < probs.shape[1])):
+            log_probs = logit_np - max_logit - np.log(np.sum(exp_shifted, axis=1, keepdims=True))
+            cross_entropy = float(-np.mean(log_probs[np.arange(y_true_int.shape[0]), y_true_int]))
+            one_hot = np.zeros_like(probs)
+            one_hot[np.arange(y_true_int.shape[0]), y_true_int] = 1.0
+            brier_score = float(np.mean(np.sum(np.square(probs - one_hot), axis=1)))
+        confidence = np.max(probs, axis=1)
+        correct = y_pred_np == y_true_np
+        mean_confidence = float(np.mean(confidence))
+        mean_confidence_correct = float(np.mean(confidence[correct])) if np.any(correct) else None
+        mean_confidence_incorrect = float(np.mean(confidence[~correct])) if np.any(~correct) else None
+
+    metrics = {
+        "metrics_schema_version": 2,
         "accuracy": float(accuracy),
+        "balanced_accuracy": float(balanced_accuracy),
+        "precision_macro": float(precision_macro),
+        "recall_macro": float(recall_macro),
         "f1": float(f1_macro),
+        "f1_macro": float(f1_macro),
+        "precision_weighted": float(precision_weighted),
+        "recall_weighted": float(recall_weighted),
         "wf1": float(wf1),
         "f1_weighted": float(wf1),
+        "cross_entropy": cross_entropy,
+        "brier_score": brier_score,
+        "mean_confidence": mean_confidence,
+        "mean_confidence_correct": mean_confidence_correct,
+        "mean_confidence_incorrect": mean_confidence_incorrect,
+        "n_samples": int(y_true_np.shape[0]),
+        "n_classes": int(len(labels)),
+        "class_labels": [int(label) for label in labels],
+        "confusion_matrix": confusion.astype(int).tolist(),
     }
+    for key in ("cross_entropy", "brier_score", "mean_confidence"):
+        if metrics[key] is None or not np.isfinite(float(metrics[key])):
+            raise ValueError(f"classification metric {key} must be finite")
+    return metrics
 
 
 def _build_task_targets(task, x_missing_norm, y, forecast_horizon=None):
@@ -1120,7 +1201,7 @@ def _build_evaluation_result(
 ):
     task = str(task).strip().lower()
     if task == "classification":
-        metrics = _compute_metrics(y_true, y_pred)
+        metrics = _compute_metrics(y_true, y_pred, logit_list)
         predictions = _build_predictions_payload(
             y_true=y_true,
             y_pred=y_pred,
@@ -1282,6 +1363,7 @@ def _build_result_payload(
     output_contract=None,
     timestamp_summary=None,
     aux_nan_event_count=0,
+    runtime_provenance=None,
 ):
     resolved_regime = str(evaluation_regime or mode)
     resolved_mode = resolved_regime if str(mode).strip().lower() == "standard" else str(mode)
@@ -1301,6 +1383,7 @@ def _build_result_payload(
         "robustness_axes": robustness_axes,
         "timestamp_summary": timestamp_summary,
         "aux_nan_event_count": int(aux_nan_event_count),
+        "runtime_provenance": runtime_provenance,
     }
     if output_contract is not None:
         meta["output_contract"] = output_contract
@@ -1347,6 +1430,7 @@ def run_model(
     targets_root="targets",
     dataset_source="default",
     dataset_npz=None,
+    runtime_provenance=None,
 ):
     task = str(task).strip().lower()
     if robustness_mode:
@@ -1775,6 +1859,7 @@ def run_model(
             output_contract=output_contract,
             timestamp_summary=timestamp_summary,
             aux_nan_event_count=_get_aux_nan_event_count(model),
+            runtime_provenance=runtime_provenance,
         )
         payload.update(param_search_contract)
 
@@ -1998,6 +2083,7 @@ def run_model(
         output_contract=output_contract,
         timestamp_summary=timestamp_summary,
         aux_nan_event_count=_get_aux_nan_event_count(model),
+        runtime_provenance=runtime_provenance,
     )
     payload.update(param_search_contract)
     with open(output_path, 'wb') as f:
@@ -2026,6 +2112,7 @@ def run_model(
         "train_missing_type": train_missing_type,
         "train_channel_sync": train_channel_sync,
         "output_contract_hash": output_contract_hash,
+        "runtime_provenance": runtime_provenance,
     }
 
 
@@ -2296,6 +2383,7 @@ def main():
     seed_everything(seed)
     LOGGER.info("Run device resolved mode=%s device=%s", args.device, device)
     run_id = args.run_id or generate_run_id("run")
+    runtime_provenance = build_runtime_provenance(args.runtime_baseline_id)
     records = []
     reused_records = []
     skipped = []
@@ -2394,6 +2482,7 @@ def main():
                         targets_root=args.targets_root,
                         dataset_source=args.dataset_source,
                         dataset_npz=args.dataset_npz,
+                        runtime_provenance=runtime_provenance,
                     )
                     if run_result is None:
                         output_path = _build_output_path(
@@ -2446,6 +2535,7 @@ def main():
                                     "output_path": str(output_path),
                                     "output_contract_hash": _read_output_contract_hash(output_path),
                                     "reason": "output artifact already exists (--check)",
+                                    "runtime_provenance": runtime_provenance,
                                 }
                             )
                         continue
@@ -2536,6 +2626,7 @@ def main():
                             targets_root=args.targets_root,
                             dataset_source=args.dataset_source,
                             dataset_npz=args.dataset_npz,
+                            runtime_provenance=runtime_provenance,
                         )
                         if run_result is None:
                             output_path = _build_output_path(
@@ -2579,6 +2670,7 @@ def main():
                                         "output_path": str(output_path),
                                         "output_contract_hash": _read_output_contract_hash(output_path),
                                         "reason": "output artifact already exists (--check)",
+                                        "runtime_provenance": runtime_provenance,
                                     }
                                 )
                             continue
@@ -2668,6 +2760,7 @@ def main():
             "existing_policy": args.existing_policy,
             "skip_policy": args.skip_policy,
             "max_runs_mode": args.max_runs_mode,
+            "runtime_provenance": runtime_provenance,
             "summary": {
                 "completed_run_calls": run_count,
                 "executed_runs": run_count,
