@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import copy
+import logging
+import math
 from typing import Dict, Optional
 
 import torch
@@ -17,6 +20,7 @@ SUPPORTED_TASKS = frozenset(
         "change_detection",
     }
 )
+LOGGER = logging.getLogger("torch_ists.script_runtime")
 
 
 def _resolve_task(task: str) -> str:
@@ -390,3 +394,103 @@ def evaluate(
 
     size = len(val_iter.dataset)
     return total_loss / size
+
+
+def run_train_valid_loop(
+    *,
+    model_name,
+    model,
+    optimizer,
+    criterion,
+    train_batch,
+    valid_batch,
+    interpolate,
+    use_intensity,
+    device,
+    epochs: int,
+    task: str = "classification",
+    scheduler_step_size: int = 10,
+    scheduler_gamma: float = 0.5,
+    early_stop_warmup: int = 22,
+    early_stop_patience: int = 10,
+    epoch_reporter=None,
+    log_prefix: str = "",
+):
+    """Run the shared train/validation outer loop used by search and final runs."""
+    scheduler = torch.optim.lr_scheduler.StepLR(
+        optimizer,
+        step_size=int(scheduler_step_size),
+        gamma=float(scheduler_gamma),
+    )
+    best_loss = math.inf
+    best_model_wts = copy.deepcopy(model.state_dict())
+    patient = 0
+    epochs_completed = 0
+    stopped_early = False
+
+    for e in range(int(epochs)):
+        train_loss = train(
+            model_name,
+            model,
+            optimizer,
+            criterion,
+            train_batch,
+            interpolate,
+            use_intensity,
+            device,
+            task=task,
+        )
+        valid_loss = evaluate(
+            model_name,
+            model,
+            criterion,
+            valid_batch,
+            interpolate,
+            use_intensity,
+            device,
+            task=task,
+        )
+        epochs_completed = e + 1
+        valid_loss_value = float(valid_loss)
+
+        if epochs_completed == 1 or epochs_completed % 10 == 0:
+            LOGGER.info(
+                "%sEpoch=%d train=%.6f valid=%.6f",
+                f"{log_prefix} " if log_prefix else "",
+                e,
+                float(train_loss),
+                valid_loss_value,
+            )
+
+        if not math.isfinite(valid_loss_value):
+            raise RuntimeError(
+                f"Validation loss became non-finite for model={model_name} "
+                f"epoch={e}: {valid_loss!r}."
+            )
+
+        if valid_loss_value < best_loss:
+            best_loss = valid_loss_value
+            best_model_wts = copy.deepcopy(model.state_dict())
+            patient = 0
+        else:
+            patient += 1
+
+        if epoch_reporter is not None:
+            epoch_reporter(best_loss, epoch=epochs_completed)
+
+        if epochs_completed >= int(early_stop_warmup) and patient > int(early_stop_patience):
+            stopped_early = True
+            break
+
+        scheduler.step()
+
+    return {
+        "best_loss": float(best_loss),
+        "best_model_wts": best_model_wts,
+        "epochs_completed": int(epochs_completed),
+        "stopped_early": bool(stopped_early),
+        "scheduler_step_size": int(scheduler_step_size),
+        "scheduler_gamma": float(scheduler_gamma),
+        "early_stop_warmup": int(early_stop_warmup),
+        "early_stop_patience": int(early_stop_patience),
+    }

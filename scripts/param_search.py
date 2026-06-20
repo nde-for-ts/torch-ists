@@ -520,6 +520,7 @@ from _training_runtime import (
     evaluate,
     ists_dataset,
     normalize_with_train_stats,
+    run_train_valid_loop,
     train,
 )
 from task_target_contracts import load_task_targets_npz
@@ -714,6 +715,7 @@ def _build_search_provenance(
     execution_backend: str,
     search_algorithm: str,
     search_algorithm_seed: int,
+    scheduler_step_size: int = 10,
     asha_grace_period: int | None = None,
     allow_incomplete_ray_trial: bool | None = None,
     selected_iteration: int | None = None,
@@ -727,6 +729,7 @@ def _build_search_provenance(
         "search_max_num_epochs": int(max_num_epochs),
         "search_warmup": int(search_warmup),
         "search_patience": int(search_patience),
+        "search_scheduler_step_size": int(scheduler_step_size),
         "search_execution_backend": str(execution_backend),
         "search_budget_class": "smoke" if int(num_samples) <= 1 else "production",
         "search_algorithm": str(search_algorithm),
@@ -1433,48 +1436,26 @@ def _train_single_seed(
     else:
         criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
-    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.5)
-
-    best_loss = np.inf
-    best_model_wts = copy.deepcopy(model.state_dict())
-    patient = 0
-
-    for e in tqdm(range(EPOCHS)):
-        train_loss = train(
-            model_name, model, optimizer, criterion, train_batch, interpolate, use_intensity, trial_device, task=task
-        )
-        valid_loss = evaluate(
-            model_name, model, criterion, valid_batch, interpolate, use_intensity, trial_device, task=task
-        )
-        if not np.isfinite(valid_loss):
-            raise RuntimeError(
-                f"Validation loss became non-finite for dataset={data_name} "
-                f"model={model_name} seed={seed} epoch={e}: {valid_loss!r}"
-            )
-
-        if e % 10 == 0:
-            LOGGER.info(
-                "Seed=%d Epoch=%d train=%.6f valid=%.6f",
-                seed,
-                e,
-                train_loss,
-                valid_loss,
-            )
-
-        if valid_loss < best_loss:
-            best_loss = valid_loss
-            best_model_wts = copy.deepcopy(model.state_dict())
-            patient = 0
-        else:
-            patient += 1
-
-        if epoch_reporter is not None:
-            epoch_reporter(best_loss, epoch=e + 1)
-
-        if (e + 1 >= int(search_warmup)) and (patient > int(search_patience)):
-            break
-
-        scheduler.step()
+    training_loop = run_train_valid_loop(
+        model_name=model_name,
+        model=model,
+        optimizer=optimizer,
+        criterion=criterion,
+        train_batch=train_batch,
+        valid_batch=valid_batch,
+        interpolate=interpolate,
+        use_intensity=use_intensity,
+        device=trial_device,
+        epochs=EPOCHS,
+        task=task,
+        scheduler_step_size=10,
+        scheduler_gamma=0.5,
+        early_stop_warmup=search_warmup,
+        early_stop_patience=search_patience,
+        epoch_reporter=epoch_reporter,
+        log_prefix=f"{data_name}/{model_name}/seed{seed}",
+    )
+    best_loss = float(training_loop["best_loss"])
 
     LOGGER.info("Seed=%d finished with best_loss=%.6f", seed, best_loss)
     return best_loss

@@ -14,6 +14,8 @@ import pickle
 import random
 import logging
 import argparse
+import signal
+from contextlib import contextmanager
 from pathlib import Path
 
 import urllib.request
@@ -435,6 +437,141 @@ def _effective_robustness_test_rates(rates):
     return [0.0] + positives
 
 
+class CellTimeoutError(TimeoutError):
+    """Raised when a configured model-run cell exceeds its wall-clock budget."""
+
+
+class SolverBudgetExcluded(RuntimeError):
+    """Raised when a configured solver-budget policy excludes a cell before training."""
+
+
+@contextmanager
+def _cell_timeout(seconds: float):
+    budget = float(seconds or 0.0)
+    if budget <= 0.0 or not hasattr(signal, "SIGALRM"):
+        yield
+        return
+
+    def _handle_timeout(signum, frame):
+        del signum, frame
+        raise CellTimeoutError(f"cell wall-clock budget exceeded ({budget:.1f}s)")
+
+    previous_handler = signal.getsignal(signal.SIGALRM)
+    signal.signal(signal.SIGALRM, _handle_timeout)
+    previous_timer = signal.setitimer(signal.ITIMER_REAL, budget)
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0.0)
+        signal.signal(signal.SIGALRM, previous_handler)
+        if previous_timer and previous_timer[0] > 0:
+            signal.setitimer(signal.ITIMER_REAL, previous_timer[0], previous_timer[1])
+
+
+def _runtime_status_for_elapsed(elapsed_s: float, performance_limit_s: float) -> str:
+    limit = float(performance_limit_s or 0.0)
+    if limit > 0.0 and float(elapsed_s) > limit:
+        return "performance_limited"
+    return "completed"
+
+
+def _solver_budget_exclusion_reason(model_name: str, seq_len: int, policy: str, threshold: int) -> str | None:
+    normalized_policy = str(policy or "allow").strip().lower()
+    if normalized_policy == "allow":
+        return None
+    if normalized_policy != "exclude-long-adaptive-ode":
+        raise ValueError("solver_budget_policy must be one of {'allow','exclude-long-adaptive-ode'}")
+    threshold = int(threshold or 0)
+    if threshold <= 0 or int(seq_len) < threshold:
+        return None
+    normalized_model = str(model_name).strip().lower()
+    adaptive_models = {"ode-lstm", "latentode"}
+    if normalized_model in adaptive_models:
+        return (
+            f"{normalized_model} excluded by solver budget policy "
+            f"for seq_len={int(seq_len)} >= {threshold}"
+        )
+    return None
+
+
+def _hash_array_for_cache(value):
+    if value is None:
+        return None
+    arr = np.ascontiguousarray(np.asarray(value))
+    digest = hashlib.sha256()
+    digest.update(str(arr.shape).encode("utf-8"))
+    digest.update(str(arr.dtype).encode("utf-8"))
+    digest.update(arr.view(np.uint8).tobytes())
+    return digest.hexdigest()
+
+
+def _preprocess_cache_contract(
+    *,
+    X,
+    missing_rate,
+    interpolate,
+    use_intensity,
+    mechanism,
+    seed,
+    channel_sync,
+    timestamps,
+    timestamp_delta_scale,
+    missingness_reference,
+):
+    return {
+        "cache_contract": "torch-ists-preprocess-cache-v1",
+        "x_hash": _hash_array_for_cache(X),
+        "missing_rate": float(missing_rate),
+        "interpolate": str(interpolate),
+        "use_intensity": bool(use_intensity),
+        "mechanism": str(mechanism).upper(),
+        "seed": int(seed),
+        "channel_sync": bool(channel_sync),
+        "timestamps_hash": _hash_array_for_cache(timestamps),
+        "timestamp_delta_scale": None if timestamp_delta_scale is None else float(timestamp_delta_scale),
+        "missingness_reference_hash": _hash_array_for_cache(missingness_reference),
+    }
+
+
+def _preprocess_with_optional_cache(*, coeff_cache_dir=None, no_coeff_cache=False, cache_events=None, **kwargs):
+    cache_enabled = bool(coeff_cache_dir) and not bool(no_coeff_cache)
+    if not cache_enabled:
+        return preprocess(**kwargs)
+    cache_root = Path(coeff_cache_dir).expanduser().resolve()
+    cache_root.mkdir(parents=True, exist_ok=True)
+    contract = _preprocess_cache_contract(**kwargs)
+    cache_key = hashlib.sha256(json.dumps(contract, sort_keys=True).encode("utf-8")).hexdigest()
+    cache_path = cache_root / f"{cache_key}.pkl"
+    event = {"enabled": True, "cache_key": cache_key, "hit": False}
+    if cache_path.exists():
+        with cache_path.open("rb") as f:
+            cached = pickle.load(f)
+        if cached.get("contract") != contract:
+            raise ValueError(f"preprocess cache contract mismatch for key={cache_key}")
+        event["hit"] = True
+        if cache_events is not None:
+            cache_events.append(event)
+        return cached["payload"]
+    payload = preprocess(**kwargs)
+    tmp_path = cache_path.with_name(f"{cache_path.name}.{os.getpid()}.tmp")
+    with tmp_path.open("wb") as f:
+        pickle.dump({"contract": contract, "payload": payload}, f)
+    os.replace(tmp_path, cache_path)
+    if cache_events is not None:
+        cache_events.append(event)
+    return payload
+
+
+def _summarize_cache_events(cache_events):
+    events = list(cache_events or [])
+    return {
+        "enabled": bool(events),
+        "lookups": int(len(events)),
+        "hits": int(sum(1 for event in events if event.get("hit"))),
+        "misses": int(sum(1 for event in events if not event.get("hit"))),
+    }
+
+
 def _evaluation_regime_for_missing_rate(rate):
     return "standard" if _is_zero_missing_rate(rate) else "missingness"
 
@@ -668,6 +805,42 @@ def parse_cli_args():
         help="Prediction payload mode. full=store arrays, summary=store shape/dtype metadata only.",
     )
     parser.add_argument(
+        "--coeff-cache-dir",
+        type=str,
+        default=None,
+        help="Optional preprocessing/coefficient cache directory. Disabled unless this path is provided.",
+    )
+    parser.add_argument(
+        "--no-coeff-cache",
+        action="store_true",
+        help="Disable preprocessing/coefficient cache even when --coeff-cache-dir is set.",
+    )
+    parser.add_argument(
+        "--cell-timeout-seconds",
+        type=float,
+        default=0.0,
+        help="Optional per-cell wall-clock timeout in seconds. 0 disables timeout.",
+    )
+    parser.add_argument(
+        "--performance-limit-seconds",
+        type=float,
+        default=0.0,
+        help="Optional per-cell wall-clock label threshold. Completed cells above this are marked performance_limited.",
+    )
+    parser.add_argument(
+        "--solver-budget-policy",
+        type=str,
+        choices=["allow", "exclude-long-adaptive-ode"],
+        default="allow",
+        help="Operational solver-budget policy for long sequence adaptive ODE cells.",
+    )
+    parser.add_argument(
+        "--solver-budget-seq-len-threshold",
+        type=int,
+        default=0,
+        help="Sequence length threshold used by --solver-budget-policy. 0 disables preflight exclusion.",
+    )
+    parser.add_argument(
         "--task",
         type=str,
         choices=["classification"],
@@ -726,6 +899,7 @@ def parse_cli_args():
     args.out_root = os.path.abspath(os.path.expanduser(str(args.out_root)))
     args.contract_dir = os.path.abspath(os.path.expanduser(str(args.contract_dir)))
     args.targets_root = os.path.abspath(os.path.expanduser(str(args.targets_root)))
+    args.coeff_cache_dir = None if args.coeff_cache_dir is None else os.path.abspath(os.path.expanduser(str(args.coeff_cache_dir)))
     args.dataset_npz = _abspath_or_none(args.dataset_npz)
     return args
 
@@ -776,6 +950,7 @@ from _training_runtime import (
     evaluate,
     ists_dataset,
     normalize_with_train_stats,
+    run_train_valid_loop,
     train,
 )
 from task_target_contracts import load_task_targets_npz
@@ -881,6 +1056,7 @@ def _build_output_contract(
     param_search_contract,
     timestamp_summary=None,
     robustness_axes=None,
+    training_loop_policy=None,
 ):
     return {
         "contract_version": "model_run_output_contract_v1",
@@ -909,6 +1085,7 @@ def _build_output_contract(
         "param_search_contract": dict(param_search_contract),
         "timestamp_summary": timestamp_summary,
         "robustness_axes": robustness_axes,
+        "training_loop_policy": training_loop_policy,
     }
 
 
@@ -1371,6 +1548,8 @@ def _build_result_payload(
     timestamp_summary=None,
     aux_nan_event_count=0,
     runtime_provenance=None,
+    training_loop=None,
+    coeff_cache=None,
 ):
     resolved_regime = str(evaluation_regime or mode)
     resolved_mode = resolved_regime if str(mode).strip().lower() == "standard" else str(mode)
@@ -1391,6 +1570,8 @@ def _build_result_payload(
         "timestamp_summary": timestamp_summary,
         "aux_nan_event_count": int(aux_nan_event_count),
         "runtime_provenance": runtime_provenance,
+        "training_loop": training_loop,
+        "coeff_cache": coeff_cache,
     }
     if output_contract is not None:
         meta["output_contract"] = output_contract
@@ -1438,6 +1619,10 @@ def run_model(
     dataset_source="default",
     dataset_npz=None,
     runtime_provenance=None,
+    coeff_cache_dir=None,
+    no_coeff_cache=False,
+    solver_budget_policy="allow",
+    solver_budget_seq_len_threshold=0,
 ):
     task = str(task).strip().lower()
     if robustness_mode:
@@ -1487,6 +1672,15 @@ def run_model(
     num_dim = X.shape[1]
     seq_len = X.shape[2]
     num_class = len(np.unique(Y))
+    solver_exclusion_reason = _solver_budget_exclusion_reason(
+        model_name,
+        seq_len,
+        solver_budget_policy,
+        solver_budget_seq_len_threshold,
+    )
+    if solver_exclusion_reason is not None:
+        raise SolverBudgetExcluded(solver_exclusion_reason)
+    coeff_cache_events = []
     
     # check model_name and settings
     data_config = get_data_config(model_name)
@@ -1538,6 +1732,13 @@ def run_model(
         if robustness_mode
         else None
     )
+    training_loop_policy = {
+        "scheduler": "StepLR",
+        "scheduler_step_size": 10,
+        "scheduler_gamma": 0.5,
+        "early_stop_warmup": 22,
+        "early_stop_patience": 10,
+    }
     output_contract = _build_output_contract(
         data_name=data_name,
         model_name=model_name,
@@ -1564,6 +1765,7 @@ def run_model(
         param_search_contract=param_search_contract,
         timestamp_summary=timestamp_summary,
         robustness_axes=robustness_axes,
+        training_loop_policy=training_loop_policy,
     )
     output_contract_hash = _output_contract_hash(output_contract)
     if CHECK and os.path.exists(out_path):
@@ -1600,8 +1802,11 @@ def run_model(
     else:
         os.makedirs(os.path.join(out_root, data_name, str(missing_rate)), exist_ok=True)
 
-    X_missing, X_mask, X_delta, coeffs = preprocess(
-        X,
+    X_missing, X_mask, X_delta, coeffs = _preprocess_with_optional_cache(
+        coeff_cache_dir=coeff_cache_dir,
+        no_coeff_cache=no_coeff_cache,
+        cache_events=coeff_cache_events,
+        X=X,
         missing_rate=missing_rate,
         interpolate=interpolate,
         use_intensity=use_intensity,
@@ -1765,45 +1970,28 @@ def run_model(
     else:
         criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
-    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.5)
-
-    best_loss = np.inf
-    best_model_wts = copy.deepcopy(model.state_dict())
-    patient = 0
-
-    for e in tqdm(range(EPOCHS)):
-        train_loss = train(
-            model_name, model, optimizer, criterion, train_batch, interpolate, use_intensity, device, task=task
-        )
-        valid_loss = evaluate(
-            model_name, model, criterion, valid_batch, interpolate, use_intensity, device, task=task
-        )
-
-        if e % 10 == 0:
-            LOGGER.info(
-                "Epoch=%d train=%.6f valid=%.6f",
-                e,
-                train_loss,
-                valid_loss,
-            )
-
-        if not np.isfinite(valid_loss):
-            raise RuntimeError(
-                f"Validation loss became non-finite for {data_name}/{model_name} "
-                f"at epoch {e}: {valid_loss!r}."
-            )
-
-        if valid_loss < best_loss:
-            best_loss = valid_loss
-            best_model_wts = copy.deepcopy(model.state_dict())
-            patient = 0
-        else:
-            patient += 1
-
-        if (e > 20) and (patient > 10):
-            break
-
-        scheduler.step()
+    training_loop = run_train_valid_loop(
+        model_name=model_name,
+        model=model,
+        optimizer=optimizer,
+        criterion=criterion,
+        train_batch=train_batch,
+        valid_batch=valid_batch,
+        interpolate=interpolate,
+        use_intensity=use_intensity,
+        device=device,
+        epochs=EPOCHS,
+        task=task,
+        scheduler_step_size=10,
+        scheduler_gamma=0.5,
+        early_stop_warmup=22,
+        early_stop_patience=10,
+        log_prefix=f"{data_name}/{model_name}",
+    )
+    best_model_wts = training_loop["best_model_wts"]
+    training_loop_metadata = {
+        key: value for key, value in training_loop.items() if key != "best_model_wts"
+    }
 
     # using trained model
     try:
@@ -1841,7 +2029,11 @@ def run_model(
             batch_size=batch_size,
             timestamps=timestamps,
             timestamp_delta_scale=timestamp_delta_scale,
+            coeff_cache_dir=coeff_cache_dir,
+            no_coeff_cache=no_coeff_cache,
+            coeff_cache_events=coeff_cache_events,
         )
+        coeff_cache_summary = _summarize_cache_events(coeff_cache_events)
 
         payload = _build_result_payload(
             mode="robustness",
@@ -1867,6 +2059,8 @@ def run_model(
             timestamp_summary=timestamp_summary,
             aux_nan_event_count=_get_aux_nan_event_count(model),
             runtime_provenance=runtime_provenance,
+            training_loop=training_loop_metadata,
+            coeff_cache=coeff_cache_summary,
         )
         payload.update(param_search_contract)
 
@@ -1938,6 +2132,9 @@ def run_model(
             "mode": "robustness",
             "evaluation_regime": "robustness",
             "output_contract_hash": output_contract_hash,
+            "runtime_provenance": runtime_provenance,
+            "training_loop": training_loop_metadata,
+            "coeff_cache": coeff_cache_summary,
         }
 
     # Normal mode: single test evaluation
@@ -2068,6 +2265,7 @@ def run_model(
 
     out_name = '_'.join([data_name, str(missing_rate), model_name, str(SEED)])
     output_path = os.path.join(out_root, data_name, str(missing_rate), out_name)
+    coeff_cache_summary = _summarize_cache_events(coeff_cache_events)
     payload = _build_result_payload(
         mode=evaluation_regime,
         evaluation_regime=evaluation_regime,
@@ -2091,6 +2289,8 @@ def run_model(
         timestamp_summary=timestamp_summary,
         aux_nan_event_count=_get_aux_nan_event_count(model),
         runtime_provenance=runtime_provenance,
+        training_loop=training_loop_metadata,
+        coeff_cache=coeff_cache_summary,
     )
     payload.update(param_search_contract)
     with open(output_path, 'wb') as f:
@@ -2120,6 +2320,8 @@ def run_model(
         "train_channel_sync": train_channel_sync,
         "output_contract_hash": output_contract_hash,
         "runtime_provenance": runtime_provenance,
+        "training_loop": training_loop_metadata,
+        "coeff_cache": coeff_cache_summary,
     }
 
 
@@ -2147,6 +2349,9 @@ def _evaluate_robustness(
     batch_size,
     timestamps=None,
     timestamp_delta_scale=None,
+    coeff_cache_dir=None,
+    no_coeff_cache=False,
+    coeff_cache_events=None,
 ):
     """
     Evaluate trained model on multiple test missing rates.
@@ -2182,8 +2387,11 @@ def _evaluate_robustness(
         channel_sync_options,
         use_raw_flow_input,
     )
-    train_missing_ref, _, _, _ = preprocess(
-        X,
+    train_missing_ref, _, _, _ = _preprocess_with_optional_cache(
+        coeff_cache_dir=coeff_cache_dir,
+        no_coeff_cache=no_coeff_cache,
+        cache_events=coeff_cache_events,
+        X=X,
         missing_rate=0.0,
         interpolate=interpolate,
         use_intensity=use_intensity,
@@ -2234,8 +2442,11 @@ def _evaluate_robustness(
                         requested_missing_rate=test_rate,
                         floor_stats=floor_stats,
                     )
-                    X_missing, X_mask, X_delta, coeffs = preprocess(
-                        X,
+                    X_missing, X_mask, X_delta, coeffs = _preprocess_with_optional_cache(
+                        coeff_cache_dir=coeff_cache_dir,
+                        no_coeff_cache=no_coeff_cache,
+                        cache_events=coeff_cache_events,
+                        X=X,
                         missing_rate=test_rate,
                         interpolate=interpolate,
                         use_intensity=use_intensity,
@@ -2433,6 +2644,7 @@ def main():
                     stop_early = True
                     break
                 try:
+                    cell_start = None
                     param_name, param_path = _resolve_param_artifact_path(
                         args.param_root,
                         data_name,
@@ -2467,30 +2679,37 @@ def main():
                         param_search_profile,
                     )
 
-                    run_result = run_model(
-                        data_name,
-                        missing_rate=0.0,  # Force train on missing=0.0
-                        model_name=model_name,
-                        model_config=model_config,
-                        EPOCHS=args.epochs,
-                        SEED=seed,
-                        CHECK=args.check,
-                        robustness_mode=True,
-                        robustness_test_rates=args.robustness_test_rates,
-                        robustness_test_mechanisms=args.robustness_test_mechanisms,
-                        robustness_channel_sync_options=args.robustness_channel_sync_options,
-                        split_root=args.split_root,
-                        out_root=args.out_root,
-                        run_id=run_id,
-                        save_predictions=args.save_predictions,
-                        task=args.task,
-                        forecast_horizon=args.forecast_horizon,
-                        target_source=args.target_source,
-                        targets_root=args.targets_root,
-                        dataset_source=args.dataset_source,
-                        dataset_npz=args.dataset_npz,
-                        runtime_provenance=runtime_provenance,
-                    )
+                    cell_start = time.monotonic()
+                    with _cell_timeout(args.cell_timeout_seconds):
+                        run_result = run_model(
+                            data_name,
+                            missing_rate=0.0,  # Force train on missing=0.0
+                            model_name=model_name,
+                            model_config=model_config,
+                            EPOCHS=args.epochs,
+                            SEED=seed,
+                            CHECK=args.check,
+                            robustness_mode=True,
+                            robustness_test_rates=args.robustness_test_rates,
+                            robustness_test_mechanisms=args.robustness_test_mechanisms,
+                            robustness_channel_sync_options=args.robustness_channel_sync_options,
+                            split_root=args.split_root,
+                            out_root=args.out_root,
+                            run_id=run_id,
+                            save_predictions=args.save_predictions,
+                            task=args.task,
+                            forecast_horizon=args.forecast_horizon,
+                            target_source=args.target_source,
+                            targets_root=args.targets_root,
+                            dataset_source=args.dataset_source,
+                            dataset_npz=args.dataset_npz,
+                            runtime_provenance=runtime_provenance,
+                            coeff_cache_dir=args.coeff_cache_dir,
+                            no_coeff_cache=args.no_coeff_cache,
+                            solver_budget_policy=args.solver_budget_policy,
+                            solver_budget_seq_len_threshold=args.solver_budget_seq_len_threshold,
+                        )
+                    cell_elapsed_s = time.monotonic() - cell_start
                     if run_result is None:
                         output_path = _build_output_path(
                             data_name,
@@ -2543,9 +2762,20 @@ def main():
                                     "output_contract_hash": _read_output_contract_hash(output_path),
                                     "reason": "output artifact already exists (--check)",
                                     "runtime_provenance": runtime_provenance,
+                                    "runtime_status": "reused",
                                 }
                             )
                         continue
+                    run_result["cell_wall_clock_s"] = float(cell_elapsed_s)
+                    run_result["runtime_status"] = _runtime_status_for_elapsed(
+                        cell_elapsed_s,
+                        args.performance_limit_seconds,
+                    )
+                    if run_result["runtime_status"] == "performance_limited":
+                        run_result["runtime_status_reason"] = (
+                            f"cell wall-clock {cell_elapsed_s:.3f}s exceeded "
+                            f"performance limit {float(args.performance_limit_seconds):.3f}s"
+                        )
                     run_result["param_path"] = str(param_path)
                     run_result["search_profile"] = param_search_profile
                     run_result["search_policy"] = args.param_policy
@@ -2556,6 +2786,14 @@ def main():
 
                 except Exception as e:
                     LOGGER.warning("[SKIP] %s/%s: %s", data_name, model_name, e)
+                    runtime_status = (
+                        "timeout"
+                        if isinstance(e, CellTimeoutError)
+                        else "excluded_solver_budget"
+                        if isinstance(e, SolverBudgetExcluded)
+                        else "failed"
+                    )
+                    cell_elapsed_s = (time.monotonic() - cell_start) if cell_start is not None else None
                     skipped.append(
                         {
                             "dataset": data_name,
@@ -2563,6 +2801,9 @@ def main():
                             "missing_rate": 0.0,
                             "task": args.task,
                             "reason": str(e),
+                            "runtime_status": runtime_status,
+                            "runtime_status_reason": str(e),
+                            "cell_wall_clock_s": cell_elapsed_s,
                         }
                     )
                     if isinstance(e, OutputArtifactContractError):
@@ -2581,6 +2822,7 @@ def main():
                         stop_early = True
                         break
                     try:
+                        cell_start = None
                         param_name, param_path = _resolve_param_artifact_path(
                             args.param_root,
                             data_name,
@@ -2615,26 +2857,33 @@ def main():
                             param_search_profile,
                         )
 
-                        run_result = run_model(
-                            data_name,
-                            missing_rate,
-                            model_name,
-                            model_config,
-                            EPOCHS=args.epochs,
-                            SEED=seed,
-                            CHECK=args.check,
-                            split_root=args.split_root,
-                            out_root=args.out_root,
-                            run_id=run_id,
-                            save_predictions=args.save_predictions,
-                            task=args.task,
-                            forecast_horizon=args.forecast_horizon,
-                            target_source=args.target_source,
-                            targets_root=args.targets_root,
-                            dataset_source=args.dataset_source,
-                            dataset_npz=args.dataset_npz,
-                            runtime_provenance=runtime_provenance,
-                        )
+                        cell_start = time.monotonic()
+                        with _cell_timeout(args.cell_timeout_seconds):
+                            run_result = run_model(
+                                data_name,
+                                missing_rate,
+                                model_name,
+                                model_config,
+                                EPOCHS=args.epochs,
+                                SEED=seed,
+                                CHECK=args.check,
+                                split_root=args.split_root,
+                                out_root=args.out_root,
+                                run_id=run_id,
+                                save_predictions=args.save_predictions,
+                                task=args.task,
+                                forecast_horizon=args.forecast_horizon,
+                                target_source=args.target_source,
+                                targets_root=args.targets_root,
+                                dataset_source=args.dataset_source,
+                                dataset_npz=args.dataset_npz,
+                                runtime_provenance=runtime_provenance,
+                                coeff_cache_dir=args.coeff_cache_dir,
+                                no_coeff_cache=args.no_coeff_cache,
+                                solver_budget_policy=args.solver_budget_policy,
+                                solver_budget_seq_len_threshold=args.solver_budget_seq_len_threshold,
+                            )
+                        cell_elapsed_s = time.monotonic() - cell_start
                         if run_result is None:
                             output_path = _build_output_path(
                                 data_name,
@@ -2678,9 +2927,20 @@ def main():
                                         "output_contract_hash": _read_output_contract_hash(output_path),
                                         "reason": "output artifact already exists (--check)",
                                         "runtime_provenance": runtime_provenance,
+                                        "runtime_status": "reused",
                                     }
                                 )
                             continue
+                        run_result["cell_wall_clock_s"] = float(cell_elapsed_s)
+                        run_result["runtime_status"] = _runtime_status_for_elapsed(
+                            cell_elapsed_s,
+                            args.performance_limit_seconds,
+                        )
+                        if run_result["runtime_status"] == "performance_limited":
+                            run_result["runtime_status_reason"] = (
+                                f"cell wall-clock {cell_elapsed_s:.3f}s exceeded "
+                                f"performance limit {float(args.performance_limit_seconds):.3f}s"
+                            )
                         run_result["param_path"] = str(param_path)
                         run_result["search_profile"] = param_search_profile
                         run_result["search_policy"] = args.param_policy
@@ -2691,6 +2951,14 @@ def main():
 
                     except Exception as e:
                         LOGGER.warning("[SKIP] %s/%s: %s", data_name, model_name, e)
+                        runtime_status = (
+                            "timeout"
+                            if isinstance(e, CellTimeoutError)
+                            else "excluded_solver_budget"
+                            if isinstance(e, SolverBudgetExcluded)
+                            else "failed"
+                        )
+                        cell_elapsed_s = (time.monotonic() - cell_start) if cell_start is not None else None
                         skipped.append(
                             {
                                 "dataset": data_name,
@@ -2698,6 +2966,9 @@ def main():
                                 "missing_rate": float(missing_rate),
                                 "task": args.task,
                                 "reason": str(e),
+                                "runtime_status": runtime_status,
+                                "runtime_status_reason": str(e),
+                                "cell_wall_clock_s": cell_elapsed_s,
                             }
                         )
                         if isinstance(e, OutputArtifactContractError):

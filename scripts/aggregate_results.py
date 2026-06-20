@@ -89,6 +89,20 @@ def _flatten_runtime_provenance(payload: dict[str, Any] | None) -> dict[str, Any
     }
 
 
+def _flatten_timestamp_summary(payload: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        return {}
+    degenerate_rows = payload.get(
+        "timestamp_degenerate_rows_count",
+        payload.get("timestamp_degenerate_rows"),
+    )
+    return {
+        "timestamp_mode": payload.get("timestamp_mode"),
+        "timestamp_delta_scale_fallback": payload.get("timestamp_delta_scale_fallback"),
+        "timestamp_degenerate_rows_count": degenerate_rows,
+    }
+
+
 def _copy_public_fields(row: dict[str, Any], payload: dict[str, Any], keys: list[str]) -> None:
     for key in keys:
         if key in payload:
@@ -125,6 +139,7 @@ def _evaluation_rows_from_output(
         return rows
     meta = payload.get("meta") if isinstance(payload.get("meta"), dict) else {}
     runtime_provenance = meta.get("runtime_provenance") or manifest.get("runtime_provenance")
+    timestamp_summary = meta.get("timestamp_summary") or record.get("timestamp_summary")
     for index, evaluation in enumerate(evaluations):
         if not isinstance(evaluation, dict):
             continue
@@ -160,10 +175,14 @@ def _evaluation_rows_from_output(
                 "output_path",
                 "param_path",
                 "split_path",
+                "runtime_status",
+                "runtime_status_reason",
+                "cell_wall_clock_s",
             ],
         )
         _copy_metrics(row, evaluation.get("metrics"))
         row.update(_flatten_runtime_provenance(runtime_provenance))
+        row.update(_flatten_timestamp_summary(timestamp_summary))
         rows.append(row)
     return rows
 
@@ -179,10 +198,24 @@ def _run_record_row(record: dict[str, Any], manifest: dict[str, Any], *, kind: s
     _copy_public_fields(
         row,
         record,
-        ["dataset", "model", "seed", "task", "missing_rate", "output_path", "param_path", "split_path", "reason"],
+        [
+            "dataset",
+            "model",
+            "seed",
+            "task",
+            "missing_rate",
+            "output_path",
+            "param_path",
+            "split_path",
+            "reason",
+            "runtime_status",
+            "runtime_status_reason",
+            "cell_wall_clock_s",
+        ],
     )
     _copy_metrics(row, record.get("metrics"))
     row.update(_flatten_runtime_provenance(record.get("runtime_provenance") or manifest.get("runtime_provenance")))
+    row.update(_flatten_timestamp_summary(record.get("timestamp_summary")))
     return row
 
 
@@ -214,6 +247,7 @@ def _search_record_row(record: dict[str, Any], manifest: dict[str, Any], *, kind
         ],
     )
     row.update(_flatten_runtime_provenance(record.get("runtime_provenance") or manifest.get("runtime_provenance")))
+    row.update(_flatten_timestamp_summary(record.get("timestamp_summary")))
     return row
 
 

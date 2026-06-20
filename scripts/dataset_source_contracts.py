@@ -171,6 +171,7 @@ def summarize_timestamps(
             "timestamp_monotonic_failures": 0,
             "timestamp_duplicate_count": 0,
             "timestamp_degenerate_rows": 0,
+            "timestamp_degenerate_rows_count": 0,
             "timestamp_min": None,
             "timestamp_max": None,
             "delta_policy": "index",
@@ -190,6 +191,7 @@ def summarize_timestamps(
         if timestamp_delta_scale is None
         else float(timestamp_delta_scale)
     )
+    degenerate_rows = int((finite_counts < 2).sum())
     return {
         "timestamp_source": str(source),
         "timestamp_shape": [int(value) for value in timestamps.shape],
@@ -197,7 +199,8 @@ def summarize_timestamps(
         "timestamp_finite_ratio": float(finite.mean()) if finite.size else 0.0,
         "timestamp_monotonic_failures": _count_monotonic_failures(timestamps),
         "timestamp_duplicate_count": _count_duplicate_timestamp_steps(timestamps),
-        "timestamp_degenerate_rows": int((finite_counts < 2).sum()),
+        "timestamp_degenerate_rows": degenerate_rows,
+        "timestamp_degenerate_rows_count": degenerate_rows,
         "timestamp_min": float(finite_values.min()) if finite_values.size else None,
         "timestamp_max": float(finite_values.max()) if finite_values.size else None,
         "delta_policy": "timestamp",
