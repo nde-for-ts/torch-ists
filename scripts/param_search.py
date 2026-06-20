@@ -267,6 +267,18 @@ def parse_cli_args():
     parser.add_argument("--num-samples", type=int, default=50, help="Ray Tune num_samples.")
     parser.add_argument("--max-num-epochs", type=int, default=20, help="Ray Tune max epochs.")
     parser.add_argument(
+        "--search-warmup",
+        type=int,
+        default=5,
+        help="Minimum completed epochs before the in-trial patience stop may fire.",
+    )
+    parser.add_argument(
+        "--search-patience",
+        type=int,
+        default=5,
+        help="Stop a search trial after this many non-improving validation epochs.",
+    )
+    parser.add_argument(
         "--asha-grace-period",
         type=int,
         default=5,
@@ -684,6 +696,8 @@ def _build_search_provenance(
     *,
     num_samples: int,
     max_num_epochs: int,
+    search_warmup: int,
+    search_patience: int,
     execution_backend: str,
     search_algorithm: str,
     search_algorithm_seed: int,
@@ -698,6 +712,8 @@ def _build_search_provenance(
     return {
         "search_num_samples": int(num_samples),
         "search_max_num_epochs": int(max_num_epochs),
+        "search_warmup": int(search_warmup),
+        "search_patience": int(search_patience),
         "search_execution_backend": str(execution_backend),
         "search_budget_class": "smoke" if int(num_samples) <= 1 else "production",
         "search_algorithm": str(search_algorithm),
@@ -1186,6 +1202,8 @@ def _train_single_seed(
     dataset_source="default",
     dataset_npz=None,
     epoch_reporter=None,
+    search_warmup=5,
+    search_patience=5,
 ):
     """
     Train and evaluate model on a single seed split.
@@ -1440,7 +1458,7 @@ def _train_single_seed(
         if epoch_reporter is not None:
             epoch_reporter(best_loss, epoch=e + 1)
 
-        if (e > 10) and (patient > 5):
+        if (e + 1 >= int(search_warmup)) and (patient > int(search_patience)):
             break
 
         scheduler.step()
@@ -1467,6 +1485,8 @@ def tune_model(
     targets_root="targets",
     dataset_source="default",
     dataset_npz=None,
+    search_warmup=5,
+    search_patience=5,
     trial_seed=None,
 ):
     trial_device = resolve_trial_device(device_mode, ray_gpu)
@@ -1510,6 +1530,8 @@ def tune_model(
             dataset_source=dataset_source,
             dataset_npz=dataset_npz,
             epoch_reporter=_report_epoch,
+            search_warmup=search_warmup,
+            search_patience=search_patience,
         )
         LOGGER.info("Single repeat finished dataset=%s model=%s best_loss=%.6f", data_name, model_name, best_loss)
         if reported_epochs == 0:
@@ -1537,6 +1559,8 @@ def tune_model(
                 targets_root=targets_root,
                 dataset_source=dataset_source,
                 dataset_npz=dataset_npz,
+                search_warmup=search_warmup,
+                search_patience=search_patience,
             )
             repeat_losses.append(loss)
             LOGGER.info("Aggregated repeat seed=%d dataset=%s model=%s loss=%.6f", seed, data_name, model_name, loss)
@@ -1568,6 +1592,8 @@ def optimize(
     param_root="params",
     num_samples=50,
     max_num_epochs=20,
+    search_warmup=5,
+    search_patience=5,
     asha_grace_period=5,
     allow_incomplete_ray_trial=True,
     ray_cpu=16.0,
@@ -1691,6 +1717,8 @@ def optimize(
                 targets_root=targets_root,
                 dataset_source=dataset_source,
                 dataset_npz=dataset_npz,
+                search_warmup=search_warmup,
+                search_patience=search_patience,
             )
         elif search_repeat == AGGREGATED_SEARCH_REPEAT:
             losses = []
@@ -1713,6 +1741,8 @@ def optimize(
                         targets_root=targets_root,
                         dataset_source=dataset_source,
                         dataset_npz=dataset_npz,
+                        search_warmup=search_warmup,
+                        search_patience=search_patience,
                     )
                 )
             best_loss = float(np.mean(losses))
@@ -1740,6 +1770,8 @@ def optimize(
             search_provenance=_build_search_provenance(
                 num_samples=num_samples,
                 max_num_epochs=max_num_epochs,
+                search_warmup=search_warmup,
+                search_patience=search_patience,
                 execution_backend="local-single",
                 search_algorithm="local-single",
                 search_algorithm_seed=SEED,
@@ -1787,6 +1819,15 @@ def optimize(
             "search_algorithm_seed": saved_model_config["search_algorithm_seed"],
             "search_num_samples": saved_model_config["search_num_samples"],
             "search_max_num_epochs": saved_model_config["search_max_num_epochs"],
+            "search_warmup": saved_model_config.get("search_warmup"),
+            "search_patience": saved_model_config.get("search_patience"),
+            "search_asha_grace_period": saved_model_config.get("search_asha_grace_period"),
+            "search_allow_incomplete_ray_trial": saved_model_config.get("search_allow_incomplete_ray_trial"),
+            "search_selected_iteration": saved_model_config.get("search_selected_iteration"),
+            "search_max_t_reached": saved_model_config.get("search_max_t_reached"),
+            "search_incomplete_fallback_used": saved_model_config.get("search_incomplete_fallback_used"),
+            "search_selected_trial_status": saved_model_config.get("search_selected_trial_status"),
+            "search_error_fallback_used": saved_model_config.get("search_error_fallback_used"),
             "search_execution_backend": saved_model_config["search_execution_backend"],
             "search_budget_class": saved_model_config["search_budget_class"],
             "legacy_grid_version": saved_model_config["legacy_grid_version"],
@@ -1874,6 +1915,7 @@ def optimize(
                    split_root=split_root, task=task, forecast_horizon=forecast_horizon,
                    target_source=target_source, targets_root=targets_root,
                    dataset_source=dataset_source, dataset_npz=dataset_npz,
+                   search_warmup=search_warmup, search_patience=search_patience,
                    trial_seed=trial_seed)
 
     result = tune.run(
@@ -1966,6 +2008,8 @@ def optimize(
         search_provenance=_build_search_provenance(
             num_samples=num_samples,
             max_num_epochs=max_num_epochs,
+            search_warmup=search_warmup,
+            search_patience=search_patience,
             execution_backend="ray-tune",
             search_algorithm="BasicVariantGenerator",
             search_algorithm_seed=SEED,
@@ -2006,6 +2050,8 @@ def optimize(
         "search_algorithm_seed": saved_param_config["search_algorithm_seed"],
         "search_num_samples": saved_param_config["search_num_samples"],
         "search_max_num_epochs": saved_param_config["search_max_num_epochs"],
+        "search_warmup": saved_param_config.get("search_warmup"),
+        "search_patience": saved_param_config.get("search_patience"),
         "search_asha_grace_period": saved_param_config.get("search_asha_grace_period"),
         "search_allow_incomplete_ray_trial": saved_param_config.get("search_allow_incomplete_ray_trial"),
         "search_selected_iteration": saved_param_config.get("search_selected_iteration"),
@@ -2192,6 +2238,8 @@ def main():
                             "search_algorithm_seed": existing_cfg.get("search_algorithm_seed"),
                             "search_num_samples": existing_cfg.get("search_num_samples"),
                             "search_max_num_epochs": existing_cfg.get("search_max_num_epochs"),
+                            "search_warmup": existing_cfg.get("search_warmup"),
+                            "search_patience": existing_cfg.get("search_patience"),
                             "search_asha_grace_period": existing_cfg.get("search_asha_grace_period"),
                             "search_allow_incomplete_ray_trial": existing_cfg.get("search_allow_incomplete_ray_trial"),
                             "search_selected_iteration": existing_cfg.get("search_selected_iteration"),
@@ -2223,6 +2271,8 @@ def main():
                     param_root=args.param_root,
                     num_samples=args.num_samples,
                     max_num_epochs=args.max_num_epochs,
+                    search_warmup=args.search_warmup,
+                    search_patience=args.search_patience,
                     asha_grace_period=args.asha_grace_period,
                     allow_incomplete_ray_trial=args.allow_incomplete_ray_trial,
                     ray_cpu=args.ray_cpu,
@@ -2285,6 +2335,8 @@ def main():
                         "search_algorithm_seed": search_result["search_algorithm_seed"],
                         "search_num_samples": search_result["search_num_samples"],
                         "search_max_num_epochs": search_result["search_max_num_epochs"],
+                        "search_warmup": search_result["search_warmup"],
+                        "search_patience": search_result["search_patience"],
                         "search_asha_grace_period": search_result["search_asha_grace_period"],
                         "search_allow_incomplete_ray_trial": search_result["search_allow_incomplete_ray_trial"],
                         "search_selected_iteration": search_result["search_selected_iteration"],
