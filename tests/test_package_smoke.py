@@ -84,6 +84,39 @@ def test_missingness_and_split_helpers_smoke():
     assert np.isnan(masked[mask == 0]).any()
 
 
+def test_probabilistic_missingness_keeps_sequence_floor():
+    X = np.full((64, 2, 45), np.nan, dtype=np.float32)
+    X[:, :, :2] = 1.0
+
+    for mechanism in ("MAR", "MNAR"):
+        X_missing, mask = apply_missingness(
+            X,
+            rate=0.95,
+            mechanism=mechanism,
+            seed=123,
+        )
+        observed_steps = (mask > 0).any(axis=1).sum(axis=1)
+        assert np.all(observed_steps >= 1)
+        assert np.isfinite(X_missing[mask > 0]).all()
+
+
+def test_missingness_floor_provenance_stats():
+    X = np.full((64, 2, 45), np.nan, dtype=np.float32)
+    X[:, :, 0] = 1.0
+
+    _, mask, stats = apply_missingness(
+        X,
+        rate=0.9,
+        mechanism="MAR",
+        seed=0,
+        return_stats=True,
+    )
+
+    assert stats["n_sequences"] == 64
+    assert stats["fully_masked_before_floor"] > 0
+    assert np.all((mask > 0).any(axis=1).sum(axis=1) >= 1)
+
+
 def test_param_search_uses_repeat_axis_for_internal_branching():
     script = Path(__file__).resolve().parents[1] / "scripts" / "param_search.py"
     source = script.read_text()

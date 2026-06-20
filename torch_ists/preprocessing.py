@@ -168,14 +168,19 @@ def _enforce_sequence_observation_floor(
     rng: np.random.Generator,
     *,
     channel_sync: bool,
-) -> np.ndarray:
-    """Keep synthetic missingness from removing a sample's last observed value."""
+) -> Tuple[np.ndarray, int]:
+    """Keep synthetic missingness from removing a sample's last observed value.
+
+    Returns the possibly modified mask plus the number of sequences that were
+    emptied by sampling before the floor restored one observed step.
+    """
     observed_before = ~existing_missing
     observed_after = ~(existing_missing | sampled_missing)
     has_native_observation = observed_before.any(axis=(1, 2))
     emptied_by_sampling = has_native_observation & ~observed_after.any(axis=(1, 2))
+    fully_masked_before_floor = int(np.count_nonzero(emptied_by_sampling))
     if not np.any(emptied_by_sampling):
-        return sampled_missing
+        return sampled_missing, fully_masked_before_floor
 
     sampled_missing = sampled_missing.copy()
     for sample_idx in np.flatnonzero(emptied_by_sampling):
@@ -189,7 +194,7 @@ def _enforce_sequence_observation_floor(
             sampled_missing[sample_idx, :, time_idx] = False
         else:
             sampled_missing[sample_idx, channel, time_idx] = False
-    return sampled_missing
+    return sampled_missing, fully_masked_before_floor
 
 
 def _sample_block_indices(rng: np.random.Generator, length: int, count: int) -> np.ndarray:
@@ -425,7 +430,8 @@ def apply_missingness(
     seed: int = 0,
     channel_sync: bool = False,
     reference_X: Optional[np.ndarray] = None,
-) -> Tuple[np.ndarray, np.ndarray]:
+    return_stats: bool = False,
+) -> tuple:
     """Apply synthetic missingness to [N, D, L] input data.
 
     Mechanism guidance:
@@ -437,6 +443,8 @@ def apply_missingness(
     Returns:
         X_missing: [N, D, L], with missing values as NaN.
         mask_observed: [N, D, L], 1.0 observed / 0.0 missing.
+        stats (only when return_stats=True): dict with
+            fully_masked_before_floor and n_sequences.
     """
     _validate_inputs(X, rate)
 
@@ -490,7 +498,7 @@ def apply_missingness(
         else:
             sampled_missing = rng.random((n, d, l), dtype=np.float32) < prob.astype(np.float32)
 
-    sampled_missing = _enforce_sequence_observation_floor(
+    sampled_missing, fully_masked_before_floor = _enforce_sequence_observation_floor(
         existing_missing,
         sampled_missing,
         rng,
@@ -501,6 +509,12 @@ def apply_missingness(
     X_missing[missing] = np.nan
     mask_observed = (~np.isnan(X_missing)).astype(np.float32)
 
+    if return_stats:
+        stats = {
+            "fully_masked_before_floor": int(fully_masked_before_floor),
+            "n_sequences": int(n),
+        }
+        return X_missing, mask_observed, stats
     return X_missing, mask_observed
 
 

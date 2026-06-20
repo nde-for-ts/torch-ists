@@ -751,7 +751,7 @@ def _resolve_run_device(device_mode: str) -> torch.device:
     raise ValueError("device must be one of {'auto', 'cpu', 'cuda'}")
 
 # Import from the packaged torch_ists runtime.
-from torch_ists.preprocessing import preprocess
+from torch_ists.preprocessing import apply_missingness, preprocess
 from torch_ists import ists_classifier, ists_model
 from _training_runtime import (
     _align_prediction_target,
@@ -1069,6 +1069,40 @@ def _build_predictions_payload(y_true, y_pred, logit_list, save_predictions="ful
     raise ValueError(f"save_predictions must be 'full' or 'summary', got {save_predictions!r}")
 
 
+def _build_missingness_provenance(
+    X,
+    X_missing,
+    mask_observed,
+    requested_missing_rate,
+    floor_stats=None,
+):
+    x_np = np.asarray(X, dtype=np.float32)
+    missing_np = np.asarray(X_missing, dtype=np.float32)
+    mask_np = np.asarray(mask_observed, dtype=np.float32)
+    observed_before = ~np.isnan(x_np)
+    observed_value_count = int(np.count_nonzero(observed_before))
+    synthetic_missing = observed_before & np.isnan(missing_np)
+    realized_missing_count = int(np.count_nonzero(synthetic_missing))
+    realized_missing_rate = (
+        float(realized_missing_count / observed_value_count)
+        if observed_value_count > 0
+        else 0.0
+    )
+    floor_stats = floor_stats or {}
+    mask_hash = hashlib.sha256(
+        np.ascontiguousarray((mask_np > 0).astype(np.uint8)).tobytes()
+    ).hexdigest()
+    return {
+        "requested_missing_rate": float(requested_missing_rate),
+        "realized_missing_rate": realized_missing_rate,
+        "realized_missing_count": realized_missing_count,
+        "observed_value_count": observed_value_count,
+        "fully_masked_before_floor": int(floor_stats.get("fully_masked_before_floor", 0)),
+        "floor_n_sequences": int(floor_stats.get("n_sequences", x_np.shape[0])),
+        "mask_hash": mask_hash,
+    }
+
+
 def _build_evaluation_result(
     test_missing_rate,
     y_true=None,
@@ -1082,6 +1116,7 @@ def _build_evaluation_result(
     test_channel_sync=None,
     missing_seed=0,
     save_predictions="full",
+    missingness_provenance=None,
 ):
     task = str(task).strip().lower()
     if task == "classification":
@@ -1211,14 +1246,16 @@ def _build_evaluation_result(
             }
         else:
             raise ValueError(f"save_predictions must be 'full' or 'summary', got {save_predictions!r}")
-    return {
+    result = {
         "missing_seed": int(missing_seed),
         "test_missing_rate": float(test_missing_rate),
         "test_missing_type": str(test_missing_type).upper(),
         "test_channel_sync": None if test_channel_sync is None else bool(test_channel_sync),
-        "metrics": metrics,
-        "predictions": predictions,
     }
+    if missingness_provenance is not None:
+        result.update(missingness_provenance)
+    result.update({"metrics": metrics, "predictions": predictions})
+    return result
 
 
 def _build_result_payload(
@@ -2087,6 +2124,22 @@ def _evaluate_robustness(
                     # Generate missing data for this test axis point.
                     preprocess_mechanism = "MCAR" if _is_zero_missing_rate(test_rate) else test_mechanism
                     preprocess_channel_sync = False if test_channel_sync is None else bool(test_channel_sync)
+                    stats_missing_np, stats_mask_np, floor_stats = apply_missingness(
+                        X,
+                        rate=float(test_rate),
+                        mechanism=preprocess_mechanism,
+                        seed=missing_seed,
+                        channel_sync=preprocess_channel_sync,
+                        reference_X=X[train_idx],
+                        return_stats=True,
+                    )
+                    missingness_provenance = _build_missingness_provenance(
+                        X,
+                        stats_missing_np,
+                        stats_mask_np,
+                        requested_missing_rate=test_rate,
+                        floor_stats=floor_stats,
+                    )
                     X_missing, X_mask, X_delta, coeffs = preprocess(
                         X,
                         missing_rate=test_rate,
@@ -2152,6 +2205,7 @@ def _evaluate_robustness(
                             test_channel_sync=test_channel_sync,
                             missing_seed=missing_seed,
                             save_predictions=save_predictions,
+                            missingness_provenance=missingness_provenance,
                         )
                     else:
                         pred_list, target_list = [], []
@@ -2184,6 +2238,7 @@ def _evaluate_robustness(
                             test_channel_sync=test_channel_sync,
                             missing_seed=missing_seed,
                             save_predictions=save_predictions,
+                            missingness_provenance=missingness_provenance,
                         )
                     evaluations.append(eval_result)
                     metrics = eval_result["metrics"]
