@@ -265,7 +265,29 @@ def parse_cli_args():
     )
     parser.add_argument("--missing-rate", type=float, default=0.0, help=argparse.SUPPRESS)
     parser.add_argument("--num-samples", type=int, default=50, help="Ray Tune num_samples.")
-    parser.add_argument("--max-num-epochs", type=int, default=10, help="Ray Tune max epochs.")
+    parser.add_argument("--max-num-epochs", type=int, default=20, help="Ray Tune max epochs.")
+    parser.add_argument(
+        "--asha-grace-period",
+        type=int,
+        default=5,
+        help="Minimum epochs before ASHA may stop a Ray trial.",
+    )
+    parser.add_argument(
+        "--allow-incomplete-ray-trial",
+        dest="allow_incomplete_ray_trial",
+        action="store_true",
+        default=True,
+        help=(
+            "For single-repeat Ray search, allow the best finite terminated trial "
+            "when no finite trial reaches --max-num-epochs."
+        ),
+    )
+    parser.add_argument(
+        "--no-allow-incomplete-ray-trial",
+        dest="allow_incomplete_ray_trial",
+        action="store_false",
+        help="Require a finite Ray trial to reach --max-num-epochs.",
+    )
     parser.add_argument(
         "--max-runs",
         type=int,
@@ -665,6 +687,13 @@ def _build_search_provenance(
     execution_backend: str,
     search_algorithm: str,
     search_algorithm_seed: int,
+    asha_grace_period: int | None = None,
+    allow_incomplete_ray_trial: bool | None = None,
+    selected_iteration: int | None = None,
+    max_t_reached: bool | None = None,
+    incomplete_fallback_used: bool = False,
+    selected_trial_status: str | None = None,
+    error_fallback_used: bool = False,
 ) -> dict:
     return {
         "search_num_samples": int(num_samples),
@@ -673,6 +702,15 @@ def _build_search_provenance(
         "search_budget_class": "smoke" if int(num_samples) <= 1 else "production",
         "search_algorithm": str(search_algorithm),
         "search_algorithm_seed": int(search_algorithm_seed),
+        "search_asha_grace_period": None if asha_grace_period is None else int(asha_grace_period),
+        "search_allow_incomplete_ray_trial": (
+            None if allow_incomplete_ray_trial is None else bool(allow_incomplete_ray_trial)
+        ),
+        "search_selected_iteration": None if selected_iteration is None else int(selected_iteration),
+        "search_max_t_reached": None if max_t_reached is None else bool(max_t_reached),
+        "search_incomplete_fallback_used": bool(incomplete_fallback_used),
+        "search_selected_trial_status": selected_trial_status,
+        "search_error_fallback_used": bool(error_fallback_used),
     }
 
 
@@ -1019,20 +1057,99 @@ class SearchNoCompletedTrialError(RuntimeError):
     """Raised when ASHA prunes every single-repeat trial before max_t."""
 
 
-def _select_best_ray_trial(result, *, max_num_epochs: int, require_completed: bool):
+def _trial_status(trial) -> str:
+    status = str(getattr(trial, "status", "") or "").upper()
+    return status or "UNKNOWN"
+
+
+def _trial_is_terminated(trial) -> bool:
+    return _trial_status(trial) in {"UNKNOWN", "TERMINATED"}
+
+
+def _ray_trial_selection_metadata(
+    trial,
+    *,
+    max_num_epochs: int,
+    fallback_used: bool,
+    error_fallback_used: bool = False,
+) -> dict:
+    if trial is None:
+        return {
+            "search_selected_iteration": None,
+            "search_max_t_reached": False,
+            "search_incomplete_fallback_used": False,
+            "search_selected_trial_status": None,
+            "search_error_fallback_used": False,
+        }
+    selected_iteration = _trial_reported_iteration(trial)
+    selected_status = _trial_status(trial)
+    return {
+        "search_selected_iteration": int(selected_iteration),
+        "search_max_t_reached": bool(selected_iteration >= int(max_num_epochs)),
+        "search_incomplete_fallback_used": bool(fallback_used),
+        "search_selected_trial_status": selected_status,
+        "search_error_fallback_used": bool(error_fallback_used or not _trial_is_terminated(trial)),
+    }
+
+
+def _select_best_ray_trial(
+    result,
+    *,
+    max_num_epochs: int,
+    require_completed: bool,
+    allow_incomplete: bool,
+):
     if not require_completed:
-        return result.get_best_trial("loss", "min", "last")
-    candidates = []
+        trial = result.get_best_trial("loss", "min", "last")
+        return trial, _ray_trial_selection_metadata(
+            trial,
+            max_num_epochs=max_num_epochs,
+            fallback_used=False,
+    )
+    completed_candidates = []
+    incomplete_candidates = []
+    error_candidates = []
     for trial in getattr(result, "trials", []) or []:
         loss = _trial_reported_loss(trial)
         if loss is None:
             continue
-        if _trial_reported_iteration(trial) >= int(max_num_epochs):
-            candidates.append((loss, trial))
-    if not candidates:
-        return None
-    candidates.sort(key=lambda item: item[0])
-    return candidates[0][1]
+        iteration = _trial_reported_iteration(trial)
+        if iteration >= int(max_num_epochs):
+            completed_candidates.append((loss, trial))
+        elif allow_incomplete and iteration > 0 and _trial_is_terminated(trial):
+            incomplete_candidates.append((loss, trial))
+        elif allow_incomplete and iteration > 0:
+            error_candidates.append((loss, trial))
+    if completed_candidates:
+        completed_candidates.sort(key=lambda item: item[0])
+        trial = completed_candidates[0][1]
+        return trial, _ray_trial_selection_metadata(
+            trial,
+            max_num_epochs=max_num_epochs,
+            fallback_used=False,
+        )
+    if incomplete_candidates:
+        incomplete_candidates.sort(key=lambda item: item[0])
+        trial = incomplete_candidates[0][1]
+        return trial, _ray_trial_selection_metadata(
+            trial,
+            max_num_epochs=max_num_epochs,
+            fallback_used=True,
+        )
+    if error_candidates:
+        error_candidates.sort(key=lambda item: item[0])
+        trial = error_candidates[0][1]
+        return trial, _ray_trial_selection_metadata(
+            trial,
+            max_num_epochs=max_num_epochs,
+            fallback_used=True,
+            error_fallback_used=True,
+        )
+    return None, _ray_trial_selection_metadata(
+        None,
+        max_num_epochs=max_num_epochs,
+        fallback_used=False,
+    )
 
 
 def resolve_trial_device(device_mode, ray_gpu):
@@ -1450,7 +1567,9 @@ def optimize(
     split_root="split",
     param_root="params",
     num_samples=50,
-    max_num_epochs=10,
+    max_num_epochs=20,
+    asha_grace_period=5,
+    allow_incomplete_ray_trial=True,
     ray_cpu=16.0,
     ray_gpu=0.5,
     device_mode="auto",
@@ -1624,6 +1743,13 @@ def optimize(
                 execution_backend="local-single",
                 search_algorithm="local-single",
                 search_algorithm_seed=SEED,
+                asha_grace_period=None,
+                allow_incomplete_ray_trial=None,
+                selected_iteration=None,
+                max_t_reached=None,
+                incomplete_fallback_used=False,
+                selected_trial_status=None,
+                error_fallback_used=False,
             ),
         )
         saved_model_config["timestamp_summary"] = metadata["timestamp_summary"]
@@ -1736,7 +1862,7 @@ def optimize(
 
     scheduler = ASHAScheduler(
         max_t=max_num_epochs,
-        grace_period=1,
+        grace_period=asha_grace_period,
         reduction_factor=2)
     search_alg = BasicVariantGenerator(random_state=SEED)
 
@@ -1764,10 +1890,11 @@ def optimize(
     )
     
     require_completed_trial = search_repeat == SINGLE_SEARCH_REPEAT
-    best_trial = _select_best_ray_trial(
+    best_trial, trial_selection_metadata = _select_best_ray_trial(
         result,
         max_num_epochs=max_num_epochs,
         require_completed=require_completed_trial,
+        allow_incomplete=bool(allow_incomplete_ray_trial),
     )
     if best_trial is None:
         if require_completed_trial:
@@ -1799,10 +1926,11 @@ def optimize(
         return None
     LOGGER.info("Best trial config: %s", best_trial.config)
     LOGGER.info(
-        "Best trial final validation loss: %s iteration=%s completion_required=%s",
+        "Best trial final validation loss: %s iteration=%s completion_required=%s fallback_used=%s",
         best_trial.last_result["loss"],
         _trial_reported_iteration(best_trial),
         require_completed_trial,
+        trial_selection_metadata["search_incomplete_fallback_used"],
     )
     
     # save params
@@ -1841,6 +1969,13 @@ def optimize(
             execution_backend="ray-tune",
             search_algorithm="BasicVariantGenerator",
             search_algorithm_seed=SEED,
+            asha_grace_period=asha_grace_period,
+            allow_incomplete_ray_trial=allow_incomplete_ray_trial,
+            selected_iteration=trial_selection_metadata["search_selected_iteration"],
+            max_t_reached=trial_selection_metadata["search_max_t_reached"],
+            incomplete_fallback_used=trial_selection_metadata["search_incomplete_fallback_used"],
+            selected_trial_status=trial_selection_metadata["search_selected_trial_status"],
+            error_fallback_used=trial_selection_metadata["search_error_fallback_used"],
         ),
     )
     saved_param_config["timestamp_summary"] = metadata["timestamp_summary"]
@@ -1871,6 +2006,13 @@ def optimize(
         "search_algorithm_seed": saved_param_config["search_algorithm_seed"],
         "search_num_samples": saved_param_config["search_num_samples"],
         "search_max_num_epochs": saved_param_config["search_max_num_epochs"],
+        "search_asha_grace_period": saved_param_config.get("search_asha_grace_period"),
+        "search_allow_incomplete_ray_trial": saved_param_config.get("search_allow_incomplete_ray_trial"),
+        "search_selected_iteration": saved_param_config.get("search_selected_iteration"),
+        "search_max_t_reached": saved_param_config.get("search_max_t_reached"),
+        "search_incomplete_fallback_used": saved_param_config.get("search_incomplete_fallback_used"),
+        "search_selected_trial_status": saved_param_config.get("search_selected_trial_status"),
+        "search_error_fallback_used": saved_param_config.get("search_error_fallback_used"),
         "search_execution_backend": saved_param_config["search_execution_backend"],
         "search_budget_class": saved_param_config["search_budget_class"],
         "legacy_grid_version": saved_param_config["legacy_grid_version"],
@@ -2050,6 +2192,13 @@ def main():
                             "search_algorithm_seed": existing_cfg.get("search_algorithm_seed"),
                             "search_num_samples": existing_cfg.get("search_num_samples"),
                             "search_max_num_epochs": existing_cfg.get("search_max_num_epochs"),
+                            "search_asha_grace_period": existing_cfg.get("search_asha_grace_period"),
+                            "search_allow_incomplete_ray_trial": existing_cfg.get("search_allow_incomplete_ray_trial"),
+                            "search_selected_iteration": existing_cfg.get("search_selected_iteration"),
+                            "search_max_t_reached": existing_cfg.get("search_max_t_reached"),
+                            "search_incomplete_fallback_used": existing_cfg.get("search_incomplete_fallback_used"),
+                            "search_selected_trial_status": existing_cfg.get("search_selected_trial_status"),
+                            "search_error_fallback_used": existing_cfg.get("search_error_fallback_used"),
                             "search_execution_backend": existing_cfg.get("search_execution_backend"),
                             "search_budget_class": existing_cfg.get("search_budget_class"),
                             "legacy_grid_version": existing_cfg.get("legacy_grid_version", existing_profile),
@@ -2074,6 +2223,8 @@ def main():
                     param_root=args.param_root,
                     num_samples=args.num_samples,
                     max_num_epochs=args.max_num_epochs,
+                    asha_grace_period=args.asha_grace_period,
+                    allow_incomplete_ray_trial=args.allow_incomplete_ray_trial,
                     ray_cpu=args.ray_cpu,
                     ray_gpu=args.ray_gpu,
                     device_mode=args.device,
@@ -2134,6 +2285,13 @@ def main():
                         "search_algorithm_seed": search_result["search_algorithm_seed"],
                         "search_num_samples": search_result["search_num_samples"],
                         "search_max_num_epochs": search_result["search_max_num_epochs"],
+                        "search_asha_grace_period": search_result["search_asha_grace_period"],
+                        "search_allow_incomplete_ray_trial": search_result["search_allow_incomplete_ray_trial"],
+                        "search_selected_iteration": search_result["search_selected_iteration"],
+                        "search_max_t_reached": search_result["search_max_t_reached"],
+                        "search_incomplete_fallback_used": search_result["search_incomplete_fallback_used"],
+                        "search_selected_trial_status": search_result["search_selected_trial_status"],
+                        "search_error_fallback_used": search_result["search_error_fallback_used"],
                         "search_execution_backend": search_result["search_execution_backend"],
                         "search_budget_class": search_result["search_budget_class"],
                         "legacy_grid_version": search_result["legacy_grid_version"],
@@ -2182,6 +2340,12 @@ def main():
             completed_runs,
             max_runs,
             args.max_runs_mode,
+        )
+        exit_code = 2
+    elif completed_runs == 0:
+        LOGGER.error(
+            "No search records were produced; refusing status=pass. "
+            "Check dataset/model filters, split artifacts, trial errors, and --skip-policy."
         )
         exit_code = 2
 

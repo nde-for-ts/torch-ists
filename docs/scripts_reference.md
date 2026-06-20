@@ -107,7 +107,7 @@ PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/param_search.py \
     --num-samples 1 --max-num-epochs 1
 ```
 
-This is a bounded smoke run; the full defaults (`--num-samples 50 --max-num-epochs 10`) are documented in the flags table below.
+This is a bounded smoke run; the full defaults (`--num-samples 50 --max-num-epochs 20`) are documented in the flags table below.
 
 ### Flags
 
@@ -119,7 +119,9 @@ This is a bounded smoke run; the full defaults (`--num-samples 50 --max-num-epoc
 | `--dataset-npz` | `str` | `None` | Required when `--dataset-source npz`; `--datasets` must contain exactly one dataset name; optional `timestamps [N,L]` are validated and recorded. |
 | `--models` | `str` | `cnn` | Comma-separated model list. Pass a comma-separated list to run additional models. |
 | `--num-samples` | `int` | `50` | Ray Tune `num_samples` — hyperparameter trial budget. Saved parameter artifacts record this value and mark `--num-samples 1` artifacts as smoke/local artifacts. |
-| `--max-num-epochs` | `int` | `10` | Per-trial training budget. |
+| `--max-num-epochs` | `int` | `20` | Per-trial training budget. |
+| `--asha-grace-period` | `int` | `5` | Minimum epochs before ASHA may stop a Ray trial. |
+| `--allow-incomplete-ray-trial` / `--no-allow-incomplete-ray-trial` | flag | enabled | In single-repeat search, use the best finite terminated Ray trial if no finite trial reaches `--max-num-epochs`; disable to require full-budget completion. |
 | `--max-runs` | `int` | `None` | Stop after this many runs across the dataset × model grid. |
 | `--max-runs-mode` | `{completed, new}` | `completed` | What counts toward `--max-runs`: `completed` (executed + reused) or `new` (executed only). |
 | `--existing-policy` | `{reuse, fail}` | `reuse` | Behavior when a param artifact already exists. The filename does not include the search seed; if you override `--seed`, back up or delete `params/` and use `--existing-policy fail`. |

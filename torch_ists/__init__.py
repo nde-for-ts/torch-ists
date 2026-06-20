@@ -29,7 +29,7 @@ __all__ = [
     "ists_layer",
 ]
 
-__version__ = "0.3.5"
+__version__ = "0.3.7"
 
 _LAZY_EXPORTS = {
     "ists_layer": (".layer", "ists_layer"),

@@ -54,7 +54,7 @@ Environment:
 - `.[cde]` installs the packaged CDE backend requirements (`torchcde`, `torchdiffeq`)
 - `.[sde]` installs the packaged SDE backend requirements (`torchsde`, `torchcde`)
 - `.[all]` installs the optional data and model backend dependencies
-- `.[signatory]` installs `signatory` from source for signature-based CDE / Neural RDE paths
+- `.[signatory]` installs `signatory` from source for Neural RDE (`neuralrde-1/2/3`)
 - `signatory` is intentionally not included in `.[all]` because the PyPI wheel is torch-version-pinned
 
 ```bash

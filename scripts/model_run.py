@@ -2575,6 +2575,12 @@ def main():
             args.max_runs_mode,
         )
         exit_code = 2
+    elif completed_runs == 0:
+        LOGGER.error(
+            "No run records were produced; refusing status=pass. "
+            "Check dataset/model filters, split/param artifacts, run errors, and --skip-policy."
+        )
+        exit_code = 2
 
     LOGGER.info(
         "Completed run_model calls=%d (reused=%d, completed=%d, mode=%s)",

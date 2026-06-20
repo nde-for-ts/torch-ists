@@ -356,6 +356,8 @@ def validate_search_manifest(doc: Dict[str, Any]) -> List[str]:
     if not isinstance(reused_records, list):
         errors.append("reused_records must be an array")
         return errors
+    if str(doc.get("status", "")).strip().lower() == "pass" and not records and not reused_records:
+        errors.append("pass manifest must contain at least one record or reused_record")
     for idx, record in enumerate(reused_records):
         if not isinstance(record, dict):
             errors.append(f"reused_records[{idx}] must be an object")
@@ -495,6 +497,8 @@ def validate_run_manifest(doc: Dict[str, Any]) -> List[str]:
     if not isinstance(reused_records, list):
         errors.append("reused_records must be an array")
         return errors
+    if str(doc.get("status", "")).strip().lower() == "pass" and not records and not reused_records:
+        errors.append("pass manifest must contain at least one record or reused_record")
     for idx, record in enumerate(reused_records):
         if not isinstance(record, dict):
             errors.append(f"reused_records[{idx}] must be an object")

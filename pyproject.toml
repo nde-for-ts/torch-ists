@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "torch-ists"
-version = "0.3.5"
+version = "0.3.7"
 description = "PyTorch package for irregular time series modeling"
 readme = "README.md"
 license = { text = "MIT" }
@@ -66,7 +66,7 @@ cde = [
     # torch-version-pinned. Use .[signatory] for source-checkout builds.
 ]
 
-# Source-build optional dependency for Neural RDE / signature-based CDE paths.
+# Source-build optional dependency for Neural RDE paths.
 # Kept out of .[cde] and .[all] so standard installs do not silently pick a
 # torch-incompatible prebuilt wheel.
 signatory = [
