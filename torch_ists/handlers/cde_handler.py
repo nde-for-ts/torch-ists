@@ -414,9 +414,8 @@ class CDEHandler(BaseHandler):
 
         if model_name.startswith("neuralrde-"):
             depth = int(getattr(model, "rde_depth", self.CDE_MODELS[model_name]["depth"]))
-            window_length = self._resolve_neuralrde_window_length(
-                model_params,
-                default=getattr(model, "rde_window_length", DEFAULT_NEURALRDE_LOGSIGNATURE_WINDOW_LENGTH),
+            window_length = int(
+                getattr(model, "rde_window_length", DEFAULT_NEURALRDE_LOGSIGNATURE_WINDOW_LENGTH)
             )
             model.rde_window_length = window_length
             out, hn = model(

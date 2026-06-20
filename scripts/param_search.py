@@ -1727,6 +1727,7 @@ def optimize(
         split_root_local = split_root
 
         if search_repeat == SINGLE_SEARCH_REPEAT:
+            seed_everything(SEED)
             best_loss = _train_single_seed(
                 data_name=data_name,
                 missing_rate=missing_rate,
@@ -1751,6 +1752,7 @@ def optimize(
         elif search_repeat == AGGREGATED_SEARCH_REPEAT:
             losses = []
             for seed in _fixed_search_seed_set(search_repeat, SEED):
+                seed_everything(seed)
                 losses.append(
                     _train_single_seed(
                         data_name=data_name,
