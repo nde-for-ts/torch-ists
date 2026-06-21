@@ -142,7 +142,6 @@ This is a bounded smoke run; the full defaults (`--num-samples 50 --max-num-epoc
 | `--param-root` | `str` | `params` | Output parameter artifact root. |
 | `--contract-dir` | `str` | `evidence` | Directory for JSON run logs (stage = `search`). |
 | `--run-id` | `str` | (auto) | Run identifier. |
-| `--runtime-baseline-id` | `str` | `None` | Optional user-provided run label copied into the search manifest and parameter metadata. |
 | `--task` | `{classification}` | `classification` | Task head. Only `classification` is stable. |
 | `--targets-root` | `str` | `targets` | Root directory for dataset target bundles when a task uses external targets. |
 
@@ -220,7 +219,6 @@ PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/model_run.py \
 | `--out-root` | `str` | `out` | Output prediction artifact root. |
 | `--contract-dir` | `str` | `evidence` | Directory for JSON run logs (stage = `run`). |
 | `--run-id` | `str` | (auto) | Run identifier. |
-| `--runtime-baseline-id` | `str` | `None` | Optional user-provided run label copied into the run manifest and output metadata. |
 | `--task` | `{classification}` | `classification` | Task head. Only `classification` is stable. |
 | `--targets-root` | `str` | `targets` | Root directory for dataset target bundles. |
 

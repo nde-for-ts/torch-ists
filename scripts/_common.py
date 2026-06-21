@@ -214,6 +214,22 @@ def normalize_runtime_baseline_id(runtime_baseline_id: str | None = None) -> str
     return value or None
 
 
+def omit_none_runtime_baseline_id(payload):
+    """Remove unset runtime labels before writing artifacts or manifests."""
+    if isinstance(payload, dict):
+        cleaned = {}
+        for key, value in payload.items():
+            if key == "runtime_baseline_id" and value is None:
+                continue
+            cleaned[key] = omit_none_runtime_baseline_id(value)
+        return cleaned
+    if isinstance(payload, list):
+        return [omit_none_runtime_baseline_id(value) for value in payload]
+    if isinstance(payload, tuple):
+        return tuple(omit_none_runtime_baseline_id(value) for value in payload)
+    return payload
+
+
 def _path_is_under(path: Path, roots: list[Path]) -> bool:
     try:
         resolved = path.resolve()

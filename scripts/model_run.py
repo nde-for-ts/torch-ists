@@ -50,6 +50,7 @@ from _common import (
     LEGACY_ICLR2024_SEARCH_PROFILE,
     normalize_runtime_baseline_id,
     normalize_search_profile,
+    omit_none_runtime_baseline_id,
     resolve_dataset_fixed_batch_policy,
     resolve_learning_rate_policy,
     SINGLE_SEARCH_REPEAT,
@@ -1587,7 +1588,7 @@ def _build_result_payload(
     if output_contract is not None:
         meta["output_contract"] = output_contract
         meta["output_contract_hash"] = _output_contract_hash(output_contract)
-    return {
+    return omit_none_runtime_baseline_id({
         "mode": resolved_mode,
         "evaluation_regime": resolved_regime,
         "task": str(task),
@@ -1599,7 +1600,7 @@ def _build_result_payload(
         "train_channel_sync": None if train_channel_sync is None else bool(train_channel_sync),
         "evaluations": evaluations,
         "meta": meta,
-    }
+    })
 
 
 def _get_aux_nan_event_count(model):
@@ -3033,7 +3034,7 @@ def main():
         contract_dir=args.contract_dir,
         run_id=run_id,
         existing_policy=args.manifest_existing_policy,
-        payload={
+        payload=omit_none_runtime_baseline_id({
             "status": "pass" if exit_code == 0 else "fail",
             "seed": seed,
             "task": args.task,
@@ -3064,7 +3065,7 @@ def main():
                 "stopped_early": bool(stop_early),
                 "policy_violation_count": len(policy_violations),
             },
-        },
+        }),
     )
     LOGGER.info("Run log written: %s", manifest_path)
     return exit_code

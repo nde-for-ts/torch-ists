@@ -56,6 +56,7 @@ from _common import (
     LEGACY_ICLR2024_SEARCH_PROFILE,
     normalize_runtime_baseline_id,
     normalize_search_profile,
+    omit_none_runtime_baseline_id,
     resolve_dataset_fixed_batch_policy,
     resolve_effective_param_config,
     resolve_learning_rate_policy,
@@ -750,8 +751,9 @@ def _build_search_provenance(
     incomplete_fallback_used: bool = False,
     selected_trial_status: str | None = None,
     error_fallback_used: bool = False,
+    ray_trial_summary: dict | None = None,
 ) -> dict:
-    return {
+    provenance = {
         "search_num_samples": int(num_samples),
         "search_max_num_epochs": int(max_num_epochs),
         "search_warmup": int(search_warmup),
@@ -771,6 +773,9 @@ def _build_search_provenance(
         "search_selected_trial_status": selected_trial_status,
         "search_error_fallback_used": bool(error_fallback_used),
     }
+    if ray_trial_summary:
+        provenance.update(ray_trial_summary)
+    return provenance
 
 
 def _count_model_params_for_config(
@@ -1123,6 +1128,88 @@ def _trial_status(trial) -> str:
 
 def _trial_is_terminated(trial) -> bool:
     return _trial_status(trial) in {"UNKNOWN", "TERMINATED"}
+
+
+def _trial_id(trial) -> str | None:
+    for attr in ("trial_id", "trial_name"):
+        value = getattr(trial, attr, None)
+        if value:
+            return str(value)
+    return None
+
+
+def _trial_error_text(trial) -> str:
+    fragments = []
+    for attr in ("error_msg", "last_error"):
+        value = getattr(trial, attr, None)
+        if value:
+            fragments.append(str(value))
+    error_file = getattr(trial, "error_file", None)
+    if error_file:
+        try:
+            with open(error_file, "r", encoding="utf-8", errors="ignore") as f:
+                fragments.append(f.read(4096))
+        except OSError:
+            pass
+    return "\n".join(fragments)
+
+
+def _trial_has_nonfinite_loss(trial) -> bool:
+    last_result = getattr(trial, "last_result", None) or {}
+    if "loss" not in last_result:
+        return False
+    try:
+        loss = float(last_result["loss"])
+    except (TypeError, ValueError):
+        return True
+    return not np.isfinite(loss)
+
+
+def _trial_failure_reason(trial) -> str:
+    text = _trial_error_text(trial).lower()
+    if "outofmemoryerror" in text or "out of memory" in text or "cuda out of memory" in text:
+        return "oom"
+    if _trial_has_nonfinite_loss(trial) or "non-finite" in text or "nonfinite" in text:
+        return "nonfinite_output"
+    if "nan" in text or "inf" in text:
+        return "nonfinite_output"
+    return "runtime_error"
+
+
+def _ray_trial_failure_summary(result) -> dict:
+    trials = list(getattr(result, "trials", []) or [])
+    examples = []
+    error_count = 0
+    oom_count = 0
+    terminated_count = 0
+    for trial in trials:
+        status = _trial_status(trial)
+        if status == "TERMINATED":
+            terminated_count += 1
+        failed = status not in {"TERMINATED", "UNKNOWN"} or _trial_has_nonfinite_loss(trial)
+        if not failed:
+            continue
+        reason = _trial_failure_reason(trial)
+        error_count += 1
+        if reason == "oom":
+            oom_count += 1
+        if len(examples) < 5:
+            examples.append(
+                {
+                    "trial_id": _trial_id(trial),
+                    "status": status,
+                    "reason": reason,
+                    "iteration": _trial_reported_iteration(trial),
+                }
+            )
+    return {
+        "ray_trial_count": int(len(trials)),
+        "ray_terminated_count": int(terminated_count),
+        "ray_error_count": int(error_count),
+        "ray_oom_count": int(oom_count),
+        "ray_failed_trial_examples": examples,
+        "search_partial_trial_failure": bool(error_count > 0),
+    }
 
 
 def _ray_trial_selection_metadata(
@@ -1968,6 +2055,7 @@ def optimize(
         raise_on_failed_trial=False,
     )
     
+    ray_trial_summary = _ray_trial_failure_summary(result)
     require_completed_trial = search_repeat == SINGLE_SEARCH_REPEAT
     best_trial, trial_selection_metadata = _select_best_ray_trial(
         result,
@@ -2058,6 +2146,7 @@ def optimize(
             incomplete_fallback_used=trial_selection_metadata["search_incomplete_fallback_used"],
             selected_trial_status=trial_selection_metadata["search_selected_trial_status"],
             error_fallback_used=trial_selection_metadata["search_error_fallback_used"],
+            ray_trial_summary=ray_trial_summary,
         ),
     )
     saved_param_config["timestamp_summary"] = metadata["timestamp_summary"]
@@ -2100,6 +2189,12 @@ def optimize(
         "search_incomplete_fallback_used": saved_param_config.get("search_incomplete_fallback_used"),
         "search_selected_trial_status": saved_param_config.get("search_selected_trial_status"),
         "search_error_fallback_used": saved_param_config.get("search_error_fallback_used"),
+        "ray_trial_count": saved_param_config.get("ray_trial_count"),
+        "ray_terminated_count": saved_param_config.get("ray_terminated_count"),
+        "ray_error_count": saved_param_config.get("ray_error_count"),
+        "ray_oom_count": saved_param_config.get("ray_oom_count"),
+        "ray_failed_trial_examples": saved_param_config.get("ray_failed_trial_examples"),
+        "search_partial_trial_failure": saved_param_config.get("search_partial_trial_failure"),
         "search_execution_backend": saved_param_config["search_execution_backend"],
         "search_budget_class": saved_param_config["search_budget_class"],
         "legacy_grid_version": saved_param_config["legacy_grid_version"],
@@ -2291,6 +2386,12 @@ def main():
                             "search_incomplete_fallback_used": existing_cfg.get("search_incomplete_fallback_used"),
                             "search_selected_trial_status": existing_cfg.get("search_selected_trial_status"),
                             "search_error_fallback_used": existing_cfg.get("search_error_fallback_used"),
+                            "ray_trial_count": existing_cfg.get("ray_trial_count"),
+                            "ray_terminated_count": existing_cfg.get("ray_terminated_count"),
+                            "ray_error_count": existing_cfg.get("ray_error_count"),
+                            "ray_oom_count": existing_cfg.get("ray_oom_count"),
+                            "ray_failed_trial_examples": existing_cfg.get("ray_failed_trial_examples"),
+                            "search_partial_trial_failure": existing_cfg.get("search_partial_trial_failure"),
                             "search_execution_backend": existing_cfg.get("search_execution_backend"),
                             "search_budget_class": existing_cfg.get("search_budget_class"),
                             "legacy_grid_version": existing_cfg.get("legacy_grid_version", existing_profile),
@@ -2392,6 +2493,12 @@ def main():
                         "search_incomplete_fallback_used": search_result["search_incomplete_fallback_used"],
                         "search_selected_trial_status": search_result["search_selected_trial_status"],
                         "search_error_fallback_used": search_result["search_error_fallback_used"],
+                        "ray_trial_count": search_result.get("ray_trial_count"),
+                        "ray_terminated_count": search_result.get("ray_terminated_count"),
+                        "ray_error_count": search_result.get("ray_error_count"),
+                        "ray_oom_count": search_result.get("ray_oom_count"),
+                        "ray_failed_trial_examples": search_result.get("ray_failed_trial_examples"),
+                        "search_partial_trial_failure": search_result.get("search_partial_trial_failure"),
                         "search_execution_backend": search_result["search_execution_backend"],
                         "search_budget_class": search_result["search_budget_class"],
                         "legacy_grid_version": search_result["legacy_grid_version"],
@@ -2466,7 +2573,7 @@ def main():
         contract_dir=args.contract_dir,
         run_id=run_id,
         existing_policy=args.manifest_existing_policy,
-        payload={
+        payload=omit_none_runtime_baseline_id({
             "status": "pass" if exit_code == 0 else "fail",
             "seed": SEED,
             "missing_rate": float(args.missing_rate),
@@ -2514,7 +2621,7 @@ def main():
                 "stopped_early": bool(stop_early),
                 "policy_violation_count": len(policy_violations),
             },
-        },
+        }),
     )
     LOGGER.info("Search run log written: %s", manifest_path)
     return exit_code
