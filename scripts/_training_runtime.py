@@ -5,6 +5,8 @@ from __future__ import annotations
 import copy
 import logging
 import math
+import sys
+from pathlib import Path
 from typing import Dict, Optional
 
 import torch
@@ -136,17 +138,28 @@ def _align_prediction_target(
             pred = pred.unsqueeze(-1)
         if target.dim() == 1:
             target = target.unsqueeze(-1)
-        dim = min(pred.shape[-1], target.shape[-1])
-        return pred[..., :dim], target[..., :dim]
+        if pred.dim() != 2:
+            raise ValueError(f"regression expects 2D predictions [N,1], got shape {tuple(pred.shape)}")
+        if target.dim() != 2:
+            raise ValueError(f"regression expects 2D targets [N,1], got shape {tuple(target.shape)}")
+        if tuple(pred.shape) != tuple(target.shape):
+            raise ValueError(
+                f"regression prediction/target shape mismatch: "
+                f"pred={tuple(pred.shape)} target={tuple(target.shape)}"
+            )
+        return pred, target
 
     if task in {"forecasting", "imputation", "change_detection"}:
         if pred.dim() != 3:
             raise ValueError(f"{task} expects 3D predictions [N,L,D], got shape {tuple(pred.shape)}")
         if target.dim() != 3:
             raise ValueError(f"{task} expects 3D targets [N,L,D], got shape {tuple(target.shape)}")
-        length = min(pred.shape[1], target.shape[1])
-        dim = min(pred.shape[2], target.shape[2])
-        return pred[:, :length, :dim], target[:, :length, :dim]
+        if tuple(pred.shape) != tuple(target.shape):
+            raise ValueError(
+                f"{task} prediction/target shape mismatch: "
+                f"pred={tuple(pred.shape)} target={tuple(target.shape)}"
+            )
+        return pred, target
 
     if task == "outlier_detection":
         if pred.dim() == 1:
@@ -161,7 +174,14 @@ def _align_prediction_target(
             raise ValueError(
                 f"outlier_detection expects 2D targets [N,1], got shape {tuple(target.shape)}"
             )
-        return pred[:, :1], target[:, :1]
+        if tuple(pred.shape) != tuple(target.shape):
+            raise ValueError(
+                "outlier_detection prediction/target shape mismatch: "
+                f"pred={tuple(pred.shape)} target={tuple(target.shape)}"
+            )
+        if pred.shape[1] != 1:
+            raise ValueError(f"outlier_detection second dim must be 1, got {pred.shape[1]}")
+        return pred, target
 
     return pred, target
 
@@ -169,12 +189,16 @@ def _align_prediction_target(
 def _load_flow_policy_helpers():
     try:
         from torch_ists.config.alias_policy import is_flow_strict_raw_name
-    except ModuleNotFoundError as exc:
-        raise ImportError(
-            "Failed to import torch_ists.config.alias_policy. "
-            "Set TORCH_ISTS_RUNTIME_ROOT to a package root that contains torch_ists/."
-        ) from exc
-    return is_flow_strict_raw_name
+        return is_flow_strict_raw_name
+    except ModuleNotFoundError:
+        repo_root = Path(__file__).resolve().parents[2]
+        deployment_root = repo_root / "deployment"
+        for path in (deployment_root, repo_root):
+            path_str = str(path)
+            if path_str not in sys.path:
+                sys.path.insert(0, path_str)
+        from torch_ists.config.alias_policy import is_flow_strict_raw_name
+        return is_flow_strict_raw_name
 
 
 _is_flow_strict_raw_name = _load_flow_policy_helpers()
@@ -257,12 +281,11 @@ def _align_target_mask(mask: torch.Tensor, target: torch.Tensor) -> torch.Tensor
         raise ValueError(
             f"target_mask rank mismatch: mask={tuple(mask.shape)} target={tuple(target.shape)}"
         )
-    if mask.dim() == 3:
-        length = min(mask.shape[1], target.shape[1])
-        dim = min(mask.shape[2], target.shape[2])
-        return mask[:, :length, :dim]
-    dim = min(mask.shape[-1], target.shape[-1])
-    return mask[..., :dim]
+    if tuple(mask.shape) != tuple(target.shape):
+        raise ValueError(
+            f"Target mask shape mismatch: mask={tuple(mask.shape)} target={tuple(target.shape)}"
+        )
+    return mask
 
 
 def train(

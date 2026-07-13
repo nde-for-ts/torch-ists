@@ -63,7 +63,7 @@ from dataset_source_contracts import (
     normalize_dataset_source,
     resolve_timestamp_delta_metadata,
 )
-from script_chain_contracts import generate_run_id, write_manifest
+from script_chain_contracts import atomic_pickle_dump, file_sha256, generate_run_id, write_manifest
 
 sys.dont_write_bytecode = True
 
@@ -113,6 +113,7 @@ def _normalize_search_profile_arg(raw: str) -> str:
 
 CONSTRAINED_SEARCH_POLICY = "constrained"
 AGGREGATED_SEARCH_REPEAT = "aggregated"
+PREDICTION_IDENTITY_SCHEMA = "sample_indices"
 
 
 def _normalize_param_policy_arg(raw: str) -> str:
@@ -1052,6 +1053,7 @@ def _build_output_contract(
     forecast_horizon,
     dataset_source,
     dataset_npz,
+    dataset_npz_sha256,
     data_shape,
     num_class,
     missing_rate,
@@ -1059,6 +1061,9 @@ def _build_output_contract(
     train_missing_type,
     train_channel_sync,
     split_path,
+    split_sha256,
+    target_path,
+    target_sha256,
     epochs,
     save_predictions,
     interpolate,
@@ -1075,6 +1080,7 @@ def _build_output_contract(
         "dataset": str(data_name),
         "dataset_source": str(dataset_source),
         "dataset_npz": None if dataset_npz is None else str(dataset_npz),
+        "dataset_npz_sha256": dataset_npz_sha256,
         "data_shape": [int(value) for value in data_shape],
         "num_class": int(num_class),
         "model": str(model_name),
@@ -1088,8 +1094,12 @@ def _build_output_contract(
         "train_channel_sync": None if train_channel_sync is None else bool(train_channel_sync),
         "evaluation_regime": str(evaluation_regime),
         "split_path": str(split_path),
+        "split_sha256": split_sha256,
+        "target_path": target_path,
+        "target_sha256": target_sha256,
         "epochs": int(epochs),
         "save_predictions": str(save_predictions),
+        "prediction_identity_schema": PREDICTION_IDENTITY_SCHEMA,
         "interpolate": str(interpolate),
         "use_intensity": bool(use_intensity),
         "batch_policy": batch_policy,
@@ -1321,19 +1331,45 @@ def _compute_binary_detection_metrics(pred: np.ndarray, target: np.ndarray, *, a
     return {"bce": bce, accuracy_key: acc}
 
 
-def _build_predictions_payload(y_true, y_pred, logit_list, save_predictions="full"):
+def _prediction_identity_fields(sample_indices, *, include_indices: bool, expected_n: int | None = None) -> dict:
+    if sample_indices is None:
+        return {
+            "prediction_identity_schema": PREDICTION_IDENTITY_SCHEMA,
+            "sample_indices": None,
+            "sample_index_hash": None,
+            "sample_index_count": None,
+            "sample_index_dtype": None,
+        }
+    indices = np.ascontiguousarray(np.asarray(sample_indices, dtype=np.int64).reshape(-1))
+    if expected_n is not None and int(indices.shape[0]) != int(expected_n):
+        raise ValueError(
+            f"prediction sample index length mismatch: expected {int(expected_n)}, "
+            f"got {int(indices.shape[0])}."
+        )
+    return {
+        "prediction_identity_schema": PREDICTION_IDENTITY_SCHEMA,
+        "sample_indices": indices.copy() if include_indices else None,
+        "sample_index_hash": hashlib.sha256(indices.tobytes()).hexdigest(),
+        "sample_index_count": int(indices.shape[0]),
+        "sample_index_dtype": str(indices.dtype),
+    }
+
+
+def _build_predictions_payload(y_true, y_pred, logit_list, save_predictions="full", sample_indices=None):
+    n_samples = int(y_true.shape[0]) if hasattr(y_true, "shape") else int(len(y_true))
     if save_predictions == "full":
         return {
             "storage": "full",
+            **_prediction_identity_fields(sample_indices, include_indices=True, expected_n=n_samples),
             "y_true": y_true,
             "y_pred": y_pred,
             "logit_list": logit_list,
         }
     if save_predictions == "summary":
-        n_samples = int(y_true.shape[0]) if hasattr(y_true, "shape") else int(len(y_true))
         n_classes = int(logit_list.shape[1]) if getattr(logit_list, "ndim", 0) >= 2 else 0
         return {
             "storage": "summary",
+            **_prediction_identity_fields(sample_indices, include_indices=False, expected_n=n_samples),
             "n_samples": n_samples,
             "n_classes": n_classes,
             "y_true_dtype": str(getattr(y_true, "dtype", "unknown")),
@@ -1394,6 +1430,7 @@ def _build_evaluation_result(
     missing_seed=0,
     save_predictions="full",
     missingness_provenance=None,
+    sample_indices=None,
 ):
     task = str(task).strip().lower()
     if task == "classification":
@@ -1403,6 +1440,7 @@ def _build_evaluation_result(
             y_pred=y_pred,
             logit_list=logit_list,
             save_predictions=save_predictions,
+            sample_indices=sample_indices,
         )
     elif task == "outlier_detection":
         binary_metrics = _compute_binary_detection_metrics(
@@ -1414,9 +1452,13 @@ def _build_evaluation_result(
             "bce": float(binary_metrics["bce"]),
             "outlier_acc": float(binary_metrics["outlier_acc"]),
         }
+        task_pred_np = np.asarray(task_pred)
+        task_target_np = np.asarray(task_target)
+        n_samples = int(task_pred_np.shape[0]) if task_pred_np.ndim > 0 else 0
         if save_predictions == "full":
             predictions = {
                 "storage": "full",
+                **_prediction_identity_fields(sample_indices, include_indices=True, expected_n=n_samples),
                 "y_true": None,
                 "y_pred": None,
                 "logit_list": None,
@@ -1424,11 +1466,10 @@ def _build_evaluation_result(
                 "pred": task_pred,
             }
         elif save_predictions == "summary":
-            task_pred_np = np.asarray(task_pred)
-            task_target_np = np.asarray(task_target)
             predictions = {
                 "storage": "summary",
-                "n_samples": int(task_pred_np.shape[0]) if task_pred_np.ndim > 0 else 0,
+                **_prediction_identity_fields(sample_indices, include_indices=False, expected_n=n_samples),
+                "n_samples": n_samples,
                 "n_classes": 0,
                 "y_true_dtype": None,
                 "y_pred_dtype": None,
@@ -1455,9 +1496,13 @@ def _build_evaluation_result(
             "bce": float(binary_metrics["bce"]),
             "change_acc": float(binary_metrics["change_acc"]),
         }
+        task_pred_np = np.asarray(task_pred)
+        task_target_np = np.asarray(task_target)
+        n_samples = int(task_pred_np.shape[0]) if task_pred_np.ndim > 0 else 0
         if save_predictions == "full":
             predictions = {
                 "storage": "full",
+                **_prediction_identity_fields(sample_indices, include_indices=True, expected_n=n_samples),
                 "y_true": None,
                 "y_pred": None,
                 "logit_list": None,
@@ -1465,11 +1510,10 @@ def _build_evaluation_result(
                 "pred": task_pred,
             }
         elif save_predictions == "summary":
-            task_pred_np = np.asarray(task_pred)
-            task_target_np = np.asarray(task_target)
             predictions = {
                 "storage": "summary",
-                "n_samples": int(task_pred_np.shape[0]) if task_pred_np.ndim > 0 else 0,
+                **_prediction_identity_fields(sample_indices, include_indices=False, expected_n=n_samples),
+                "n_samples": n_samples,
                 "n_classes": 0,
                 "y_true_dtype": None,
                 "y_pred_dtype": None,
@@ -1492,9 +1536,13 @@ def _build_evaluation_result(
             "mse": float(task_metrics["mse"]),
             "mae": float(task_metrics["mae"]),
         }
+        task_pred_np = np.asarray(task_pred)
+        task_target_np = np.asarray(task_target)
+        n_samples = int(task_pred_np.shape[0]) if task_pred_np.ndim > 0 else 0
         if save_predictions == "full":
             predictions = {
                 "storage": "full",
+                **_prediction_identity_fields(sample_indices, include_indices=True, expected_n=n_samples),
                 "y_true": None,
                 "y_pred": None,
                 "logit_list": None,
@@ -1502,11 +1550,10 @@ def _build_evaluation_result(
                 "pred": task_pred,
             }
         elif save_predictions == "summary":
-            task_pred_np = np.asarray(task_pred)
-            task_target_np = np.asarray(task_target)
             predictions = {
                 "storage": "summary",
-                "n_samples": int(task_pred_np.shape[0]) if task_pred_np.ndim > 0 else 0,
+                **_prediction_identity_fields(sample_indices, include_indices=False, expected_n=n_samples),
+                "n_samples": n_samples,
                 "n_classes": 0,
                 "y_true_dtype": None,
                 "y_pred_dtype": None,
@@ -1715,6 +1762,14 @@ def run_model(
     split_path = os.path.join(split_root, data_name, out_name)
     with open(split_path, 'rb') as f:
         train_idx, valid_idx, test_idx = pickle.load(f)
+    split_sha256 = file_sha256(split_path)
+    dataset_npz_sha256 = file_sha256(dataset_npz) if dataset_npz is not None else None
+    target_path_for_contract = None
+    target_sha256 = None
+    if task != "classification" and target_source == "dataset":
+        target_path_for_contract = str(Path(targets_root) / f"{data_name}.npz")
+        if os.path.exists(target_path_for_contract):
+            target_sha256 = file_sha256(target_path_for_contract)
     timestamp_delta_scale, timestamp_summary = resolve_timestamp_delta_metadata(
         timestamps,
         train_idx=train_idx,
@@ -1761,6 +1816,7 @@ def run_model(
         forecast_horizon=forecast_horizon,
         dataset_source=dataset_source,
         dataset_npz=dataset_npz,
+        dataset_npz_sha256=dataset_npz_sha256,
         data_shape=X.shape,
         num_class=num_class,
         missing_rate=0.0 if robustness_mode else missing_rate,
@@ -1768,6 +1824,9 @@ def run_model(
         train_missing_type=train_missing_type,
         train_channel_sync=train_channel_sync,
         split_path=split_path,
+        split_sha256=split_sha256,
+        target_path=target_path_for_contract,
+        target_sha256=target_sha256,
         epochs=EPOCHS,
         save_predictions=save_predictions,
         interpolate=interpolate,
@@ -1930,7 +1989,7 @@ def run_model(
         shuffle=True,
         drop_last=False,
     )
-    valid_batch = DataLoader(valid_dataset, batch_size=batch_size, shuffle=True, drop_last=False)
+    valid_batch = DataLoader(valid_dataset, batch_size=batch_size, shuffle=False, drop_last=False)
     test_batch = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, drop_last=False)
     
     # set params
@@ -2089,8 +2148,7 @@ def run_model(
             robustness_test_mechanisms=robustness_test_mechanisms,
             robustness_channel_sync_options=robustness_channel_sync_options,
         )
-        with open(output_path, 'wb') as f:
-            pickle.dump(payload, f)
+        output_file_sha256 = atomic_pickle_dump(payload, output_path)
 
         eval0 = next((x for x in evaluations if abs(x["test_missing_rate"]) < 1e-12), evaluations[0])
         metrics = eval0["metrics"]
@@ -2125,6 +2183,7 @@ def run_model(
             "dataset": data_name,
             "dataset_source": str(dataset_source),
             "dataset_npz": None if dataset_npz is None else str(dataset_npz),
+            "dataset_npz_sha256": dataset_npz_sha256,
             "timestamp_summary": timestamp_summary,
             "task": task,
             "model": model_name,
@@ -2137,6 +2196,8 @@ def run_model(
             "robustness_evaluations": int(len(evaluations)),
             "split_path": str(split_path),
             "output_path": str(output_path),
+            "split_sha256": split_sha256,
+            "output_file_sha256": output_file_sha256,
             "batch_policy": batch_policy,
             "lr_policy": lr_policy,
             "metrics": metrics,
@@ -2186,6 +2247,7 @@ def run_model(
             logit_list=logit_list,
             missing_seed=SEED,
             save_predictions=save_predictions,
+            sample_indices=test_idx,
         )
         metrics = eval_result["metrics"]
         LOGGER.info(
@@ -2213,19 +2275,7 @@ def run_model(
                 output = model(seq, batch['coeffs'].to(device))
                 pred = output[0] if isinstance(output, tuple) else output
                 target = batch["target"].to(device).float()
-                if pred.dim() == 1:
-                    pred = pred.unsqueeze(-1)
-                if target.dim() == 1:
-                    target = target.unsqueeze(-1)
-                if pred.dim() == 3 and target.dim() == 3:
-                    length = min(pred.shape[1], target.shape[1])
-                    dim = min(pred.shape[2], target.shape[2])
-                    pred = pred[:, :length, :dim]
-                    target = target[:, :length, :dim]
-                else:
-                    dim = min(pred.shape[-1], target.shape[-1])
-                    pred = pred[..., :dim]
-                    target = target[..., :dim]
+                pred, target = _align_prediction_target(pred, target, task)
                 pred_list.append(pred.detach().cpu().numpy())
                 target_list.append(target.detach().cpu().numpy())
 
@@ -2240,6 +2290,7 @@ def run_model(
             task_target=task_target,
             missing_seed=SEED,
             save_predictions=save_predictions,
+            sample_indices=test_idx,
         )
         metrics = eval_result["metrics"]
         if task == "outlier_detection":
@@ -2306,12 +2357,12 @@ def run_model(
         coeff_cache=coeff_cache_summary,
     )
     payload.update(param_search_contract)
-    with open(output_path, 'wb') as f:
-        pickle.dump(payload, f)
+    output_file_sha256 = atomic_pickle_dump(payload, output_path)
     return {
         "dataset": data_name,
         "dataset_source": str(dataset_source),
         "dataset_npz": None if dataset_npz is None else str(dataset_npz),
+        "dataset_npz_sha256": dataset_npz_sha256,
         "timestamp_summary": timestamp_summary,
         "task": task,
         "target_source": target_source if task != "classification" else "label",
@@ -2321,6 +2372,8 @@ def run_model(
         "missing_rate": float(missing_rate),
         "split_path": str(split_path),
         "output_path": str(output_path),
+        "split_sha256": split_sha256,
+        "output_file_sha256": output_file_sha256,
         "batch_policy": batch_policy,
         "lr_policy": lr_policy,
         "metrics": metrics,
@@ -2526,6 +2579,7 @@ def _evaluate_robustness(
                             missing_seed=missing_seed,
                             save_predictions=save_predictions,
                             missingness_provenance=missingness_provenance,
+                            sample_indices=test_idx,
                         )
                     else:
                         pred_list, target_list = [], []
@@ -2559,6 +2613,7 @@ def _evaluate_robustness(
                             missing_seed=missing_seed,
                             save_predictions=save_predictions,
                             missingness_provenance=missingness_provenance,
+                            sample_indices=test_idx,
                         )
                     evaluations.append(eval_result)
                     metrics = eval_result["metrics"]
@@ -2759,6 +2814,7 @@ def main():
                                     "dataset": data_name,
                                     "dataset_source": str(args.dataset_source),
                                     "dataset_npz": None if args.dataset_npz is None else str(args.dataset_npz),
+                                    "dataset_npz_sha256": file_sha256(args.dataset_npz) if args.dataset_npz is not None else None,
                                     "model": model_name,
                                     "seed": seed,
                                     "missing_rate": 0.0,
@@ -2774,6 +2830,9 @@ def main():
                                     "split_path": str(split_path),
                                     "param_path": str(param_path),
                                     "output_path": str(output_path),
+                                    "split_sha256": file_sha256(split_path),
+                                    "param_file_sha256": file_sha256(param_path),
+                                    "output_file_sha256": file_sha256(output_path),
                                     "output_contract_hash": _read_output_contract_hash(output_path),
                                     "reason": "output artifact already exists (--check)",
                                     "runtime_baseline_id": runtime_baseline_id,
@@ -2792,6 +2851,7 @@ def main():
                             f"performance limit {float(args.performance_limit_seconds):.3f}s"
                         )
                     run_result["param_path"] = str(param_path)
+                    run_result["param_file_sha256"] = file_sha256(param_path)
                     run_result["search_profile"] = param_search_profile
                     run_result["search_policy"] = args.param_policy
                     run_result["search_repeat"] = args.param_repeat
@@ -2927,6 +2987,7 @@ def main():
                                         "dataset": data_name,
                                         "dataset_source": str(args.dataset_source),
                                         "dataset_npz": None if args.dataset_npz is None else str(args.dataset_npz),
+                                        "dataset_npz_sha256": file_sha256(args.dataset_npz) if args.dataset_npz is not None else None,
                                         "model": model_name,
                                         "seed": seed,
                                         "missing_rate": float(missing_rate),
@@ -2939,6 +3000,9 @@ def main():
                                         "split_path": str(split_path),
                                         "param_path": str(param_path),
                                         "output_path": str(output_path),
+                                        "split_sha256": file_sha256(split_path),
+                                        "param_file_sha256": file_sha256(param_path),
+                                        "output_file_sha256": file_sha256(output_path),
                                         "output_contract_hash": _read_output_contract_hash(output_path),
                                         "reason": "output artifact already exists (--check)",
                                         "runtime_baseline_id": runtime_baseline_id,
@@ -2957,6 +3021,7 @@ def main():
                                 f"performance limit {float(args.performance_limit_seconds):.3f}s"
                             )
                         run_result["param_path"] = str(param_path)
+                        run_result["param_file_sha256"] = file_sha256(param_path)
                         run_result["search_profile"] = param_search_profile
                         run_result["search_policy"] = args.param_policy
                         run_result["search_repeat"] = args.param_repeat

@@ -6,6 +6,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import hashlib
 import json
+import os
 import pickle
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
@@ -51,6 +52,70 @@ def stable_hash(payload: Any) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def file_sha256(path: str | Path) -> str:
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _fsync_parent_dir(path: Path) -> None:
+    try:
+        fd = os.open(str(path), os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _tmp_path_for(path: Path) -> Path:
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    return path.with_name(f".{path.name}.{os.getpid()}.{stamp}.tmp")
+
+
+def atomic_pickle_dump(payload: Any, path: str | Path) -> str:
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = _tmp_path_for(path)
+    try:
+        with tmp_path.open("wb") as f:
+            pickle.dump(payload, f)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, path)
+        _fsync_parent_dir(path.parent)
+    except Exception:
+        try:
+            tmp_path.unlink()
+        except FileNotFoundError:
+            pass
+        raise
+    return file_sha256(path)
+
+
+def atomic_write_text(path: str | Path, text: str, *, encoding: str = "utf-8") -> str:
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = _tmp_path_for(path)
+    try:
+        with tmp_path.open("w", encoding=encoding) as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, path)
+        _fsync_parent_dir(path.parent)
+    except Exception:
+        try:
+            tmp_path.unlink()
+        except FileNotFoundError:
+            pass
+        raise
+    return file_sha256(path)
+
+
 def write_manifest(
     *,
     stage: str,
@@ -86,7 +151,7 @@ def write_manifest(
         body["reused_manifest_path"] = str(out_path)
     elif manifest_exists and policy == "overwrite":
         body["overwrote_existing_manifest"] = True
-    out_path.write_text(json.dumps(body, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    atomic_write_text(out_path, json.dumps(body, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return out_path, body
 
 
@@ -109,6 +174,51 @@ def _is_finite_number(value: Any) -> bool:
     except (TypeError, ValueError):
         return False
     return v == v and v not in (float("inf"), float("-inf"))
+
+
+def _validate_file_sha256_field(
+    record: Dict[str, Any],
+    path: str,
+    artifact_field: str,
+    sha_field: str,
+    errors: List[str],
+) -> None:
+    expected = record.get(sha_field)
+    if expected in (None, ""):
+        return
+    if (
+        not isinstance(expected, str)
+        or len(expected) != 64
+        or any(ch not in "0123456789abcdefABCDEF" for ch in expected)
+    ):
+        errors.append(f"{path}.{sha_field} must be a 64-character SHA-256 hex string")
+        return
+    artifact_path = record.get(artifact_field)
+    if not artifact_path:
+        errors.append(f"{path}.{sha_field} provided but {artifact_field} is missing")
+        return
+    artifact = Path(str(artifact_path))
+    if not artifact.exists() or not artifact.is_file():
+        errors.append(f"{path}.{sha_field} artifact missing: {artifact}")
+        return
+    actual = file_sha256(artifact)
+    if str(expected) != actual:
+        errors.append(
+            f"{path}.{sha_field} mismatch for {artifact_field}: stored={expected}, actual={actual}"
+        )
+
+
+def _validate_target_spec_sha256(record: Dict[str, Any], path: str, errors: List[str]) -> None:
+    target_spec = record.get("target_spec")
+    if not isinstance(target_spec, dict):
+        return
+    _validate_file_sha256_field(
+        target_spec,
+        f"{path}.target_spec",
+        "target_path",
+        "target_sha256",
+        errors,
+    )
 
 
 def _validate_target_source(record: Dict[str, Any], path: str, errors: List[str], task: str) -> None:
@@ -191,6 +301,7 @@ def _validate_output_payload(record: Dict[str, Any], *, path: str, errors: List[
     if not artifact.exists() or artifact.stat().st_size <= 0:
         errors.append(f"{path} output artifact missing/empty: {artifact}")
         return
+    _validate_file_sha256_field(record, path, "output_path", "output_file_sha256", errors)
     try:
         with artifact.open("rb") as f:
             payload = pickle.load(f)
@@ -318,6 +429,8 @@ def validate_split_manifest(doc: Dict[str, Any]) -> List[str]:
                 errors.append(f"counts.{key} must be int")
             elif counts[key] <= 0:
                 errors.append(f"counts.{key} must be > 0")
+    _validate_file_sha256_field(doc, "split", "split_path", "split_sha256", errors)
+    _validate_file_sha256_field(doc, "split", "dataset_npz", "dataset_npz_sha256", errors)
     return errors
 
 
@@ -365,6 +478,10 @@ def validate_search_manifest(doc: Dict[str, Any]) -> List[str]:
         task = str(record.get("task", doc.get("task", "classification"))).strip().lower()
         if task in SUPPORTED_TASKS:
             _validate_target_source(record, f"records[{idx}]", errors, task)
+        _validate_file_sha256_field(record, f"records[{idx}]", "dataset_npz", "dataset_npz_sha256", errors)
+        _validate_file_sha256_field(record, f"records[{idx}]", "split_path", "split_sha256", errors)
+        _validate_file_sha256_field(record, f"records[{idx}]", "param_path", "param_file_sha256", errors)
+        _validate_target_spec_sha256(record, f"records[{idx}]", errors)
         if "best_loss" in record and not _is_finite_number(record.get("best_loss")):
             errors.append(f"records[{idx}].best_loss must be finite")
 
@@ -394,6 +511,10 @@ def validate_search_manifest(doc: Dict[str, Any]) -> List[str]:
         task = str(record.get("task", doc.get("task", "classification"))).strip().lower()
         if task in SUPPORTED_TASKS:
             _validate_target_source(record, f"reused_records[{idx}]", errors, task)
+        _validate_file_sha256_field(record, f"reused_records[{idx}]", "dataset_npz", "dataset_npz_sha256", errors)
+        _validate_file_sha256_field(record, f"reused_records[{idx}]", "split_path", "split_sha256", errors)
+        _validate_file_sha256_field(record, f"reused_records[{idx}]", "param_path", "param_file_sha256", errors)
+        _validate_target_spec_sha256(record, f"reused_records[{idx}]", errors)
     return errors
 
 
@@ -448,6 +569,10 @@ def validate_run_manifest(doc: Dict[str, Any]) -> List[str]:
             )
             continue
         _validate_target_source(record, f"records[{idx}]", errors, task)
+        _validate_file_sha256_field(record, f"records[{idx}]", "dataset_npz", "dataset_npz_sha256", errors)
+        _validate_file_sha256_field(record, f"records[{idx}]", "split_path", "split_sha256", errors)
+        _validate_file_sha256_field(record, f"records[{idx}]", "param_path", "param_file_sha256", errors)
+        _validate_target_spec_sha256(record, f"records[{idx}]", errors)
         if task == "classification":
             has_v2 = all(metric in metrics for metric in ("accuracy", "f1", "wf1"))
             has_v1 = all(metric in metrics for metric in ("accuracy", "f1_weighted"))
@@ -536,5 +661,9 @@ def validate_run_manifest(doc: Dict[str, Any]) -> List[str]:
         task = str(record.get("task", doc.get("task", "classification"))).strip().lower()
         if task in SUPPORTED_TASKS:
             _validate_target_source(record, f"reused_records[{idx}]", errors, task)
+        _validate_file_sha256_field(record, f"reused_records[{idx}]", "dataset_npz", "dataset_npz_sha256", errors)
+        _validate_file_sha256_field(record, f"reused_records[{idx}]", "split_path", "split_sha256", errors)
+        _validate_file_sha256_field(record, f"reused_records[{idx}]", "param_path", "param_file_sha256", errors)
+        _validate_target_spec_sha256(record, f"reused_records[{idx}]", errors)
         _validate_output_payload(record, path=f"reused_records[{idx}]", errors=errors)
     return errors

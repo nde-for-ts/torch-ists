@@ -72,6 +72,8 @@ from dataset_source_contracts import (
     resolve_timestamp_delta_metadata,
 )
 from script_chain_contracts import (
+    atomic_pickle_dump,
+    file_sha256,
     generate_run_id,
     stable_hash,
     write_manifest,
@@ -597,6 +599,8 @@ LOGGER = logging.getLogger("param_search")
 
 os.makedirs('params', exist_ok=True)
 
+RAY_TRIAL_SELECTOR = "loss-then-config-hash-then-trial-id"
+
 
 def _collect_task_metadata(
     *,
@@ -627,6 +631,8 @@ def _collect_task_metadata(
     with open(split_path, "rb") as f:
         train_idx, valid_idx, test_idx = pickle.load(f)
     del valid_idx, test_idx
+    split_sha256 = file_sha256(split_path)
+    dataset_npz_sha256 = file_sha256(dataset_npz) if dataset_npz is not None else None
     timestamp_delta_scale, timestamp_summary = resolve_timestamp_delta_metadata(
         timestamps,
         train_idx=train_idx,
@@ -705,6 +711,8 @@ def _collect_task_metadata(
         "target_spec": target_spec,
         "target_source": str(target_source if task != "classification" else "label"),
         "timestamp_summary": timestamp_summary,
+        "split_sha256": split_sha256,
+        "dataset_npz_sha256": dataset_npz_sha256,
     }
 
 
@@ -751,6 +759,10 @@ def _build_search_provenance(
     incomplete_fallback_used: bool = False,
     selected_trial_status: str | None = None,
     error_fallback_used: bool = False,
+    ray_selector: str | None = None,
+    selected_candidate_id: str | None = None,
+    selected_trial_id: str | None = None,
+    best_loss_tie_count: int | None = None,
     ray_trial_summary: dict | None = None,
 ) -> dict:
     provenance = {
@@ -772,6 +784,10 @@ def _build_search_provenance(
         "search_incomplete_fallback_used": bool(incomplete_fallback_used),
         "search_selected_trial_status": selected_trial_status,
         "search_error_fallback_used": bool(error_fallback_used),
+        "search_ray_selector": ray_selector,
+        "search_selected_candidate_id": selected_candidate_id,
+        "search_selected_trial_id": selected_trial_id,
+        "search_best_loss_tie_count": None if best_loss_tie_count is None else int(best_loss_tie_count),
     }
     if ray_trial_summary:
         provenance.update(ray_trial_summary)
@@ -1117,6 +1133,29 @@ def _trial_reported_loss(trial) -> float | None:
     return loss if np.isfinite(loss) else None
 
 
+def _json_safe(value):
+    if isinstance(value, dict):
+        return {str(key): _json_safe(value[key]) for key in sorted(value, key=str)}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, Path):
+        return str(value)
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    return str(value)
+
+
+def _trial_candidate_id(trial) -> str:
+    config = getattr(trial, "config", None) or {}
+    return stable_hash({"trial_config": _json_safe(config)})
+
+
+def _trial_selection_sort_key(loss: float, trial) -> tuple:
+    return (float(loss), _trial_candidate_id(trial), _trial_id(trial) or "")
+
+
 class SearchNoCompletedTrialError(RuntimeError):
     """Raised when ASHA prunes every single-repeat trial before max_t."""
 
@@ -1218,6 +1257,7 @@ def _ray_trial_selection_metadata(
     max_num_epochs: int,
     fallback_used: bool,
     error_fallback_used: bool = False,
+    best_loss_tie_count: int = 0,
 ) -> dict:
     if trial is None:
         return {
@@ -1226,6 +1266,10 @@ def _ray_trial_selection_metadata(
             "search_incomplete_fallback_used": False,
             "search_selected_trial_status": None,
             "search_error_fallback_used": False,
+            "search_ray_selector": RAY_TRIAL_SELECTOR,
+            "search_selected_candidate_id": None,
+            "search_selected_trial_id": None,
+            "search_best_loss_tie_count": 0,
         }
     selected_iteration = _trial_reported_iteration(trial)
     selected_status = _trial_status(trial)
@@ -1235,6 +1279,10 @@ def _ray_trial_selection_metadata(
         "search_incomplete_fallback_used": bool(fallback_used),
         "search_selected_trial_status": selected_status,
         "search_error_fallback_used": bool(error_fallback_used or not _trial_is_terminated(trial)),
+        "search_ray_selector": RAY_TRIAL_SELECTOR,
+        "search_selected_candidate_id": _trial_candidate_id(trial),
+        "search_selected_trial_id": _trial_id(trial),
+        "search_best_loss_tie_count": int(best_loss_tie_count),
     }
 
 
@@ -1246,11 +1294,35 @@ def _select_best_ray_trial(
     allow_incomplete: bool,
 ):
     if not require_completed:
-        trial = result.get_best_trial("loss", "min", "last")
+        try:
+            ray_best_trial = result.get_best_trial("loss", "min", "last")
+        except (AttributeError, TypeError, ValueError, RuntimeError):
+            ray_best_trial = None
+        best_loss = _trial_reported_loss(ray_best_trial) if ray_best_trial is not None else None
+        if best_loss is None:
+            return None, _ray_trial_selection_metadata(
+                None,
+                max_num_epochs=max_num_epochs,
+                fallback_used=False,
+            )
+        ray_best_status = _trial_status(ray_best_trial)
+        candidates = []
+        for trial in getattr(result, "trials", []) or []:
+            loss = _trial_reported_loss(trial)
+            if loss is None or float(loss) != float(best_loss):
+                continue
+            if _trial_status(trial) != ray_best_status:
+                continue
+            candidates.append((_trial_selection_sort_key(loss, trial), trial))
+        if not candidates:
+            candidates = [(_trial_selection_sort_key(best_loss, ray_best_trial), ray_best_trial)]
+        candidates.sort(key=lambda item: item[0])
+        trial = candidates[0][1]
         return trial, _ray_trial_selection_metadata(
             trial,
             max_num_epochs=max_num_epochs,
             fallback_used=False,
+            best_loss_tie_count=len(candidates),
     )
     completed_candidates = []
     incomplete_candidates = []
@@ -1261,35 +1333,41 @@ def _select_best_ray_trial(
             continue
         iteration = _trial_reported_iteration(trial)
         if iteration >= int(max_num_epochs):
-            completed_candidates.append((loss, trial))
+            completed_candidates.append((_trial_selection_sort_key(loss, trial), trial))
         elif allow_incomplete and iteration > 0 and _trial_is_terminated(trial):
-            incomplete_candidates.append((loss, trial))
+            incomplete_candidates.append((_trial_selection_sort_key(loss, trial), trial))
         elif allow_incomplete and iteration > 0:
-            error_candidates.append((loss, trial))
+            error_candidates.append((_trial_selection_sort_key(loss, trial), trial))
     if completed_candidates:
         completed_candidates.sort(key=lambda item: item[0])
         trial = completed_candidates[0][1]
+        selected_loss = completed_candidates[0][0][0]
         return trial, _ray_trial_selection_metadata(
             trial,
             max_num_epochs=max_num_epochs,
             fallback_used=False,
+            best_loss_tie_count=sum(1 for key, _ in completed_candidates if key[0] == selected_loss),
         )
     if incomplete_candidates:
         incomplete_candidates.sort(key=lambda item: item[0])
         trial = incomplete_candidates[0][1]
+        selected_loss = incomplete_candidates[0][0][0]
         return trial, _ray_trial_selection_metadata(
             trial,
             max_num_epochs=max_num_epochs,
             fallback_used=True,
+            best_loss_tie_count=sum(1 for key, _ in incomplete_candidates if key[0] == selected_loss),
         )
     if error_candidates:
         error_candidates.sort(key=lambda item: item[0])
         trial = error_candidates[0][1]
+        selected_loss = error_candidates[0][0][0]
         return trial, _ray_trial_selection_metadata(
             trial,
             max_num_epochs=max_num_epochs,
             fallback_used=True,
             error_fallback_used=True,
+            best_loss_tie_count=sum(1 for key, _ in error_candidates if key[0] == selected_loss),
         )
     return None, _ray_trial_selection_metadata(
         None,
@@ -1499,7 +1577,7 @@ def _train_single_seed(
         shuffle=True,
         drop_last=False,
     )
-    valid_batch = DataLoader(valid_dataset, batch_size=batch_size, shuffle=True, drop_last=False)
+    valid_batch = DataLoader(valid_dataset, batch_size=batch_size, shuffle=False, drop_last=False)
 
     # Set model params
     model_kwargs = build_model_kwargs_from_config(model_name, model_config)
@@ -1916,8 +1994,7 @@ def optimize(
             task=task,
         )
         param_path = os.path.join(param_root, data_name, out_name)
-        with open(param_path, "wb") as f:
-            pickle.dump(saved_model_config, f)
+        param_file_sha256 = atomic_pickle_dump(saved_model_config, param_path)
 
         return {
             "best_trial": None,
@@ -1926,6 +2003,9 @@ def optimize(
             "param_hash": saved_model_config["param_hash"],
             "param_path": str(param_path),
             "split_path": str(split_path),
+            "param_file_sha256": param_file_sha256,
+            "split_sha256": metadata["split_sha256"],
+            "dataset_npz_sha256": metadata["dataset_npz_sha256"],
             "batch_policy": metadata["batch_policy"],
             "lr_policy": resolve_learning_rate_policy(saved_model_config.get("lr")),
             "search_profile": search_profile,
@@ -1950,6 +2030,10 @@ def optimize(
             "search_incomplete_fallback_used": saved_model_config.get("search_incomplete_fallback_used"),
             "search_selected_trial_status": saved_model_config.get("search_selected_trial_status"),
             "search_error_fallback_used": saved_model_config.get("search_error_fallback_used"),
+            "search_ray_selector": saved_model_config.get("search_ray_selector"),
+            "search_selected_candidate_id": saved_model_config.get("search_selected_candidate_id"),
+            "search_selected_trial_id": saved_model_config.get("search_selected_trial_id"),
+            "search_best_loss_tie_count": saved_model_config.get("search_best_loss_tie_count"),
             "search_execution_backend": saved_model_config["search_execution_backend"],
             "search_budget_class": saved_model_config["search_budget_class"],
             "legacy_grid_version": saved_model_config["legacy_grid_version"],
@@ -2146,6 +2230,10 @@ def optimize(
             incomplete_fallback_used=trial_selection_metadata["search_incomplete_fallback_used"],
             selected_trial_status=trial_selection_metadata["search_selected_trial_status"],
             error_fallback_used=trial_selection_metadata["search_error_fallback_used"],
+            ray_selector=trial_selection_metadata["search_ray_selector"],
+            selected_candidate_id=trial_selection_metadata["search_selected_candidate_id"],
+            selected_trial_id=trial_selection_metadata["search_selected_trial_id"],
+            best_loss_tie_count=trial_selection_metadata["search_best_loss_tie_count"],
             ray_trial_summary=ray_trial_summary,
         ),
     )
@@ -2153,8 +2241,7 @@ def optimize(
     if runtime_baseline_id is not None:
         saved_param_config["runtime_baseline_id"] = runtime_baseline_id
     saved_param_config["param_hash"] = compute_param_config_hash(saved_param_config)
-    with open(param_path, 'wb') as f:
-        pickle.dump(saved_param_config, f)
+    param_file_sha256 = atomic_pickle_dump(saved_param_config, param_path)
 
     LOGGER.info("Params saved to %s (repeat=%s)", param_path, search_repeat)
 
@@ -2165,6 +2252,9 @@ def optimize(
         "param_hash": saved_param_config["param_hash"],
         "param_path": str(param_path),
         "split_path": str(split_path),
+        "param_file_sha256": param_file_sha256,
+        "split_sha256": metadata["split_sha256"],
+        "dataset_npz_sha256": metadata["dataset_npz_sha256"],
         "batch_policy": metadata["batch_policy"],
         "lr_policy": resolve_learning_rate_policy(saved_param_config.get("lr")),
         "search_profile": search_profile,
@@ -2189,6 +2279,10 @@ def optimize(
         "search_incomplete_fallback_used": saved_param_config.get("search_incomplete_fallback_used"),
         "search_selected_trial_status": saved_param_config.get("search_selected_trial_status"),
         "search_error_fallback_used": saved_param_config.get("search_error_fallback_used"),
+        "search_ray_selector": saved_param_config.get("search_ray_selector"),
+        "search_selected_candidate_id": saved_param_config.get("search_selected_candidate_id"),
+        "search_selected_trial_id": saved_param_config.get("search_selected_trial_id"),
+        "search_best_loss_tie_count": saved_param_config.get("search_best_loss_tie_count"),
         "ray_trial_count": saved_param_config.get("ray_trial_count"),
         "ray_terminated_count": saved_param_config.get("ray_terminated_count"),
         "ray_error_count": saved_param_config.get("ray_error_count"),
@@ -2352,11 +2446,15 @@ def main():
                         policy_violations.append(f"{data_name}/{model_name}: {reason}")
                         continue
                     LOGGER.info("Params file already exists: %s/%s (reusing)", data_name, out_name)
+                    existing_param_file_sha256 = file_sha256(existing_param_path)
+                    existing_split_sha256 = file_sha256(split_path)
+                    dataset_npz_sha256 = file_sha256(args.dataset_npz) if args.dataset_npz is not None else None
                     reused_records.append(
                         {
                             "dataset": data_name,
                             "dataset_source": str(args.dataset_source),
                             "dataset_npz": None if args.dataset_npz is None else str(args.dataset_npz),
+                            "dataset_npz_sha256": dataset_npz_sha256,
                             "model": model_name,
                             "seed": SEED,
                             "search_seed_set": split_seeds,
@@ -2386,6 +2484,10 @@ def main():
                             "search_incomplete_fallback_used": existing_cfg.get("search_incomplete_fallback_used"),
                             "search_selected_trial_status": existing_cfg.get("search_selected_trial_status"),
                             "search_error_fallback_used": existing_cfg.get("search_error_fallback_used"),
+                            "search_ray_selector": existing_cfg.get("search_ray_selector"),
+                            "search_selected_candidate_id": existing_cfg.get("search_selected_candidate_id"),
+                            "search_selected_trial_id": existing_cfg.get("search_selected_trial_id"),
+                            "search_best_loss_tie_count": existing_cfg.get("search_best_loss_tie_count"),
                             "ray_trial_count": existing_cfg.get("ray_trial_count"),
                             "ray_terminated_count": existing_cfg.get("ray_terminated_count"),
                             "ray_error_count": existing_cfg.get("ray_error_count"),
@@ -2401,6 +2503,8 @@ def main():
                             "split_path": str(split_path),
                             "param_path": str(existing_param_path),
                             "param_hash": str(param_hash),
+                            "split_sha256": existing_split_sha256,
+                            "param_file_sha256": existing_param_file_sha256,
                             "runtime_baseline_id": existing_cfg.get("runtime_baseline_id", runtime_baseline_id),
                             "reason": "param artifact already exists",
                         }
@@ -2457,6 +2561,7 @@ def main():
                         "dataset": data_name,
                         "dataset_source": str(search_result["dataset_source"]),
                         "dataset_npz": search_result["dataset_npz"],
+                        "dataset_npz_sha256": search_result["dataset_npz_sha256"],
                         "model": model_name,
                         "seed": SEED,
                         "search_seed_set": _fixed_search_seed_set(args.search_repeat, SEED),
@@ -2469,6 +2574,8 @@ def main():
                         "split_path": str(search_result["split_path"]),
                         "param_path": str(search_result["param_path"]),
                         "param_hash": str(search_result["param_hash"]),
+                        "split_sha256": search_result["split_sha256"],
+                        "param_file_sha256": search_result["param_file_sha256"],
                         "batch_policy": search_result["batch_policy"],
                         "lr_policy": search_result["lr_policy"],
                         "search_profile": search_result["search_profile"],
@@ -2493,6 +2600,10 @@ def main():
                         "search_incomplete_fallback_used": search_result["search_incomplete_fallback_used"],
                         "search_selected_trial_status": search_result["search_selected_trial_status"],
                         "search_error_fallback_used": search_result["search_error_fallback_used"],
+                        "search_ray_selector": search_result.get("search_ray_selector"),
+                        "search_selected_candidate_id": search_result.get("search_selected_candidate_id"),
+                        "search_selected_trial_id": search_result.get("search_selected_trial_id"),
+                        "search_best_loss_tie_count": search_result.get("search_best_loss_tie_count"),
                         "ray_trial_count": search_result.get("ray_trial_count"),
                         "ray_terminated_count": search_result.get("ray_terminated_count"),
                         "ray_error_count": search_result.get("ray_error_count"),
