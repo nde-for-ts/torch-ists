@@ -47,7 +47,7 @@ from _common import (
     default_method_for_model,
     describe_search_profile,
     infer_param_search_profile,
-    LEGACY_ICLR2024_SEARCH_PROFILE,
+    is_pre_integrity_param_artifact,
     normalize_runtime_baseline_id,
     normalize_search_profile,
     omit_none_runtime_baseline_id,
@@ -291,7 +291,8 @@ def _validate_param_search_profile(
                 f"{param_path} has capacity_policy={capacity_policy!r}. "
                 "Regenerate params with scripts/param_search.py --search-policy constrained."
             )
-    if not (allow_legacy_search_profile and actual == LEGACY_ICLR2024_SEARCH_PROFILE):
+    legacy_integrity_shape = is_pre_integrity_param_artifact(model_config)
+    if not (allow_legacy_search_profile and legacy_integrity_shape):
         validate_param_artifact_identity(
             model_config,
             data_name=expected_data_name,

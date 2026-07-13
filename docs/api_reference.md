@@ -455,6 +455,9 @@ def preprocess(
     channel_sync: bool = False,
     mechanism: str = "MCAR",
     model_name: Optional[str] = None,
+    timestamps: Optional[Any] = None,
+    timestamp_delta_scale: Optional[float] = None,
+    missingness_reference: Optional[Any] = None,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
 ```
 
@@ -470,6 +473,9 @@ def preprocess(
 | `channel_sync` | `bool` | `False` | If `True`, synchronize injected missing positions across channels. |
 | `mechanism` | `str` | `"MCAR"` | Missingness mechanism (`MCAR`, `MAR`, `MNAR`, `BLOCK`, `BURST`). `MAR`, `MNAR`, `BLOCK`, and `BURST` are experimental. |
 | `model_name` | `Optional[str]` | `None` | Optional model key. When set, `interpolate` and `use_intensity` default to `get_data_config(model_name)`. Explicit kwargs still override. |
+| `timestamps` | `Optional[Any]` | `None` | Optional timestamp grid `[N, L]` or `[L]` used for delta-channel construction. Continuous-time solver grids remain normalized-index unless a model documents otherwise. |
+| `timestamp_delta_scale` | `Optional[float]` | `None` | Positive scale for timestamp-based deltas. The scripts use the train split median positive timestamp step. |
+| `missingness_reference` | `Optional[Any]` | `None` | Optional reference array used by non-MCAR missingness mechanisms such as MAR/MNAR; script workflows pass train-split reference statistics. |
 
 #### Returns
 
@@ -497,6 +503,8 @@ X_missing, X_mask, X_delta, coeffs = preprocess(
 ```
 
 When `model_name` is set, `interpolate` and `use_intensity` default to `get_data_config(model_name)` (explicit kwargs override). When omitted, defaults are `interpolate="cubic"` and `use_intensity=True`.
+
+Timestamp kwargs affect the returned `X_delta` channel and metadata-aligned preprocessing. They do not by themselves change the solver time grid used by continuous-time backbones.
 
 #### Interpolation Modes
 
@@ -794,13 +802,50 @@ Behavior notes:
 - `forward(..., return_aux_loss=True)` returns `(prediction, aux_loss)` for auxiliary-loss backbones.
 - Non-finite predictions raise `RuntimeError`.
 
-### 6.3 Using Custom Models
+### 6.3 `ists_layer`
+
+`ists_layer` is the exported low-level backbone wrapper used inside `ists_model`. It creates the selected packaged sequence model and returns hidden/backbone features before any task head is applied.
+
+```python
+class ists_layer(nn.Module):
+    def __init__(
+        self,
+        model_name: str = "cnn",
+        input_dim: int = 3,
+        seq_len: int = 128,
+        hidden_dim: int = 32,
+        hidden_hidden_dim: int = 32,
+        num_layers: int = 1,
+        num_hidden_layers: int = 1,
+        head_depth: Optional[int] = None,
+        flow_depth: Optional[int] = None,
+        flow_num_layers: Optional[int] = None,
+        bidirectional: bool = False,
+        dropout: float = 0.1,
+        use_intensity: Optional[bool] = None,
+        method: Optional[str] = None,
+        file: Optional[str] = None,
+        device: str = "cpu",
+        model_params: Optional[Dict[str, Any]] = None,
+        imputation_strategy: str = "zero",
+    ):
+```
+
+Forward call:
+
+```python
+def forward(seq, coeffs=None, **kwargs)
+```
+
+Returns `(out, hn)` for ordinary backbones and `(out, hn, loss)` for auxiliary-loss backbones. `seq` must be `[N, 3, L, D]`; `coeffs` should come from `preprocess(...)` for coefficient-driven models and may be `None` for direct sequence baselines.
+
+### 6.4 Using Custom Models
 
 Use custom models from user-owned training code. The included scripts accept only packaged model names. Reuse the packaged data loading, split utilities, and preprocessing; treat the packaged model-name list as fixed.
 
 See [Custom Model Guide](custom_model_guide.md) for the wrapper pattern.
 
-### 6.4 Depth Parameters
+### 6.5 Depth Parameters
 
 `head_depth` and `flow_depth` are different knobs.
 
@@ -820,7 +865,7 @@ Compatibility mapping:
 - legacy `num_hidden_layers` is interpreted as `head_depth`.
 - legacy `flow_num_layers` is interpreted as `flow_depth`.
 
-### 6.5 Command-Line Scripts
+### 6.6 Command-Line Scripts
 
 The scripts `scripts/set_splits.py`, `scripts/param_search.py`, and `scripts/model_run.py` are CLI entry points for the benchmark workflow. Helper modules under `scripts/` support those entry points and are documented in the scripts reference. They are not installed as wheel console commands.
 

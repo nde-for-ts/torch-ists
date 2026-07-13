@@ -470,6 +470,23 @@ def validate_param_artifact_identity(
         raise ValueError(f"{context} artifact identity mismatch ({details}).")
 
 
+_PARAM_ARTIFACT_INTEGRITY_SENTINELS = (
+    "artifact_identity",
+    "param_hash",
+    "search_contract",
+)
+
+
+def is_pre_integrity_param_artifact(model_config: dict | None) -> bool:
+    """Return True for pre-0.3.2 param artifacts that lack integrity metadata."""
+    if not isinstance(model_config, dict) or not model_config:
+        return False
+    return all(
+        _metadata_value_missing(model_config.get(field))
+        for field in _PARAM_ARTIFACT_INTEGRITY_SENTINELS
+    )
+
+
 def validate_param_artifact_metadata(
     model_config: dict | None,
     *,
@@ -518,7 +535,8 @@ def validate_param_artifact_metadata(
         for field in required_fields
         if _metadata_value_missing(model_config.get(field))
     ]
-    if missing_fields and not (allow_legacy_search_profile and profile == LEGACY_ICLR2024_SEARCH_PROFILE):
+    legacy_integrity_shape = is_pre_integrity_param_artifact(model_config)
+    if missing_fields and not (allow_legacy_search_profile and legacy_integrity_shape):
         missing = ", ".join(missing_fields)
         raise ValueError(
             f"{context} is missing required search detail field(s): {missing}. "
@@ -531,7 +549,7 @@ def validate_param_artifact_metadata(
             "Refusing silent learning-rate fallback for saved params; regenerate "
             "the artifact with scripts/param_search.py."
         )
-    if not (allow_legacy_search_profile and profile == LEGACY_ICLR2024_SEARCH_PROFILE):
+    if not (allow_legacy_search_profile and legacy_integrity_shape):
         expected_hash = compute_param_config_hash(model_config)
         if str(model_config.get("param_hash")) != expected_hash:
             raise ValueError(

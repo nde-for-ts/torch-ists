@@ -142,6 +142,7 @@ This is a bounded smoke run; the full defaults (`--num-samples 50 --max-num-epoc
 | `--param-root` | `str` | `params` | Output parameter artifact root. |
 | `--contract-dir` | `str` | `evidence` | Directory for JSON run logs (stage = `search`). |
 | `--run-id` | `str` | (auto) | Run identifier. |
+| `--runtime-baseline-id` | `str` | `None` | Optional caller-supplied flat run label. Leave unset for shared benchmark artifacts. |
 | `--task` | `{classification}` | `classification` | Task head. Only `classification` is stable. |
 | `--targets-root` | `str` | `targets` | Root directory for dataset target bundles when a task uses external targets. |
 
@@ -159,7 +160,7 @@ Parameter search runs the standard search without synthetic missingness injectio
 ### Output
 
 - **Param file** (pickle): `<param-root>/<dataset>/<dataset>_<model>` with optional capacity-controlled and repeat suffixes, containing the selected hyperparameters, effective model parameters, and run details. Older `_cv` aggregated artifacts are read as a compatibility fallback.
-- **Run log**: `<contract-dir>/<run-id>/search.manifest.json` (records, reused records, skipped, summary). Executed records include resolved batch size, search settings, and runtime provenance.
+- **Run log**: `<contract-dir>/<run-id>/search.manifest.json` (records, reused records, skipped, summary). Executed records include resolved batch size, search settings, and `runtime_baseline_id` only when explicitly supplied.
 
 ### Workflow Dependencies
 
@@ -219,6 +220,7 @@ PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/model_run.py \
 | `--out-root` | `str` | `out` | Output prediction artifact root. |
 | `--contract-dir` | `str` | `evidence` | Directory for JSON run logs (stage = `run`). |
 | `--run-id` | `str` | (auto) | Run identifier. |
+| `--runtime-baseline-id` | `str` | `None` | Optional caller-supplied flat run label. Leave unset for shared benchmark artifacts. |
 | `--task` | `{classification}` | `classification` | Task head. Only `classification` is stable. |
 | `--targets-root` | `str` | `targets` | Root directory for dataset target bundles. |
 
@@ -260,14 +262,20 @@ The task and metric tables in this document describe `ists_model` API outputs. T
 
 ### Output
 
-- **Prediction file** (pickle): standard/missingness `<out-root>/<dataset>/<missing_rate>/<dataset>_<missing_rate>_<model>_<seed>`; robustness `<out-root>/<dataset>/robustness/<dataset>_robustness_<model>_<seed>__rates_<...>__types_<...>__sync_<...>`. The robustness path has **no** `<missing_rate>` segment — the test axes are encoded in the filename suffix. Output metadata includes runtime provenance; classification metrics use schema version 2.
-- **Run log**: `<contract-dir>/<run-id>/run.manifest.json`. Executed records include resolved batch size and runtime provenance.
+- **Prediction file** (pickle): standard/missingness `<out-root>/<dataset>/<missing_rate>/<dataset>_<missing_rate>_<model>_<seed>`; robustness `<out-root>/<dataset>/robustness/<dataset>_robustness_<model>_<seed>__rates_<...>__types_<...>__sync_<...>`. The robustness path has **no** `<missing_rate>` segment — the test axes are encoded in the filename suffix. Output metadata includes the output contract, prediction identity, and classification metrics schema version 2; `runtime_baseline_id` appears only when explicitly supplied.
+- **Run log**: `<contract-dir>/<run-id>/run.manifest.json`. Executed records include resolved batch size, output-contract checks, and `runtime_baseline_id` only when explicitly supplied.
 
 ### Workflow Dependencies
 
 Requires:
 - Split files from `set_splits.py` for every dataset at every reported evaluation seed (`--seed 0..4` for the standard evaluation; the `param_search.py` step additionally needs the configured search seed, default `--seed 42`).
 - Param files from `param_search.py --search-policy` and `--search-repeat` matching `model_run.py --param-policy` and `--param-repeat`. The run step checks that the parameter file matches the requested run before reuse.
+
+### Artifact Reuse Boundaries
+
+- Split artifacts keep the stable `train/valid/test` pickle format and are safe to reuse when the dataset and split path are intentional.
+- Param artifacts written with `0.3.2+` integrity metadata are validated by identity, hash, search policy, repeat policy, and search profile. Pre-`0.3.2` param artifacts lack those integrity fields; reuse is accepted only with the explicit legacy audit flag and still requires a saved `lr` plus matching requested search axes. Partial integrity metadata and bad hashes are rejected.
+- Output artifacts are reused only when `model_run.py --check` finds the same output-contract hash. Artifacts predating the `0.3.5` timestamp summary or `0.4.0` training-loop policy contract are intentionally recomputed with `--no-check`; there is no silent cross-contract output reuse.
 
 ---
 
