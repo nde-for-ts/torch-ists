@@ -1,4 +1,4 @@
-"""Native (stribor-free) flow operators for runtime package."""
+"""Native flow operators for the runtime package."""
 
 from __future__ import annotations
 

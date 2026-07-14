@@ -366,49 +366,11 @@ def _validate_param_search_profile(
 
 
 def _param_search_contract_metadata(model_config: dict, search_profile: str) -> dict:
-    contract = describe_search_profile(search_profile)
-    metadata = {
+    del search_profile
+    return {
         "search_policy": _infer_cli_search_policy(model_config),
         "search_repeat": _infer_cli_search_repeat(model_config),
-        "search_contract": model_config.get("search_contract", contract["search_contract"]),
-        "search_family": model_config.get("search_family", contract["search_family"]),
-        "public_search_name": model_config.get("public_search_name", contract["public_search_name"]),
-        "search_profile_visibility": model_config.get(
-            "search_profile_visibility",
-            contract["search_profile_visibility"],
-        ),
     }
-    for key in (
-        "search_policy_axis",
-        "capacity_policy",
-        "capacity_target",
-        "capacity_target_name",
-        "capacity_label",
-        "capacity_tolerance",
-        "capacity_lower",
-        "capacity_upper",
-        "capacity_param_count",
-        "capacity_distance",
-        "capacity_in_band",
-        "capacity_overshoot",
-        "capacity_undershoot",
-        "capacity_hidden_dim",
-        "capacity_depth_level",
-        "capacity_flow_depth",
-        "params_at_min_carrier",
-        "params_at_max_carrier",
-        "candidate_count",
-        "capacity_config",
-        "search_algorithm",
-        "search_algorithm_seed",
-        "search_num_samples",
-        "search_max_num_epochs",
-        "search_execution_backend",
-        "search_budget_class",
-    ):
-        if key in model_config:
-            metadata[key] = model_config.get(key)
-    return metadata
 
 
 def _parse_missing_rates(raw):
@@ -875,7 +837,7 @@ def parse_cli_args():
         "--runtime-baseline-id",
         type=str,
         default=None,
-        help="Optional user-provided run label copied into manifests and output metadata.",
+        help="Optional user-provided run label. Leave unset for shared artifacts.",
     )
     parser.add_argument(
         "--manifest-existing-policy",
@@ -962,7 +924,7 @@ def parse_cli_args():
         "--model-scope-variant",
         choices=["active"],
         default="active",
-        help="Model scope for this package runtime.",
+        help=argparse.SUPPRESS,
     )
     args = parser.parse_args()
     if args.param_mode_alias is not None:

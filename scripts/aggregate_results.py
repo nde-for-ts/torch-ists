@@ -20,6 +20,11 @@ REDACTED_FIELD_FRAGMENTS = (
     "architecture_axes",
     "capacity_config",
     "profile",
+    "public_search_name",
+    "search_algorithm_policy",
+    "search_contract",
+    "search_family",
+    "grid_version",
 )
 REDACTED_VALUE_FRAGMENTS = (
     "/home/",

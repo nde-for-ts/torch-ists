@@ -63,6 +63,7 @@ class SourceODEHandler(BaseHandler):
 
     @property
     def returns_loss(self) -> bool:
+        # The layer resolves model-specific auxiliary losses from model policy.
         return False
 
     def create_model(self, model_name: str, config: Dict[str, Any], device: str) -> nn.Module:

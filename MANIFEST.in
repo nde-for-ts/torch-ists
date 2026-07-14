@@ -1,0 +1,3 @@
+include PACKAGE_STATUS.json
+recursive-include scripts *.py
+recursive-include docs *.md

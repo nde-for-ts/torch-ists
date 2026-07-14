@@ -25,7 +25,6 @@
 | EXIT | `exit` | `cde/exit/` | [sheoyon-jhin/EXIT](https://github.com/sheoyon-jhin/EXIT) | Apache-2.0 |
 | LEAP | `leap` | `cde/leap/` | [alflsowl12/LEAP](https://github.com/alflsowl12/LEAP) | None |
 | TorchDiffEqPack | `exit`, `leap` | `cde/{exit,leap}/_controldiffeq/TorchDiffEqPack/` | [juntang-zhuang/TorchDiffEqPack](https://github.com/juntang-zhuang/TorchDiffEqPack) | MIT |
-| NeuralFlow NFE backend (optional) | `neuralflow-r/g/c` when `flow_backend='nfe'` | `flow/_neural_flows/` | [mbilos/neural-flows-experiments](https://github.com/mbilos/neural-flows-experiments) | None |
 
 ## MIT notices for source ODE adaptations
 
@@ -61,9 +60,7 @@ The above copyright notice and this permission notice shall be included in all c
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-**None** means the upstream publishes no LICENSE file. Such code is all-rights-reserved by default; confirm redistribution rights with the original authors. Included files preserve the upstream URL and author in their headers (the NeuralFlow snapshot records source details in `flow/_neural_flows/PROVENANCE.json`).
-
-NeuralFlow defaults to the package's own MIT-licensed operators in `flow/operators_native.py`. The NFE snapshot is the optional backend selected only via `flow_backend='nfe'` (requires manual `stribor` install) and is the only path that runs the no-license NFE code; its pinned commit and file hashes are recorded in `flow/_neural_flows/PROVENANCE.json`.
+**None** means the upstream publishes no LICENSE file. Such code is all-rights-reserved by default; confirm redistribution rights with the original authors. Included files preserve the upstream URL and author in their headers.
 
 ## Runtime dependencies
 
@@ -77,7 +74,7 @@ Installed separately, each under its own license (not bundled):
 ## Notes
 
 - The SDE / Stable Neural SDE modules (`sde/`) are the author's own ICLR 2024 work ([yongkyung-oh/Stable-Neural-SDEs](https://github.com/yongkyung-oh/Stable-Neural-SDEs)), same MIT license — not third-party.
-- When updating included code, keep its upstream header and refresh `PROVENANCE.json` for pinned snapshots.
+- When updating included code, keep its upstream header and source attribution current.
 - Re-implemented models that copy no upstream code are credited in the [Model Reference](model_reference.md), not here.
 
 ---

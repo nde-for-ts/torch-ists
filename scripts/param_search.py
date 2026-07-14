@@ -62,6 +62,7 @@ from _common import (
     resolve_model_search_space,
     SINGLE_SEARCH_REPEAT,
     STANDARD_SEARCH_POLICY,
+    strip_internal_search_artifact_metadata,
     validate_param_artifact_identity,
     validate_param_artifact_metadata,
 )
@@ -464,7 +465,7 @@ def parse_cli_args():
         "--runtime-baseline-id",
         type=str,
         default=None,
-        help="Optional user-provided run label copied into manifests and parameter metadata.",
+        help="Optional user-provided run label. Leave unset for shared artifacts.",
     )
     parser.add_argument(
         "--manifest-existing-policy",
@@ -508,7 +509,7 @@ def parse_cli_args():
         "--model-scope-variant",
         choices=["active"],
         default="active",
-        help="Model scope for this package runtime.",
+        help=argparse.SUPPRESS,
     )
     args = parser.parse_args()
     if args.search_mode_alias is not None:
@@ -2078,7 +2079,10 @@ def optimize(
             task=task,
         )
         param_path = os.path.join(param_root, data_name, out_name)
-        atomic_pickle_dump(saved_model_config, param_path)
+        atomic_pickle_dump(
+            strip_internal_search_artifact_metadata(saved_model_config),
+            param_path,
+        )
 
         return {
             "best_trial": None,
@@ -2320,7 +2324,10 @@ def optimize(
     saved_param_config["timestamp_summary"] = metadata["timestamp_summary"]
     if runtime_baseline_id is not None:
         saved_param_config["runtime_baseline_id"] = runtime_baseline_id
-    atomic_pickle_dump(saved_param_config, param_path)
+    atomic_pickle_dump(
+        strip_internal_search_artifact_metadata(saved_param_config),
+        param_path,
+    )
 
     LOGGER.info("Params saved to %s (repeat=%s)", param_path, search_repeat)
 

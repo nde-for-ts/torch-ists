@@ -1,4 +1,4 @@
-"""Variational SDE model configs for release runtime."""
+"""Variational SDE model configs for the packaged runtime."""
 
 from typing import Dict
 

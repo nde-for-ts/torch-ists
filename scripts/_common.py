@@ -35,6 +35,19 @@ DEFAULT_SEARCH_CONTRACT_NAME = "model-specific-default"
 HISTORICAL_SEARCH_CONTRACT_NAME = "historical-reproducibility"
 PUBLIC_SEARCH_PROFILE_VISIBILITY = "public"
 COMPATIBILITY_SEARCH_PROFILE_VISIBILITY = "compatibility"
+INTERNAL_SEARCH_ARTIFACT_KEYS = frozenset(
+    {
+        "search_profile",
+        "search_contract",
+        "search_family",
+        "public_search_name",
+        "search_profile_visibility",
+        "search_algorithm_policy",
+        "search_grid_version",
+        "legacy_grid_version",
+        "architecture_axes",
+    }
+)
 
 _SEARCH_POLICY_ALIASES = {
     "default": MODEL_NATIVE_SEARCH_PROFILE,
@@ -338,8 +351,7 @@ def normalize_search_profile(raw: str | None) -> str:
     try:
         return _SEARCH_POLICY_ALIASES[normalized]
     except KeyError as exc:
-        allowed = ", ".join(sorted(_SEARCH_POLICY_GRIDS))
-        raise ValueError(f"Unknown search profile: {raw!r}. Allowed: {allowed}.") from exc
+        raise ValueError("Unsupported search settings.") from exc
 
 
 def describe_search_profile(raw: str | None) -> dict:
@@ -368,7 +380,7 @@ def describe_search_profile(raw: str | None) -> dict:
 
 
 def infer_param_search_profile(model_config: dict | None) -> str:
-    """Infer profile for saved params; missing profile is no longer implicit."""
+    """Infer the search settings needed to read a saved parameter artifact."""
     if not model_config:
         raise ValueError(
             "Param artifact is empty or missing; cannot infer search_profile. "
@@ -376,12 +388,34 @@ def infer_param_search_profile(model_config: dict | None) -> str:
         )
     raw = model_config.get("search_profile")
     if raw in {None, ""}:
+        if _is_semantic_param_artifact(model_config):
+            return DEFAULT_SEARCH_PROFILE
         raise ValueError(
             "Param artifact is missing required field 'search_profile'. "
             "Regenerate params with the current default search, or pass the hidden "
             "compatibility flag only for intentional legacy artifact audits."
         )
     return normalize_search_profile(raw)
+
+
+def _is_semantic_param_artifact(model_config: dict | None) -> bool:
+    if not isinstance(model_config, dict):
+        return False
+    return (
+        isinstance(model_config.get("artifact_identity"), dict)
+        and isinstance(model_config.get("effective_params"), dict)
+        and not _metadata_value_missing(model_config.get("search_policy"))
+        and not _metadata_value_missing(model_config.get("search_repeat"))
+    )
+
+
+def strip_internal_search_artifact_metadata(model_config: dict) -> dict:
+    """Return the persisted parameter view without compatibility-only labels."""
+    return {
+        key: value
+        for key, value in dict(model_config).items()
+        if key not in INTERNAL_SEARCH_ARTIFACT_KEYS
+    }
 
 
 def _metadata_value_missing(value) -> bool:
@@ -553,7 +587,10 @@ def validate_param_artifact_metadata(
 
     raw_profile = model_config.get("search_profile")
     legacy_profile_missing = _metadata_value_missing(raw_profile)
-    if legacy_profile_missing:
+    semantic_artifact = legacy_profile_missing and _is_semantic_param_artifact(model_config)
+    if semantic_artifact:
+        profile = DEFAULT_SEARCH_PROFILE
+    elif legacy_profile_missing:
         if not allow_legacy_search_profile:
             raise ValueError(
                 f"{context} is missing required field 'search_profile'. "
@@ -566,20 +603,13 @@ def validate_param_artifact_metadata(
 
     required_fields = [
         "artifact_identity",
-        "search_contract",
-        "search_family",
-        "public_search_name",
-        "search_profile_visibility",
         "search_policy",
         "search_repeat",
-        "search_algorithm_policy",
         "search_algorithm",
         "search_algorithm_seed",
         "search_budget_class",
-        "search_execution_backend",
         "search_max_num_epochs",
         "search_num_samples",
-        "architecture_axes",
         "effective_params",
     ]
     missing_fields = [
@@ -935,11 +965,23 @@ def resolve_effective_param_config(
 
 def build_model_kwargs_from_config(model_name: str, model_config: dict) -> dict:
     """Build kwargs accepted by ists_model/ists_classifier from a saved config."""
-    effective = resolve_effective_param_config(
-        model_name,
-        model_config,
-        search_profile=infer_param_search_profile(model_config),
-    )
+    stored_effective = model_config.get("effective_params")
+    required_effective_fields = {
+        "hidden_dim",
+        "num_layers",
+        "num_hidden_layers",
+        "head_depth",
+        "flow_num_layers",
+        "flow_depth",
+    }
+    if isinstance(stored_effective, dict) and required_effective_fields.issubset(stored_effective):
+        effective = dict(stored_effective)
+    else:
+        effective = resolve_effective_param_config(
+            model_name,
+            model_config,
+            search_profile=infer_param_search_profile(model_config),
+        )
     hidden_dim = int(effective["hidden_dim"])
     return {
         "hidden_dim": hidden_dim,

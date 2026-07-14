@@ -119,8 +119,10 @@ _OMITTED_MANIFEST_KEYS = frozenset(
         "capacity_target_name",
         "legacy_grid_version",
         "public_search_name",
+        "search_algorithm_policy",
         "search_contract",
         "search_family",
+        "search_grid_version",
     }
 )
 

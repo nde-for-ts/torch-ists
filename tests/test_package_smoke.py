@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import numpy as np
@@ -14,9 +15,14 @@ from torch_ists.split_utils import make_stratified_splits
 
 
 def test_package_imports_and_version():
-    assert isinstance(torch_ists.__version__, str)
-    assert torch_ists.__version__
-    assert "cnn" in get_active_model_list()
+    package_status = json.loads(
+        (Path(__file__).resolve().parents[1] / "PACKAGE_STATUS.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert torch_ists.__version__ == package_status["package_version"]
+    assert get_active_model_list() == package_status["included_models"]
     assert "interpolation" in get_data_config("cnn")
 
 
@@ -36,6 +42,19 @@ def test_basic_classifier_forward_cpu():
 
     assert logits.shape == (4, 2)
     assert torch.isfinite(logits).all()
+
+
+def test_distributed_flow_backend_is_native_only():
+    from torch_ists.module.flow import resolve_flow_backend
+
+    flow_root = Path(torch_ists.__file__).resolve().parent / "module" / "flow"
+    assert resolve_flow_backend(None) == "native"
+    assert resolve_flow_backend("default") == "native"
+    with pytest.raises(ValueError, match="Unsupported flow backend"):
+        resolve_flow_backend("nfe")
+    assert not (flow_root / "_nfe_guard.py").exists()
+    assert not (flow_root / "_neural_flows").exists()
+    assert not (flow_root / "operators_nfe.py").exists()
 
 
 @pytest.mark.parametrize("model_name", ["tlstm", "plstm", "tglstm"])

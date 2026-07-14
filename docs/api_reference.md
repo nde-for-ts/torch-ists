@@ -815,7 +815,7 @@ Source ODE model parameters:
 | Model | `model_params` | Runtime behavior |
 |---|---|---|
 | `gru-ode-bayes` | `step_size=0.05`, `p_hidden=hidden_dim`, `prep_hidden=4`, `observation_noise_std=0.01`, `mixing=1.0`, `auxiliary_weight=1e-3` | Uses Euler integration only. `step_size` bounds every observation-interval sub-step; the auxiliary term combines pre-jump likelihood and post-jump KL per observed element. |
-| `latentode` | `observation_std=0.01`, `kl_weight=1.0`, `auxiliary_weight=1e-4` | Uses the selected ODE solver for reverse recognition and generative decoding; the auxiliary term combines masked reconstruction likelihood and initial-state KL. |
+| `latentode` | `observation_std=0.01`, `kl_weight=1.0`, `auxiliary_weight=1e-4` | Uses the selected ODE solver for reverse recognition and generative decoding; padded positions after a sample's last observation do not affect its posterior or auxiliary term, and the decoded state is held at the last valid step. The auxiliary term combines masked reconstruction likelihood and initial-state KL. |
 | `njode` | `step_size=0.05`, `loss_weight=0.5`, `auxiliary_weight=1.0`, `loss_eps=1e-10`, `max_substeps=10000` | Uses bounded Euler sub-steps only. Missing coordinates are filled from the pre-jump readout, observed events update the hidden state, and the auxiliary term is normalized by sample and observation date. |
 
 The defaults above keep method-specific losses on a practical scale when they are added to a task objective. Applications may tune the weights with the rest of the training configuration.
@@ -830,6 +830,8 @@ LatentSDE model parameters:
 | `recognition_hidden` | `hidden_dim` | Width of the reverse mask-aware posterior encoder. |
 | `method`, `adjoint` | `"euler"`, `False` | Euler/direct is the default. `milstein` and direct `srk` are opt-in; `srk` with adjoint differentiation is rejected. |
 | `dt` or `step_size` | inferred from the shared grid | Positive fixed solver step. The default is bounded by the smallest positive grid gap and `0.01`. |
+
+For variable-length batches, LatentSDE integrates only through the longest valid sample. Each sample's path KL is evaluated at its own last valid step, and its returned latent path is held constant after that step. Padding-only timestamps are ignored.
 
 ### 6.3 `ists_layer`
 
@@ -887,7 +889,7 @@ Current defaults:
 - `neuralflow`: `flow_depth=3` by default
 - `dualdynamics`: `flow_depth=2` by default
 - `flowpath`: `flow_depth=1` by default
-- `neuralflow` uses the residual-flow variant by default as a flow-only row. `dualdynamics` and `flowpath` are CDE/control-path rows. Optional `NFE`/`stribor` backends are not installed by default.
+- `neuralflow` uses the residual-flow variant by default as a flow-only row. `dualdynamics` and `flowpath` are CDE/control-path rows. Distributed flow models use the package's native operators.
 - Model names use residual-flow defaults: `neuralflow`, `dualdynamics`, and `flowpath`. Explicit `-r/-g/-c` variants remain accepted variants.
 
 Compatibility mapping:
