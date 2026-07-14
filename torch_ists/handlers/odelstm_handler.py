@@ -200,7 +200,7 @@ class ODELSTMHandler(BaseHandler):
         if int(solver_runtime["fixed_step_count"]) != int(getattr(model, "fixed_step_count", 3)):
             raise ValueError("ode-lstm fixed_step_count is fixed at model creation.")
         data = self.preprocess_input(seq, times)
-        out, hn = model(data["x"], data["seq_ts"], data["seq_mask"])
+        out, hn = model(data["x"], data["seq_delta"], data["seq_mask"])
 
         if out.dim() == 2:
             out = out.unsqueeze(1)

@@ -97,7 +97,7 @@ def parse_cli_args():
 
 def main() -> int:
     _ensure_repo_on_path()
-    from script_chain_contracts import file_sha256, generate_run_id, write_manifest
+    from script_chain_contracts import file_sha256, generate_run_id, portable_artifact_reference, write_manifest
 
     args = parse_cli_args()
     run_id = args.run_id or generate_run_id("run")
@@ -137,10 +137,10 @@ def main() -> int:
                 "dataset": args.dataset_name,
                 "seed": int(args.seed),
                 "dataset_source": args.dataset_source,
-                "dataset_npz": None if args.dataset_npz is None else str(args.dataset_npz),
+                "dataset_npz": portable_artifact_reference(args.dataset_npz, root=True),
                 "dataset_npz_sha256": dataset_npz_sha256,
                 "timestamp_summary": timestamp_summary,
-                "split_path": str(split_path),
+                "split_path": portable_artifact_reference(split_path),
                 "split_sha256": split_sha256,
                 "reuse_existing": bool(reuse_existing),
                 "dry_run": bool(args.dry_run),
@@ -156,12 +156,12 @@ def main() -> int:
             "status": "pass",
             "run_id": run_id,
             "dataset_source": args.dataset_source,
-            "dataset_npz": None if args.dataset_npz is None else str(args.dataset_npz),
+            "dataset_npz": portable_artifact_reference(args.dataset_npz, root=True),
             "dataset_npz_sha256": dataset_npz_sha256,
             "timestamp_summary": timestamp_summary,
-            "split_path": str(split_path),
+            "split_path": portable_artifact_reference(split_path),
             "split_sha256": split_sha256,
-            "split_manifest_path": str(manifest_path),
+            "split_manifest_path": portable_artifact_reference(manifest_path),
             "reuse_existing": bool(reuse_existing),
             "dry_run": bool(args.dry_run),
             "counts": {
@@ -183,7 +183,7 @@ def main() -> int:
                 "dataset": args.dataset_name,
                 "seed": int(args.seed),
                 "dataset_source": args.dataset_source,
-                "dataset_npz": None if args.dataset_npz is None else str(args.dataset_npz),
+                "dataset_npz": portable_artifact_reference(args.dataset_npz, root=True),
                 "split_path": "",
                 "dry_run": bool(args.dry_run),
                 "counts": {"train": 0, "valid": 0, "test": 0},
@@ -196,7 +196,7 @@ def main() -> int:
                     "status": "fail",
                     "run_id": run_id,
                     "reason": str(exc),
-                    "split_manifest_path": str(fail_manifest_path),
+                    "split_manifest_path": portable_artifact_reference(fail_manifest_path),
                 },
                 indent=2,
             )

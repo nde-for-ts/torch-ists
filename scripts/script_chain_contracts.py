@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import pickle
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
@@ -114,6 +115,82 @@ def atomic_write_text(path: str | Path, text: str, *, encoding: str = "utf-8") -
     return file_sha256(path)
 
 
+
+_ABSOLUTE_PATH_TOKEN_RE = re.compile(
+    r"(?<![A-Za-z0-9_])(?:[A-Za-z]:[\\/]|/)[^\"'\s,;]+"
+)
+_OMITTED_MANIFEST_KEYS = frozenset(
+    {
+        "architecture_axes",
+        "capacity_config",
+        "capacity_metadata",
+        "capacity_policy",
+        "capacity_target",
+        "capacity_target_name",
+        "legacy_grid_version",
+        "public_search_name",
+        "search_contract",
+        "search_family",
+    }
+)
+
+
+def portable_artifact_reference(value: Any, *, root: bool = False) -> Any:
+    """Return a useful artifact reference without recording a machine-local root."""
+    if value in {None, ""}:
+        return value
+    text = str(value)
+    windows_absolute = bool(re.match(r"^[A-Za-z]:[\\/]", text) or text.startswith("\\\\"))
+    path = Path(text)
+    if not path.is_absolute() and not windows_absolute:
+        return text.replace("\\", "/")
+    if path.is_absolute():
+        try:
+            relative = path.resolve().relative_to(Path.cwd().resolve())
+        except (OSError, ValueError):
+            relative = None
+        if relative is not None:
+            return relative.as_posix()
+    parts = [part for part in text.replace("\\", "/").split("/") if part and not part.endswith(":")]
+    if not parts:
+        return ""
+    keep = 1 if root else min(3, len(parts))
+    return "/".join(parts[-keep:])
+
+
+def _portable_text(value: str) -> str:
+    return _ABSOLUTE_PATH_TOKEN_RE.sub(
+        lambda match: str(portable_artifact_reference(match.group(0))),
+        value,
+    )
+
+
+def _public_manifest_projection(value: Any, *, key: str | None = None) -> Any:
+    if isinstance(value, dict):
+        projected = {}
+        for raw_key, raw_value in value.items():
+            normalized_key = str(raw_key).lower()
+            if (
+                normalized_key in _OMITTED_MANIFEST_KEYS
+                or "profile" in normalized_key
+                or "backend" in normalized_key
+                or (normalized_key.startswith("schema_") and normalized_key.endswith("version"))
+            ):
+                continue
+            projected[raw_key] = _public_manifest_projection(raw_value, key=normalized_key)
+        return projected
+    if isinstance(value, list):
+        return [_public_manifest_projection(item, key=key) for item in value]
+    if isinstance(value, tuple):
+        return [_public_manifest_projection(item, key=key) for item in value]
+    if isinstance(value, str):
+        if key == "dataset_npz" or (key and key.endswith("_root")):
+            return portable_artifact_reference(value, root=True)
+        if key and key.endswith("_path"):
+            return portable_artifact_reference(value)
+        return _portable_text(value)
+    return value
+
 def write_manifest(
     *,
     stage: str,
@@ -148,6 +225,7 @@ def write_manifest(
         body["reused_manifest_path"] = str(out_path)
     elif manifest_exists and policy == "overwrite":
         body["overwrote_existing_manifest"] = True
+    body = _public_manifest_projection(body)
     atomic_write_text(out_path, json.dumps(body, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return out_path, body
 

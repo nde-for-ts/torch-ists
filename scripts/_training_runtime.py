@@ -21,6 +21,7 @@ SUPPORTED_TASKS = frozenset(
     }
 )
 LOGGER = logging.getLogger("torch_ists.script_runtime")
+MASKED_SUPERVISION_TASKS = frozenset({"imputation", "change_detection"})
 
 
 def _resolve_task(task: str) -> str:
@@ -227,6 +228,31 @@ def _split_prediction_and_aux_loss(output):
     return pred, aux_loss
 
 
+def _masked_task_loss_components(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    target_mask: torch.Tensor,
+    task: str,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    mask = _align_target_mask(target_mask, target)
+    if not torch.isfinite(mask).all():
+        raise ValueError(f"{task} target_mask must be finite")
+    if not torch.all((mask == 0) | (mask == 1)):
+        raise ValueError(f"{task} target_mask must be binary 0/1")
+    weight = mask.to(dtype=target.dtype)
+    if task == "imputation":
+        element_loss = (pred - target) ** 2
+    elif task == "change_detection":
+        element_loss = torch.nn.functional.binary_cross_entropy_with_logits(
+            pred,
+            target,
+            reduction="none",
+        )
+    else:  # pragma: no cover - guarded by caller
+        raise ValueError(f"masked supervision is unsupported for task={task!r}")
+    return (element_loss * weight).sum(), weight.sum()
+
+
 class ists_dataset(Dataset):
     def __init__(
         self,
@@ -298,6 +324,11 @@ def train(
     model.train()
     criterion.train()
     total_loss = 0.0
+    total_weight = 0
+    masked_loss_sum = 0.0
+    masked_weight = 0.0
+    masked_aux_sum = 0.0
+    masked_aux_weight = 0
     use_raw_missing = _resolve_raw_missing_policy(str(model_name), model)
 
     for batch in train_iter:
@@ -326,28 +357,45 @@ def train(
             target = batch["target"].to(device).float()
             pred, target = _align_prediction_target(pred, target, task)
             target_mask = batch.get("target_mask")
-            if task == "imputation" and target_mask is not None:
-                mask = _align_target_mask(target_mask.to(device).float(), target)
-                weight = (mask > 0.5).to(target.dtype)
-                denom = weight.sum()
-                if float(denom.item()) <= 0.0:
-                    raise ValueError(
-                        "imputation target_mask has zero supervised entries in current batch"
-                    )
-                loss = ((pred - target) ** 2 * weight).sum() / denom
+            if task in MASKED_SUPERVISION_TASKS:
+                if target_mask is None:
+                    raise ValueError(f"{task} requires target_mask")
+                numerator, denom = _masked_task_loss_components(
+                    pred,
+                    target,
+                    target_mask.to(device).float(),
+                    task,
+                )
+                denom_value = float(denom.item())
+                if denom_value <= 0.0:
+                    continue
+                loss = numerator / denom
+                masked_loss_sum += float(numerator.detach().item())
+                masked_weight += denom_value
             else:
                 loss = criterion(pred, target)
             if aux_loss is not None:
                 loss = loss + aux_loss
             batch_size = int(target.shape[0])
+            if task in MASKED_SUPERVISION_TASKS and aux_loss is not None:
+                masked_aux_sum += float(aux_loss.detach().item()) * batch_size
+                masked_aux_weight += batch_size
 
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 10.0)
         optimizer.step()
-        total_loss += float(loss.item()) * batch_size
+        if task not in MASKED_SUPERVISION_TASKS:
+            total_loss += float(loss.item()) * batch_size
+            total_weight += batch_size
 
-    size = len(train_iter.dataset)
-    return total_loss / size
+    if task in MASKED_SUPERVISION_TASKS:
+        if masked_weight <= 0.0:
+            raise ValueError(f"{task} target_mask has zero supervised entries in split")
+        aux_mean = masked_aux_sum / masked_aux_weight if masked_aux_weight > 0 else 0.0
+        return masked_loss_sum / masked_weight + aux_mean
+    if total_weight <= 0:
+        raise ValueError("training split is empty")
+    return total_loss / total_weight
 
 
 def evaluate(
@@ -365,6 +413,11 @@ def evaluate(
     model.eval()
     criterion.eval()
     total_loss = 0.0
+    total_weight = 0
+    masked_loss_sum = 0.0
+    masked_weight = 0.0
+    masked_aux_sum = 0.0
+    masked_aux_weight = 0
     use_raw_missing = _resolve_raw_missing_policy(str(model_name), model)
 
     with torch.no_grad():
@@ -392,25 +445,42 @@ def evaluate(
                 target = batch["target"].to(device).float()
                 pred, target = _align_prediction_target(pred, target, task)
                 target_mask = batch.get("target_mask")
-                if task == "imputation" and target_mask is not None:
-                    mask = _align_target_mask(target_mask.to(device).float(), target)
-                    weight = (mask > 0.5).to(target.dtype)
-                    denom = weight.sum()
-                    if float(denom.item()) <= 0.0:
-                        raise ValueError(
-                            "imputation target_mask has zero supervised entries in current batch"
-                        )
-                    loss = ((pred - target) ** 2 * weight).sum() / denom
+                if task in MASKED_SUPERVISION_TASKS:
+                    if target_mask is None:
+                        raise ValueError(f"{task} requires target_mask")
+                    numerator, denom = _masked_task_loss_components(
+                        pred,
+                        target,
+                        target_mask.to(device).float(),
+                        task,
+                    )
+                    denom_value = float(denom.item())
+                    if denom_value <= 0.0:
+                        continue
+                    loss = numerator / denom
+                    masked_loss_sum += float(numerator.item())
+                    masked_weight += denom_value
                 else:
                     loss = criterion(pred, target)
                 if aux_loss is not None:
                     loss = loss + aux_loss
                 batch_size = int(target.shape[0])
+                if task in MASKED_SUPERVISION_TASKS and aux_loss is not None:
+                    masked_aux_sum += float(aux_loss.item()) * batch_size
+                    masked_aux_weight += batch_size
 
-            total_loss += float(loss.item()) * batch_size
+            if task not in MASKED_SUPERVISION_TASKS:
+                total_loss += float(loss.item()) * batch_size
+                total_weight += batch_size
 
-    size = len(val_iter.dataset)
-    return total_loss / size
+    if task in MASKED_SUPERVISION_TASKS:
+        if masked_weight <= 0.0:
+            raise ValueError(f"{task} target_mask has zero supervised entries in split")
+        aux_mean = masked_aux_sum / masked_aux_weight if masked_aux_weight > 0 else 0.0
+        return masked_loss_sum / masked_weight + aux_mean
+    if total_weight <= 0:
+        raise ValueError("evaluation split is empty")
+    return total_loss / total_weight
 
 
 def run_train_valid_loop(

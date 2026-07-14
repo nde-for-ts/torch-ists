@@ -66,7 +66,11 @@ class ists_model(nn.Module):
         self.input_dim = int(input_dim)
         self.hidden_dim = int(hidden_dim)
         self.output_dim = max(1, int(output_dim))
-        self.forecast_horizon = int(forecast_horizon) if forecast_horizon is not None else int(seq_len)
+        self.forecast_horizon: Optional[int] = None
+        if self.task == "forecasting":
+            if forecast_horizon is None or int(forecast_horizon) <= 0:
+                raise ValueError("forecasting requires a positive forecast_horizon")
+            self.forecast_horizon = int(forecast_horizon)
 
         self.seq_layer = ists_layer(
             model_name=model_name,
@@ -100,7 +104,10 @@ class ists_model(nn.Module):
         elif self.task == "regression":
             self.head = nn.Linear(hidden_dim, self.output_dim)
         elif self.task == "forecasting":
-            self.head = nn.Linear(hidden_dim, self.output_dim)
+            self.head = nn.Linear(
+                hidden_dim,
+                int(self.forecast_horizon) * self.output_dim,
+            )
         elif self.task == "imputation":
             self.head = nn.Linear(hidden_dim, self.input_dim)
         elif self.task == "outlier_detection":
@@ -210,8 +217,11 @@ class ists_model(nn.Module):
         elif self.task == "regression":
             pred = self.head(last_observed)
         elif self.task == "forecasting":
-            horizon = min(self.forecast_horizon, out.shape[1])
-            pred = self.head(out[:, -horizon:, :])
+            pred = self.head(last_observed).reshape(
+                last_observed.shape[0],
+                int(self.forecast_horizon),
+                self.output_dim,
+            )
         elif self.task == "imputation":
             pred = self.head(out)
         elif self.task == "outlier_detection":

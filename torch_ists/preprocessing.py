@@ -1,6 +1,6 @@
 """Self-contained preprocessing utilities for torch_ists."""
 
-from typing import Any, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 import warnings
 
 import numpy as np
@@ -25,8 +25,9 @@ def _require_torchcde():
             raise
         raise ImportError(
             "preprocess() requires optional dependency 'torchcde' to build interpolation "
-            "coefficients. Install `torchcde` directly or use `pip install \"torch-ists[cde]\"` "
-            "or `pip install \"torch-ists[all]\"`."
+            "coefficients. Install `torchcde` directly or, from this source checkout, run "
+            "`python -m pip install -e \".[cde]\"` or "
+            "`python -m pip install -e \".[all]\"`."
         ) from exc
     return torchcde
 
@@ -175,19 +176,19 @@ def _enforce_sequence_observation_floor(
     rng: np.random.Generator,
     *,
     channel_sync: bool,
-) -> Tuple[np.ndarray, int]:
+) -> Tuple[np.ndarray, List[int]]:
     """Keep synthetic missingness from removing a sample's last observed value.
 
-    Returns the possibly modified mask plus the number of sequences that were
+    Returns the possibly modified mask plus the sequence indices that were
     emptied by sampling before the floor restored one observed step.
     """
     observed_before = ~existing_missing
     observed_after = ~(existing_missing | sampled_missing)
     has_native_observation = observed_before.any(axis=(1, 2))
     emptied_by_sampling = has_native_observation & ~observed_after.any(axis=(1, 2))
-    fully_masked_before_floor = int(np.count_nonzero(emptied_by_sampling))
+    fully_masked_before_floor_indices = np.flatnonzero(emptied_by_sampling).astype(int).tolist()
     if not np.any(emptied_by_sampling):
-        return sampled_missing, fully_masked_before_floor
+        return sampled_missing, fully_masked_before_floor_indices
 
     sampled_missing = sampled_missing.copy()
     for sample_idx in np.flatnonzero(emptied_by_sampling):
@@ -201,7 +202,7 @@ def _enforce_sequence_observation_floor(
             sampled_missing[sample_idx, :, time_idx] = False
         else:
             sampled_missing[sample_idx, channel, time_idx] = False
-    return sampled_missing, fully_masked_before_floor
+    return sampled_missing, fully_masked_before_floor_indices
 
 
 def _sample_block_indices(rng: np.random.Generator, length: int, count: int) -> np.ndarray:
@@ -522,7 +523,7 @@ def apply_missingness(
         else:
             sampled_missing = rng.random((n, d, l), dtype=np.float32) < prob.astype(np.float32)
 
-    sampled_missing, fully_masked_before_floor = _enforce_sequence_observation_floor(
+    sampled_missing, fully_masked_before_floor_indices = _enforce_sequence_observation_floor(
         existing_missing,
         sampled_missing,
         rng,
@@ -535,7 +536,8 @@ def apply_missingness(
 
     if return_stats:
         stats = {
-            "fully_masked_before_floor": int(fully_masked_before_floor),
+            "fully_masked_before_floor": int(len(fully_masked_before_floor_indices)),
+            "fully_masked_before_floor_indices": fully_masked_before_floor_indices,
             "n_sequences": int(n),
         }
         return X_missing, mask_observed, stats

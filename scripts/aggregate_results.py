@@ -8,6 +8,7 @@ import csv
 import hashlib
 import json
 import pickle
+import re
 from pathlib import Path
 from typing import Any
 
@@ -52,6 +53,30 @@ def _file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _stable_hash(payload: Any) -> str:
+    encoded = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _is_sha256(value: Any) -> bool:
+    text = str(value or "")
+    return len(text) == 64 and all(character in "0123456789abcdef" for character in text)
+
+
+def _values_match(left: Any, right: Any) -> bool:
+    if isinstance(left, (float, np.floating)) or isinstance(right, (float, np.floating)):
+        try:
+            return bool(np.isclose(float(left), float(right), rtol=0.0, atol=1e-12))
+        except (TypeError, ValueError):
+            return False
+    return left == right
+
+
 def _as_bool(value: Any) -> bool:
     if isinstance(value, bool):
         return value
@@ -68,6 +93,19 @@ def _public_path(value: Any) -> Any:
     if not parts:
         return ""
     return "/".join(parts[-3:])
+
+
+_WINDOWS_ABSOLUTE_PATH_RE = re.compile(r"(?<![A-Za-z0-9_])[A-Za-z]:[\\\\/][^\"'\s,;]+")
+_POSIX_ABSOLUTE_PATH_RE = re.compile(r"(?<![A-Za-z0-9_])/(?:[^/\"'\s,;]+/)*[^/\"'\s,;]+")
+
+
+def _contains_absolute_path(value: Any) -> bool:
+    text = str(value)
+    return bool(
+        _WINDOWS_ABSOLUTE_PATH_RE.search(text)
+        or _POSIX_ABSOLUTE_PATH_RE.search(text)
+        or text.startswith("\\\\")
+    )
 
 
 def _resolve_output_path(value: Any, out_root: Path) -> Path:
@@ -150,22 +188,110 @@ def _evaluation_axis_key(evaluation: dict[str, Any]) -> tuple[float, str, bool |
     )
 
 
-def _validate_full_predictions(predictions: Any, output_path: Path) -> None:
+def _validate_public_100_cell_axes(
+    axes: dict[str, Any],
+    payload: dict[str, Any],
+    output_path: Path,
+) -> None:
+    rates = [float(value) for value in axes.get("test_missing_rates", [])]
+    mechanisms = [str(value).upper() for value in axes.get("test_missing_types", [])]
+    sync_options = [bool(value) for value in axes.get("test_channel_sync_options", [])]
+    if (
+        rates != PUBLIC_ROBUSTNESS_RATES
+        or mechanisms != PUBLIC_ROBUSTNESS_MECHANISMS
+        or sync_options != PUBLIC_ROBUSTNESS_SYNC_OPTIONS
+        or int(axes.get("expected_evaluations", -1)) != 100
+        or int(axes.get("missing_seed", -1)) != int(payload.get("seed", -2))
+    ):
+        raise ValueError(f"{output_path}: public export requires canonical 100-cell axes")
+
+
+def _validate_full_predictions(predictions: Any, output_path: Path, *, num_class: int | None) -> dict[str, Any]:
     if not isinstance(predictions, dict) or predictions.get("storage") != "full":
         raise ValueError(f"{output_path}: public 100-cell output requires full prediction storage")
+    if predictions.get("prediction_identity_schema") != "sample_indices":
+        raise ValueError(f"{output_path}: prediction identity schema is invalid")
+    if predictions.get("sample_index_dtype") != "int64":
+        raise ValueError(f"{output_path}: sample index dtype is invalid")
     indices = predictions.get("sample_indices")
     count = predictions.get("sample_index_count")
     if indices is None or count is None:
         raise ValueError(f"{output_path}: full prediction identity is incomplete")
-    index_array = np.ascontiguousarray(np.asarray(indices, dtype=np.int64).reshape(-1))
-    if len(index_array) != int(count):
+    raw_indices = np.asarray(indices)
+    if raw_indices.ndim != 1 or raw_indices.dtype != np.dtype("int64"):
+        raise ValueError(f"{output_path}: stored sample indices must be one-dimensional int64")
+    index_array = np.ascontiguousarray(raw_indices)
+    if index_array.shape != (int(count),):
         raise ValueError(f"{output_path}: sample_index_count does not match stored indices")
-    if predictions.get("sample_index_hash") != hashlib.sha256(index_array.tobytes()).hexdigest():
+    index_hash = hashlib.sha256(index_array.tobytes()).hexdigest()
+    if predictions.get("sample_index_hash") != index_hash:
         raise ValueError(f"{output_path}: sample index hash is invalid")
-    for key in ("y_true", "y_pred", "logit_list"):
-        values = predictions.get(key)
-        if values is None or np.asarray(values).shape[0] != int(count):
-            raise ValueError(f"{output_path}: {key} does not match sample_index_count")
+
+    y_true = np.asarray(predictions.get("y_true"))
+    y_pred = np.asarray(predictions.get("y_pred"))
+    logits = np.asarray(predictions.get("logit_list"))
+    if y_true.shape != (int(count),) or not np.issubdtype(y_true.dtype, np.integer):
+        raise ValueError(f"{output_path}: y_true does not match sample_index_count")
+    if y_pred.shape != (int(count),) or not np.issubdtype(y_pred.dtype, np.integer):
+        raise ValueError(f"{output_path}: y_pred does not match sample_index_count")
+    resolved_num_class = int(num_class) if num_class is not None else (
+        int(logits.shape[1]) if logits.ndim == 2 else 0
+    )
+    if (
+        resolved_num_class < 2
+        or logits.shape != (int(count), resolved_num_class)
+        or not np.isfinite(logits).all()
+    ):
+        raise ValueError(f"{output_path}: logit_list is invalid")
+    for name, values in (("y_true", y_true), ("y_pred", y_pred)):
+        if np.any(values < 0) or np.any(values >= resolved_num_class):
+            raise ValueError(f"{output_path}: {name} contains invalid class indices")
+    return {
+        "sample_index_count": int(count),
+        "sample_index_hash": index_hash,
+        "y_true_hash": hashlib.sha256(
+            np.ascontiguousarray(y_true, dtype=np.int64).tobytes()
+        ).hexdigest(),
+        "num_class": resolved_num_class,
+    }
+
+
+def _expected_channel_drop_plan(channel_count: int, rate: float, seed: int) -> dict[str, Any]:
+    requested_count = int(np.floor(channel_count * rate + 0.5))
+    if channel_count == 1 and rate > 0.0:
+        return {
+            "channel_count": 1,
+            "requested_channel_drop_count": requested_count,
+            "dropped_channel_count": 0,
+            "dropped_channel_indices": [],
+            "channel_permutation": [0],
+            "channel_mask_hash": "univariate-not-applicable",
+            "minimum_one_channel_forced": False,
+            "maximum_one_channel_retained": bool(requested_count >= 1),
+            "channel_count_quantized": True,
+            "realized_channel_drop_rate": 0.0,
+            "channel_drop_applicable": False,
+            "analysis_exclusion_reason": "univariate-channel-drop-not-interpretable",
+        }
+    dropped_count = min(channel_count - 1, max(1, requested_count))
+    channel_order = np.random.default_rng(seed).permutation(channel_count).astype(np.int64)
+    dropped = np.sort(channel_order[:dropped_count])
+    channel_mask = np.isin(np.arange(channel_count), dropped).astype(np.uint8)
+    realized_rate = float(dropped_count / channel_count)
+    return {
+        "channel_count": channel_count,
+        "requested_channel_drop_count": requested_count,
+        "dropped_channel_count": dropped_count,
+        "dropped_channel_indices": dropped.tolist(),
+        "channel_permutation": channel_order.tolist(),
+        "channel_mask_hash": hashlib.sha256(channel_mask.tobytes()).hexdigest(),
+        "minimum_one_channel_forced": bool(requested_count < 1),
+        "maximum_one_channel_retained": bool(requested_count >= channel_count),
+        "channel_count_quantized": bool(not np.isclose(realized_rate, rate)),
+        "realized_channel_drop_rate": realized_rate,
+        "channel_drop_applicable": True,
+        "analysis_exclusion_reason": None,
+    }
 
 
 def _validate_channel_drop_rows(evaluations: list[dict[str, Any]], output_path: Path) -> None:
@@ -174,6 +300,11 @@ def _validate_channel_drop_rows(evaluations: list[dict[str, Any]], output_path: 
         "requested_channel_drop_count",
         "dropped_channel_count",
         "dropped_channel_indices",
+        "channel_permutation",
+        "channel_mask_hash",
+        "minimum_one_channel_forced",
+        "maximum_one_channel_retained",
+        "channel_count_quantized",
         "realized_channel_drop_rate",
         "channel_drop_applicable",
         "analysis_exclusion_reason",
@@ -185,29 +316,17 @@ def _validate_channel_drop_rows(evaluations: list[dict[str, Any]], output_path: 
         if any(key not in evaluation for key in required):
             raise ValueError(f"{output_path}: channel-drop provenance is incomplete")
         channel_count = int(evaluation["channel_count"])
-        dropped_count = int(evaluation["dropped_channel_count"])
-        dropped_indices = evaluation["dropped_channel_indices"]
-        if (
-            not isinstance(dropped_indices, list)
-            or len(dropped_indices) != dropped_count
-            or len(set(dropped_indices)) != dropped_count
-            or any(int(index) < 0 or int(index) >= channel_count for index in dropped_indices)
-        ):
-            raise ValueError(f"{output_path}: dropped channel indices are inconsistent")
-        if int(evaluation["all_missing_sequence_count"]) < 0:
+        expected = _expected_channel_drop_plan(
+            channel_count,
+            float(evaluation.get("test_missing_rate")),
+            int(evaluation.get("missing_seed")),
+        )
+        if any(not _values_match(evaluation.get(key), value) for key, value in expected.items()):
+            raise ValueError(f"{output_path}: channel-drop provenance does not match the seed-bound plan")
+        all_missing = int(evaluation["all_missing_sequence_count"])
+        sample_count = int(evaluation.get("predictions", {}).get("sample_index_count", -1))
+        if all_missing < 0 or all_missing > sample_count:
             raise ValueError(f"{output_path}: all-missing sequence count is invalid")
-        if channel_count == 1:
-            if (
-                evaluation["channel_drop_applicable"] is not False
-                or dropped_count != 0
-                or not evaluation["analysis_exclusion_reason"]
-            ):
-                raise ValueError(f"{output_path}: univariate channel-drop exclusion is invalid")
-        elif (
-            evaluation["channel_drop_applicable"] is not True
-            or evaluation["analysis_exclusion_reason"] is not None
-        ):
-            raise ValueError(f"{output_path}: channel-drop applicability is invalid")
 
 
 def _validate_robustness_output(
@@ -261,6 +380,10 @@ def _validate_robustness_output(
             raise ValueError(f"{output_path}: robustness axis values are invalid") from exc
         if actual_axes != expected_axes or len(set(actual_axes)) != len(actual_axes):
             raise ValueError(f"{output_path}: robustness axis order or uniqueness is invalid")
+    if public_export and expected_count == 100:
+        if not isinstance(axes, dict):
+            raise ValueError(f"{output_path}: public export requires canonical 100-cell axes")
+        _validate_public_100_cell_axes(axes, payload, output_path)
 
     storages = {
         evaluation.get("predictions", {}).get("storage")
@@ -271,11 +394,126 @@ def _validate_robustness_output(
     if expected_count == 100:
         if payload.get("task", "classification") != "classification":
             raise ValueError(f"{output_path}: public 100-cell output supports classification only")
+        contract = meta.get("output_contract") if isinstance(meta.get("output_contract"), dict) else {}
+        num_class = contract.get("num_class")
+        reference_prediction_identity = None
         for evaluation in evaluations:
-            _validate_full_predictions(evaluation.get("predictions"), output_path)
+            mask_hash = evaluation.get("mask_hash") if isinstance(evaluation, dict) else None
+            if not _is_sha256(mask_hash):
+                raise ValueError(f"{output_path}: evaluated mask hash is missing or invalid")
+            identity = _validate_full_predictions(
+                evaluation.get("predictions"),
+                output_path,
+                num_class=num_class,
+            )
+            if reference_prediction_identity is None:
+                reference_prediction_identity = identity
+                continue
+            if (
+                identity["sample_index_count"] != reference_prediction_identity["sample_index_count"]
+                or identity["sample_index_hash"] != reference_prediction_identity["sample_index_hash"]
+            ):
+                raise ValueError(f"{output_path}: sample indices differ across evaluations")
+            if identity["y_true_hash"] != reference_prediction_identity["y_true_hash"]:
+                raise ValueError(f"{output_path}: y_true differs across evaluations")
+            if identity["num_class"] != reference_prediction_identity["num_class"]:
+                raise ValueError(f"{output_path}: logit_list class dimension differs across evaluations")
         _validate_channel_drop_rows(evaluations, output_path)
         storage = "full"
     return expected_count, str(storage)
+
+
+def _payload_value(payload: dict[str, Any], record: dict[str, Any], key: str) -> Any:
+    meta = payload.get("meta") if isinstance(payload.get("meta"), dict) else {}
+    contract = meta.get("output_contract") if isinstance(meta.get("output_contract"), dict) else {}
+    if payload.get(key) is not None:
+        return payload.get(key)
+    if contract.get(key) is not None:
+        return contract.get(key)
+    if meta.get(key) is not None:
+        return meta.get(key)
+    return record.get(key)
+
+
+def _validate_record_payload_integrity(
+    record: dict[str, Any],
+    payload: dict[str, Any],
+    output_path: Path,
+    artifact_sha256: str,
+) -> None:
+    recorded_file_hash = record.get("output_file_sha256")
+    if recorded_file_hash not in {None, ""} and recorded_file_hash != artifact_sha256:
+        raise ValueError(f"{output_path}: output file hash does not match the run record")
+
+    meta = payload.get("meta") if isinstance(payload.get("meta"), dict) else {}
+    contract = meta.get("output_contract") if isinstance(meta.get("output_contract"), dict) else None
+    stored_contract_hash = meta.get("output_contract_hash")
+    if contract is not None and stored_contract_hash is not None:
+        if stored_contract_hash != _stable_hash(contract):
+            raise ValueError(f"{output_path}: stored output contract hash is invalid")
+    recorded_contract_hash = record.get("output_contract_hash")
+    if recorded_contract_hash not in {None, ""} and recorded_contract_hash != stored_contract_hash:
+        raise ValueError(f"{output_path}: output contract hash does not match the run record")
+
+    identity_fields = (
+        "dataset",
+        "model",
+        "seed",
+        "task",
+        "evaluation_regime",
+        "target_source",
+        "forecast_horizon",
+    )
+    for key in identity_fields:
+        recorded = record.get(key)
+        if recorded is None:
+            continue
+        payload_value = _payload_value(payload, record, key)
+        if not _values_match(recorded, payload_value):
+            raise ValueError(f"{output_path}: record {key} does not match the output payload")
+
+    record_metrics = record.get("metrics")
+    evaluations = payload.get("evaluations")
+    representative_metrics = (
+        evaluations[0].get("metrics")
+        if isinstance(evaluations, list) and evaluations and isinstance(evaluations[0], dict)
+        else None
+    )
+    if isinstance(record_metrics, dict):
+        if not isinstance(representative_metrics, dict) or any(
+            key not in representative_metrics or not _values_match(value, representative_metrics[key])
+            for key, value in record_metrics.items()
+        ):
+            raise ValueError(f"{output_path}: record metrics do not match the output payload")
+
+
+def _logical_output_key(payload: dict[str, Any], record: dict[str, Any]) -> tuple[Any, ...]:
+    meta = payload.get("meta") if isinstance(payload.get("meta"), dict) else {}
+    contract = meta.get("output_contract") if isinstance(meta.get("output_contract"), dict) else {}
+    axes = meta.get("robustness_axes")
+    if not isinstance(axes, dict):
+        axes = contract.get("robustness_axes")
+    regime = _payload_value(payload, record, "evaluation_regime")
+    if regime is None:
+        regime = payload.get("mode", record.get("mode"))
+    return (
+        _payload_value(payload, record, "dataset"),
+        _payload_value(payload, record, "model"),
+        _payload_value(payload, record, "seed"),
+        _payload_value(payload, record, "task"),
+        _payload_value(payload, record, "dataset_source"),
+        _payload_value(payload, record, "dataset_npz_sha256"),
+        _payload_value(payload, record, "target_source"),
+        _payload_value(payload, record, "target_sha256"),
+        _payload_value(payload, record, "forecast_horizon"),
+        regime,
+        _payload_value(payload, record, "train_missing_rate")
+        if _payload_value(payload, record, "train_missing_rate") is not None
+        else record.get("missing_rate"),
+        _payload_value(payload, record, "train_missing_type"),
+        _payload_value(payload, record, "train_channel_sync"),
+        _stable_hash(axes) if isinstance(axes, dict) else None,
+    )
 
 
 def _evaluation_rows_from_output(
@@ -426,6 +664,8 @@ def _is_public_safe_row(row: dict[str, Any]) -> bool:
             return False
         if any(fragment in value_text for fragment in REDACTED_VALUE_FRAGMENTS):
             return False
+        if _contains_absolute_path(value):
+            return False
     return True
 
 
@@ -485,11 +725,15 @@ def aggregate(
                             raise ValueError(f"Output artifact {resolved_path} cannot be read: {exc}") from exc
                         if not isinstance(payload, dict):
                             raise ValueError(f"Output artifact {resolved_path} must contain an object")
-                        artifact_id = (str(resolved_path.resolve()), _file_sha256(resolved_path))
-                        logical_key = tuple(
-                            payload.get(key, record.get(key))
-                            for key in ("dataset", "model", "seed", "task")
+                        artifact_sha256 = _file_sha256(resolved_path)
+                        _validate_record_payload_integrity(
+                            record,
+                            payload,
+                            resolved_path,
+                            artifact_sha256,
                         )
+                        artifact_id = (str(resolved_path.resolve()), artifact_sha256)
+                        logical_key = _logical_output_key(payload, record)
                         previous = logical_output_artifacts.get(logical_key)
                         if previous is not None and previous != artifact_id:
                             raise ValueError(
@@ -593,12 +837,6 @@ def parse_cli_args() -> argparse.Namespace:
     parser.add_argument("--evidence-root", default="evidence", help="Root containing *.manifest.json files.")
     parser.add_argument("--out-root", default="out", help="Output artifact root used by model_run.py.")
     parser.add_argument("--output-dir", default="aggregate", help="Directory for aggregate CSV/JSON files.")
-    parser.add_argument(
-        "--export-scope",
-        choices=["public", "internal"],
-        default="public",
-        help="public redacts internal paths/details; internal keeps broader metadata where emitted.",
-    )
     return parser.parse_args()
 
 
@@ -608,7 +846,7 @@ def main() -> int:
         evidence_root=args.evidence_root,
         out_root=args.out_root,
         output_dir=args.output_dir,
-        public_export=args.export_scope == "public",
+        public_export=True,
     )
     print(json.dumps(summary, indent=2, sort_keys=True))
     return 0

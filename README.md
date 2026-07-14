@@ -1,6 +1,6 @@
 # torch-ists
 
-[![Version](https://img.shields.io/badge/version-0.4.5-blue)](pyproject.toml) [![Python](https://img.shields.io/badge/python-%3E%3D3.10-blue)](pyproject.toml) [![PyTorch](https://img.shields.io/badge/PyTorch-%3E%3D2.0-ee4c2c)](pyproject.toml) [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![Package status](https://img.shields.io/badge/status-preview-orange)](#project-status)
+[![Version](https://img.shields.io/badge/version-0.4.6-blue)](pyproject.toml) [![Python](https://img.shields.io/badge/python-%3E%3D3.10-blue)](pyproject.toml) [![PyTorch](https://img.shields.io/badge/PyTorch-%3E%3D2.0-ee4c2c)](pyproject.toml) [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![Package status](https://img.shields.io/badge/status-preview-orange)](#project-status)
 
 **PyTorch toolkit for irregularly sampled multivariate time series with continuous-time methods (Neural ODE/CDE/SDE) and discrete-time baselines.**
 
@@ -20,6 +20,8 @@ Requirements:
 - `PyTorch >= 2.0`
 - `pip >= 22.3` for the pyproject-only build path; upgrade older system pip before installing from source.
 - `PYTHONNOUSERSITE=1` for runtime commands
+
+This preview is not published on PyPI. Install it from a source checkout as shown below.
 
 Install the base package:
 
@@ -60,6 +62,18 @@ PYTHONNOUSERSITE=1 python -m pip install --no-build-isolation -e .[signatory]
 ## Data Loading
 
 Use `DataLoader` for user-provided NumPy arrays, data frames, or files. Use `torch_ists.benchmark_loader` for built-in benchmark archive datasets:
+
+```python
+import numpy as np
+from torch_ists import DataLoader
+
+X = np.random.randn(40, 3, 24).astype(np.float32)  # [N, D, L]
+y = np.asarray([0, 1] * 20)
+bundle = DataLoader.from_numpy(X, y)
+print(bundle.X.shape, bundle.y.shape)
+```
+
+For a built-in benchmark dataset:
 
 ```python
 from torch_ists import benchmark_loader
@@ -115,7 +129,9 @@ Missing-value handling:
 
 ## Models Included
 
-The package includes 50 models across the groups below. See [Model Reference](docs/model_reference.md) for per-model details.
+The package includes the 50 canonical model names below. See [Model Reference](docs/model_reference.md) for per-model details.
+
+**Canonical model names:**
 
 - **Sequence baselines** — `cnn`, `rnn`, `lstm`, `gru`, `bilstm`, `gru-simple`, `plstm`, `tlstm`, `tglstm` (§1)
 - **Attention-based methods** — `transformer`, `transformer-mask`, `sand`, `mtan`, `miam` (§2)
@@ -123,10 +139,12 @@ The package includes 50 models across the groups below. See [Model Reference](do
 - **ODE-RNN, Latent ODE, and GRU-ODE-Bayes** — `ode-rnn`, `latentode`, `gru-ode-bayes` (§4)
 - **Neural CDE and Neural RDE** — `neuralcde`, `neuralcde-l`, `neuralcde-r`, `neuralcde-c`, `neuralcde-h`, `neuralrde-1`, `neuralrde-2`, `neuralrde-3` (§5)
 - **ANCDE, EXIT, and LEAP** — `ancde`, `exit`, `leap` (§6)
-- **NeuralFlow** — `neuralflow` (residual-flow alias for `neuralflow-r`), `neuralflow-r`, `neuralflow-g`, `neuralflow-c` (§7)
-- **DualDynamics and FlowPath** — `dualdynamics`, `flowpath`, and `-r/g/c` variants; the bare `dualdynamics` and `flowpath` names are residual-flow aliases of `dualdynamics-r` and `flowpath-r` (§8)
+- **NeuralFlow** — `neuralflow-r`, `neuralflow-g`, `neuralflow-c` (§7)
+- **DualDynamics and FlowPath** — `dualdynamics-r`, `dualdynamics-g`, `dualdynamics-c`, `flowpath-r`, `flowpath-g`, `flowpath-c` (§8)
 - **SDE baselines** — `naive_cde`, `neural_ode`, `neural_ode_t`, `neural_sde`, `neural_sde_t` (§9)
 - **Stable Neural SDEs** — `neural_lsde`, `neural_lnsde`, `neural_gsde` (§10)
+
+Compatibility aliases do not add models to the 50-model roster: `neuralflow`, `dualdynamics`, and `flowpath` resolve to their corresponding `-r` variants.
 
 ## Custom Model Guide
 

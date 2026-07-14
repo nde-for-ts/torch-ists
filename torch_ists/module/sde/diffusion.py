@@ -15,8 +15,8 @@ class Diffusion_model(torch.nn.Module):
     """SDE drift/diffusion vector field.
 
     Public callers should select readable model names such as ``neural_lnsde``.
-    The numeric option ids accepted here are private runtime selectors derived
-    from those public model configs, not public model names.
+    Low-level numeric selectors are derived from those model configs and are
+    not accepted as public model names.
     """
 
     def __init__(
@@ -181,47 +181,3 @@ class Diffusion_model(torch.nn.Module):
             sign = torch.where(noise < 0, noise.new_tensor(-1.0), noise.new_tensor(1.0))
             noise = sign * (noise.abs() + float(self.diffusion_floor))
         return noise.tanh()
-
-
-# Private SDE runtime selector legend.
-# These integer ids are implementation selectors derived from readable model
-# configs. They are not public model names and should not be exposed as aliases.
-# The full 7x20 cross-product is an internal implementation grid, not a
-# supported public model matrix.
-#
-# Current packaged SDE rows instantiate only:
-#   continuous-time baselines: (0,0), (1,0), (3,0), (1,18), (3,18)
-#   stable SDE rows: (2,16), (4,17), (6,17)
-# Special diffusion ids 7-11 are retained as failure-case/provenance selectors
-# and are not promoted public configs.
-#
-# input_option:
-#   0 = control-only drift, uses the encoded control path X(t)
-#   1 = latent drift, uses hidden state y
-#   2 = latent + control drift, combines y and X(t)
-#   3 = latent + time drift, uses y plus sin/cos time features
-#   4 = latent + control + time drift, combines y, X(t), and time features
-#   5 = geometric latent + time drift, applies the state-dependent damping gate
-#   6 = geometric latent + control + time drift, with the damping gate
-#
-# noise_option:
-#   0 = no diffusion
-#   1 = scalar constant diffusion
-#   2 = scalar time-scaled diffusion
-#   3 = scalar state-scaled diffusion
-#   4 = diagonal constant diffusion
-#   5 = diagonal time-scaled diffusion
-#   6 = diagonal state-scaled diffusion
-#   7 = sqrt(y) special diffusion
-#   8 = y**3 special diffusion
-#   9 = sigmoid(y) special diffusion
-#   10 = relu(y) special diffusion
-#   11 = t * y special diffusion
-#   12 = linear time additive diffusion
-#   13 = linear time multiplicative diffusion
-#   14 = linear time+state additive diffusion
-#   15 = linear time+state multiplicative diffusion
-#   16 = nonlinear time additive diffusion
-#   17 = nonlinear time multiplicative diffusion
-#   18 = nonlinear time+state additive diffusion
-#   19 = nonlinear time+state multiplicative diffusion

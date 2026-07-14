@@ -204,7 +204,7 @@ def _read_public_mirror_head(root: Path) -> str | None:
 
 
 def normalize_runtime_baseline_id(runtime_baseline_id: str | None = None) -> str | None:
-    """Return a caller-provided runtime label without adding package internals."""
+    """Return a caller-provided runtime label without adding generated metadata."""
     if runtime_baseline_id is None:
         return None
     value = str(runtime_baseline_id).strip()
@@ -272,25 +272,17 @@ def _clear_incompatible_runtime_submodules(runtime_roots: list[Path]) -> None:
 
 
 def configure_runtime_paths(caller_file: str | Path) -> Path:
-    """Ensure packaged runtime resolution for script execution."""
+    """Resolve this source checkout and an optional explicit runtime override."""
     caller_path = Path(caller_file).resolve()
-    source_repo_root = caller_path.parents[2]
-    source_release_root = source_repo_root / "release"
     public_checkout_root = caller_path.parents[1]
     env_runtime_root = os.environ.get("TORCH_ISTS_RUNTIME_ROOT")
-    if env_runtime_root:
-        runtime_root = Path(env_runtime_root).resolve()
-        repo_root = source_repo_root
-    elif (source_release_root / "torch_ists" / "__init__.py").exists():
-        runtime_root = source_release_root.resolve()
-        repo_root = source_repo_root
-    elif (public_checkout_root / "torch_ists" / "__init__.py").exists():
-        runtime_root = public_checkout_root.resolve()
-        repo_root = public_checkout_root.resolve()
-    else:
-        runtime_root = source_release_root.resolve()
-        repo_root = source_repo_root
-    scripts_root = runtime_root / "scripts"
+    runtime_root = (
+        Path(env_runtime_root).resolve()
+        if env_runtime_root
+        else public_checkout_root.resolve()
+    )
+    repo_root = public_checkout_root.resolve()
+    scripts_root = public_checkout_root / "scripts"
 
     for path in (runtime_root, repo_root, scripts_root):
         path_str = str(path)
@@ -336,22 +328,7 @@ def apply_model_scope_variant(variant: str | None) -> str:
     if normalized in {"", "active"}:
         os.environ.pop(MODEL_SCOPE_VARIANT_ENV, None)
         return "active"
-    if normalized == "tsde_internal":
-        os.environ[MODEL_SCOPE_VARIANT_ENV] = "tsde_internal"
-        return "tsde_internal"
-    if normalized == "dsde_internal":
-        os.environ[MODEL_SCOPE_VARIANT_ENV] = "dsde_internal"
-        return "dsde_internal"
-    if normalized == "physgsde_internal":
-        os.environ[MODEL_SCOPE_VARIANT_ENV] = "physgsde_internal"
-        return "physgsde_internal"
-    if normalized == "ode_source_internal":
-        os.environ[MODEL_SCOPE_VARIANT_ENV] = "ode_source_internal"
-        return "ode_source_internal"
-    raise ValueError(
-        "Unsupported model scope variant. "
-        "Expected one of {'active','tsde_internal','dsde_internal','physgsde_internal','ode_source_internal'}."
-    )
+    raise ValueError("This package supports only the active model scope.")
 
 
 def normalize_search_profile(raw: str | None) -> str:
@@ -379,9 +356,9 @@ def describe_search_profile(raw: str | None) -> dict:
     if profile == LEGACY_EXPANDED_SEARCH_PROFILE:
         return {
             "search_contract": DEFAULT_SEARCH_CONTRACT_NAME,
-            "search_family": "internal_reproducibility",
+            "search_family": "historical_reproducibility",
             "search_profile_visibility": COMPATIBILITY_SEARCH_PROFILE_VISIBILITY,
-            "public_search_name": "expanded internal search",
+            "public_search_name": "expanded historical search",
         }
     return {
         "search_contract": DEFAULT_SEARCH_CONTRACT_NAME,
@@ -426,16 +403,66 @@ def compute_param_config_hash(model_config: dict) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def _normalize_split_sha256s(value) -> list[dict]:
+    if value is None or value == "":
+        return []
+    if not isinstance(value, (list, tuple)):
+        raise ValueError("split_sha256s must be an ordered list")
+    normalized = []
+    seen_seeds = set()
+    for item in value:
+        if not isinstance(item, dict) or "seed" not in item or "sha256" not in item:
+            raise ValueError("split_sha256s entries require seed and sha256")
+        seed = int(item["seed"])
+        sha256 = str(item["sha256"]).strip().lower()
+        if seed in seen_seeds or not sha256:
+            raise ValueError("split_sha256s contains a duplicate seed or empty hash")
+        seen_seeds.add(seed)
+        normalized.append({"seed": seed, "sha256": sha256})
+    return normalized
+
+
 def build_param_artifact_identity(
     *,
     data_name: str,
     model_name: str,
     task: str,
+    target_source: str | None = None,
+    target_sha256: str | None = None,
+    forecast_horizon: int | None = None,
+    dataset_source: str | None = None,
+    dataset_npz_sha256: str | None = None,
+    split_sha256s=None,
 ) -> dict:
+    task_name = str(task).strip().lower()
+    if task_name == "classification":
+        normalized_target_source = "label"
+        normalized_target_sha256 = None
+        normalized_forecast_horizon = None
+    else:
+        normalized_target_source = str(target_source or "").strip().lower()
+        normalized_target_sha256 = (
+            None if target_sha256 in {None, ""} else str(target_sha256).strip().lower()
+        )
+        normalized_forecast_horizon = (
+            int(forecast_horizon)
+            if task_name == "forecasting" and forecast_horizon is not None
+            else None
+        )
     return {
         "data_name": str(data_name),
         "model_name": _canonical_model_name(model_name),
-        "task": str(task).strip().lower(),
+        "task": task_name,
+        "target_source": normalized_target_source,
+        "target_sha256": normalized_target_sha256,
+        "forecast_horizon": normalized_forecast_horizon,
+        "dataset_source": str(dataset_source or "").strip().lower(),
+        "dataset_npz_sha256": (
+            None
+            if dataset_npz_sha256 in {None, ""}
+            else str(dataset_npz_sha256).strip().lower()
+        ),
+        "split_sha256s": _normalize_split_sha256s(split_sha256s),
     }
 
 
@@ -445,17 +472,60 @@ def validate_param_artifact_identity(
     data_name: str,
     model_name: str,
     task: str,
+    target_source: str | None = None,
+    target_sha256: str | None = None,
+    forecast_horizon: int | None = None,
+    dataset_source: str | None = None,
+    dataset_npz_sha256: str | None = None,
+    split_sha256s=None,
     context: str = "param artifact",
 ) -> None:
     identity = model_config.get("artifact_identity") if isinstance(model_config, dict) else None
     if not isinstance(identity, dict):
         raise ValueError(f"{context} is missing required artifact_identity metadata.")
 
-    expected = build_param_artifact_identity(data_name=data_name, model_name=model_name, task=task)
+    expected = build_param_artifact_identity(
+        data_name=data_name,
+        model_name=model_name,
+        task=task,
+        target_source=target_source,
+        target_sha256=target_sha256,
+        forecast_horizon=forecast_horizon,
+        dataset_source=dataset_source,
+        dataset_npz_sha256=dataset_npz_sha256,
+        split_sha256s=split_sha256s,
+    )
+    actual_task = str(identity.get("task", "")).strip().lower()
+    actual_target_source = identity.get("target_source")
+    if actual_task == "classification" and actual_target_source in {None, ""}:
+        actual_target_source = "label"
+    actual_target_sha256 = identity.get("target_sha256")
+    if actual_target_sha256 in {None, ""}:
+        actual_target_sha256 = None
+    else:
+        actual_target_sha256 = str(actual_target_sha256).strip().lower()
+    actual_forecast_horizon = identity.get("forecast_horizon")
+    if actual_task != "forecasting" or actual_forecast_horizon in {None, ""}:
+        actual_forecast_horizon = None
+    else:
+        try:
+            actual_forecast_horizon = int(actual_forecast_horizon)
+        except (TypeError, ValueError):
+            actual_forecast_horizon = str(actual_forecast_horizon)
     actual = {
         "data_name": str(identity.get("data_name", "")),
         "model_name": _canonical_model_name(str(identity.get("model_name", ""))),
-        "task": str(identity.get("task", "")).strip().lower(),
+        "task": actual_task,
+        "target_source": str(actual_target_source or "").strip().lower(),
+        "target_sha256": actual_target_sha256,
+        "forecast_horizon": actual_forecast_horizon,
+        "dataset_source": str(identity.get("dataset_source") or "").strip().lower(),
+        "dataset_npz_sha256": (
+            None
+            if identity.get("dataset_npz_sha256") in {None, ""}
+            else str(identity.get("dataset_npz_sha256")).strip().lower()
+        ),
+        "split_sha256s": _normalize_split_sha256s(identity.get("split_sha256s")),
     }
     mismatches = [
         key

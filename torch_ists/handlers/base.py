@@ -276,7 +276,7 @@ class BaseHandler(ABC):
 
         # Use the last observed timestep. This preserves ragged NaN-padding
         # boundaries while avoiding the old count-1 compression bug under
-        # internal missingness.
+        # pre-existing missingness.
         final_index = self.get_final_index(seq_mask, L)
 
         return {
@@ -295,7 +295,7 @@ class BaseHandler(ABC):
         """Compute the last observed sequence index for each sample.
 
         This uses observed positions, not observed-count indexing. That keeps
-        ragged tail-NaN padding and scattered internal missingness consistent.
+        ragged tail-NaN padding and scattered missingness consistent.
 
         Args:
             seq_mask: [N, L] Observation mask (1=observed, 0=missing)

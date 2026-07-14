@@ -96,7 +96,7 @@ def _configure_solver_kwargs(kwargs):
     kwargs["method"] = method
 
     if method == "sym12async":
-        raise NotImplementedError("sym12async is not supported in deployment ANCDE runtime.")
+        raise NotImplementedError("sym12async is not supported for ANCDE.")
     if method == "dopri5":
         kwargs.setdefault("atol", 1e-12)
         kwargs.setdefault("rtol", 1e-6)
@@ -105,13 +105,13 @@ def _configure_solver_kwargs(kwargs):
         options = kwargs["options"]
         # Upstream ANCDE assumes integer-grid controls, so this low-level
         # `step_size=1.0` fallback is preserved only for provenance. The
-        # current deployment/release wrappers prefill a data-driven step size.
+        # current packaged wrappers prefill a data-driven step size.
         options.setdefault("step_size", 1.0)
     elif method == "euler":
         kwargs.setdefault("options", {})
         options = kwargs["options"]
         # Preserve the upstream oversampling fallback for provenance; the
-        # current deployment/release wrappers now inject the exact min-gap
+        # current packaged wrappers now inject the exact min-gap
         # step size before this branch is reached.
         options.setdefault("step_size", 1e-3)
     return kwargs

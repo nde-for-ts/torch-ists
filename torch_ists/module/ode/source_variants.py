@@ -113,25 +113,55 @@ def _integrate_scalar_interval(
     return odeint_fn(func, y0, t, **call_kwargs)[-1]
 
 
-def _reconstruct_sample_times(seq_delta: torch.Tensor, fallback_times: torch.Tensor) -> torch.Tensor:
-    delta = torch.nan_to_num(seq_delta, nan=0.0).clamp_min(0.0)
-    times = torch.cumsum(delta, dim=1)
-    zero = torch.zeros(delta.size(0), 1, dtype=times.dtype, device=times.device)
-    times = torch.cat([zero, times[:, :-1]], dim=1)
-    fallback = fallback_times.unsqueeze(0).repeat(delta.size(0), 1)
+def _reconstruct_sample_times(
+    seq_delta: torch.Tensor,
+    fallback_times: torch.Tensor,
+    observation_mask: torch.Tensor | None = None,
+) -> torch.Tensor:
+    if seq_delta.dim() != 2:
+        raise ValueError(f"seq_delta must be [N, L], got {tuple(seq_delta.shape)}")
+    if fallback_times.dim() != 1 or fallback_times.numel() != seq_delta.size(1):
+        raise ValueError(
+            f"fallback_times must be [L]={seq_delta.size(1)}, got {tuple(fallback_times.shape)}"
+        )
+    if seq_delta.size(1) == 0:
+        return seq_delta.clone()
+
+    delta = torch.nan_to_num(
+        seq_delta,
+        nan=0.0,
+        posinf=0.0,
+        neginf=0.0,
+    ).clamp_min(0.0)
+    fallback = fallback_times.to(dtype=delta.dtype, device=delta.device)
+    if not bool(torch.isfinite(fallback).all()):
+        raise ValueError("fallback_times must be finite")
+    if observation_mask is None:
+        observed = torch.ones_like(delta, dtype=torch.bool)
+    else:
+        if tuple(observation_mask.shape) != tuple(delta.shape):
+            raise ValueError(
+                f"observation_mask must match seq_delta, got {tuple(observation_mask.shape)}"
+            )
+        observed = observation_mask.to(device=delta.device) > 0.5
+
+    start = fallback[0].expand(delta.size(0), 1)
+    if delta.size(1) == 1:
+        reconstructed = start
+    else:
+        elapsed_increment = (delta[:, 1:] - delta[:, :-1]).clamp_min(0.0)
+        adjacent_delta = torch.where(
+            observed[:, :-1],
+            delta[:, 1:],
+            elapsed_increment,
+        )
+        reconstructed = torch.cat(
+            [start, start + torch.cumsum(adjacent_delta, dim=1)],
+            dim=1,
+        )
+    fallback_grid = fallback.unsqueeze(0).expand(delta.size(0), -1)
     zero_total = delta.sum(dim=1) <= 0
-    times = torch.where(zero_total.unsqueeze(1), fallback, times)
-    stagnant = times[:, 1:] <= times[:, :-1]
-    if bool(stagnant.any()):
-        eps = torch.linspace(
-            0.0,
-            1e-4,
-            times.size(1),
-            dtype=times.dtype,
-            device=times.device,
-        ).unsqueeze(0)
-        times = times + eps
-    return times
+    return torch.where(zero_total.unsqueeze(1), fallback_grid, reconstructed)
 
 
 class _RawODERNNEncoder(nn.Module):

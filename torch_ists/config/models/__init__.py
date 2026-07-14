@@ -61,7 +61,7 @@ FLOW_MODELS = _select_active_models(_ALL_FLOW_MODELS, active_set)
 
 VARIATIONAL_SDE_MODELS: Dict[str, Dict] = {}
 TSDE_METHOD_CONFIGS: Dict[str, Dict] = {}
-# Numeric SDE encodings are internal implementation details in the public package.
+# Numeric SDE encodings are implementation details in the public package.
 STABLE_SDE_LEGACY_ALIASES: Dict[str, str] = {}
 STABLE_SDE_ALIASES: Dict[str, str] = STABLE_SDE_LEGACY_ALIASES
 SDE_MODEL_ALIASES: Dict[str, str] = {}

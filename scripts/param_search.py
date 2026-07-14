@@ -75,6 +75,7 @@ from script_chain_contracts import (
     atomic_pickle_dump,
     file_sha256,
     generate_run_id,
+    portable_artifact_reference,
     stable_hash,
     write_manifest,
 )
@@ -184,6 +185,52 @@ def _build_param_artifact_name(
     return out_name
 
 
+def _build_expected_param_artifact_identity(
+    *,
+    data_name: str,
+    model_name: str,
+    task: str,
+    target_source: str,
+    targets_root: str,
+    forecast_horizon,
+    dataset_source: str,
+    dataset_npz: str | None,
+    split_root: str,
+    split_seeds,
+) -> dict:
+    task_name = str(task).strip().lower()
+    source = "label" if task_name == "classification" else str(target_source).strip().lower()
+    target_sha256 = None
+    if task_name != "classification" and source == "dataset":
+        target_path = Path(targets_root) / f"{data_name}.npz"
+        if not target_path.exists():
+            raise FileNotFoundError(f"Target bundle not found for dataset={data_name}: {target_path}")
+        target_sha256 = file_sha256(target_path)
+    normalized_dataset_source = str(dataset_source).strip().lower()
+    dataset_npz_sha256 = None
+    if normalized_dataset_source == "npz":
+        if dataset_npz is None or not Path(dataset_npz).exists():
+            raise FileNotFoundError(f"Dataset NPZ not found: {dataset_npz}")
+        dataset_npz_sha256 = file_sha256(dataset_npz)
+    split_sha256s = []
+    for seed in split_seeds:
+        split_path = Path(split_root) / data_name / f"{data_name}_{int(seed)}"
+        if not split_path.exists():
+            raise FileNotFoundError(f"Split artifact not found: {split_path}")
+        split_sha256s.append({"seed": int(seed), "sha256": file_sha256(split_path)})
+    return build_param_artifact_identity(
+        data_name=data_name,
+        model_name=model_name,
+        task=task_name,
+        target_source=source,
+        target_sha256=target_sha256,
+        forecast_horizon=forecast_horizon,
+        dataset_source=normalized_dataset_source,
+        dataset_npz_sha256=dataset_npz_sha256,
+        split_sha256s=split_sha256s,
+    )
+
+
 def _infer_cli_search_policy(model_config: dict) -> str:
     raw = str(model_config.get("search_policy", STANDARD_SEARCH_POLICY)).strip().lower()
     if raw in {STANDARD_SEARCH_POLICY, CONSTRAINED_SEARCH_POLICY}:
@@ -209,6 +256,12 @@ def _validate_existing_param_artifact_for_reuse(
     data_name: str,
     model_name: str,
     task: str,
+    target_source: str,
+    target_sha256: str | None,
+    forecast_horizon,
+    dataset_source: str,
+    dataset_npz_sha256: str | None,
+    split_sha256s,
     allow_legacy_search_profile: bool,
 ) -> str:
     existing_profile = validate_param_artifact_metadata(
@@ -224,6 +277,12 @@ def _validate_existing_param_artifact_for_reuse(
             data_name=data_name,
             model_name=model_name,
             task=task,
+            target_source=target_source,
+            target_sha256=target_sha256,
+            forecast_horizon=forecast_horizon,
+            dataset_source=dataset_source,
+            dataset_npz_sha256=dataset_npz_sha256,
+            split_sha256s=split_sha256s,
             context=f"Param artifact {existing_param_path}",
         )
     return existing_profile
@@ -429,23 +488,29 @@ def parse_cli_args():
     )
     parser.add_argument(
         "--task",
-        type=str,
-        choices=["classification"],
+        choices=[
+            "classification",
+            "regression",
+            "forecasting",
+            "imputation",
+            "outlier_detection",
+            "change_detection",
+        ],
         default="classification",
-        help="Task head for this package runtime.",
+        help="Task head. Classification is stable; other task heads are experimental.",
     )
     parser.add_argument(
         "--forecast-horizon",
         type=int,
         default=None,
-        help=argparse.SUPPRESS,
+        help="Required positive forecasting horizon when --task=forecasting.",
     )
     parser.add_argument(
         "--target-source",
         type=str,
-        choices=["surrogate"],
-        default="surrogate",
-        help=argparse.SUPPRESS,
+        choices=["dataset", "surrogate"],
+        default="dataset",
+        help="Target source for non-classification tasks; surrogate targets are rejected.",
     )
     parser.add_argument(
         "--targets-root",
@@ -455,7 +520,6 @@ def parse_cli_args():
     )
     parser.add_argument(
         "--model-scope-variant",
-        type=str,
         choices=["active"],
         default="active",
         help="Model scope for this package runtime.",
@@ -542,7 +606,11 @@ from _training_runtime import (
     run_train_valid_loop,
     train,
 )
-from task_target_contracts import load_task_targets_npz
+from task_target_contracts import (
+    load_task_targets_npz,
+    mask_imputation_inputs,
+    validate_task_splits,
+)
 
 from torch_ists.config import (
     get_data_config,
@@ -569,9 +637,10 @@ def _load_ray_tune():
         missing_name = getattr(exc, "name", "") or "ray"
         raise ImportError(
             "param_search.py requires Ray Tune for multi-sample search. "
-            f"Missing dependency: {missing_name}. Install `torch-ists[tune]` "
-            "or `torch-ists[all]`, or run with --num-samples 1 to use the "
-            "local Ray-bypass path."
+            f"Missing dependency: {missing_name}. From this source checkout, run "
+            "`python -m pip install -e \".[tune]\"` or "
+            "`python -m pip install -e \".[all]\"`; alternatively, use "
+            "--num-samples 1 for the local Ray-bypass path."
         ) from exc
     ray = _ray
     tune = _tune
@@ -640,7 +709,6 @@ def _collect_task_metadata(
     split_path = os.path.join(split_root, data_name, f"{data_name}_{seed}")
     with open(split_path, "rb") as f:
         train_idx, valid_idx, test_idx = pickle.load(f)
-    del valid_idx, test_idx
     split_sha256 = file_sha256(split_path)
     dataset_npz_sha256 = file_sha256(dataset_npz) if dataset_npz is not None else None
     timestamp_delta_scale, timestamp_summary = resolve_timestamp_delta_metadata(
@@ -654,9 +722,35 @@ def _collect_task_metadata(
         seq_len=seq_len,
     )
 
+    target_masks = None
+    task_targets = None
+    target_spec = None
+    preprocess_X = X
+    if task != "classification" and target_source == "dataset":
+        task_targets, target_masks, target_spec = load_task_targets_npz(
+            dataset=data_name,
+            targets_root=targets_root,
+            task=task,
+            horizon=forecast_horizon,
+            num_samples=num_data,
+            seq_len=seq_len,
+            input_dim=num_dim,
+        )
+        target_spec = dict(target_spec)
+        target_spec["split_supervision"] = validate_task_splits(
+            task=task,
+            target=task_targets,
+            target_mask=target_masks,
+            splits={"training": train_idx, "validation": valid_idx, "test": test_idx},
+        )
+        if task == "imputation":
+            preprocess_X = mask_imputation_inputs(X, target_masks)
+    elif task != "classification":
+        _build_task_targets(task, None, None, forecast_horizon)
+
     data_config = get_data_config(model_name)
     X_missing, _, _, _ = preprocess(
-        X,
+        preprocess_X,
         missing_rate=missing_rate,
         interpolate=data_config["interpolation"],
         use_intensity=data_config["use_intensity"],
@@ -665,7 +759,7 @@ def _collect_task_metadata(
         channel_sync=False,
         timestamps=timestamps,
         timestamp_delta_scale=timestamp_delta_scale,
-        missingness_reference=X[train_idx],
+        missingness_reference=preprocess_X[train_idx],
     )
     X_missing_norm, normalization_summary = normalize_with_train_stats(X_missing, train_idx)
     train_missing_summary = compute_train_missing_summary(X_missing, train_idx)
@@ -679,26 +773,8 @@ def _collect_task_metadata(
             "target_shape": [int(num_data)],
             "target_dtype": str(np.asarray(Y).dtype),
         }
-    elif target_source == "dataset":
-        _, target_masks, target_spec = load_task_targets_npz(
-            dataset=data_name,
-            targets_root=targets_root,
-            task=task,
-            horizon=forecast_horizon,
-            num_samples=num_data,
-            seq_len=seq_len,
-            input_dim=num_dim,
-        )
     else:
-        if task == "change_detection":
-            raise ValueError("change_detection requires --target-source dataset")
-        target_masks = None
-        target_spec = {
-            "task": task,
-            "target_key": f"surrogate::{task}",
-            "target_shape": None,
-            "target_dtype": "torch.float32",
-        }
+        assert target_spec is not None
 
     target_spec = dict(target_spec)
     target_spec["target_source"] = target_source if task != "classification" else "label"
@@ -1076,26 +1152,12 @@ def _capacity_metadata_from_config(model_config: dict) -> dict:
 
 
 def _build_task_targets(task, x_missing_norm, y, forecast_horizon=None):
+    del x_missing_norm, y, forecast_horizon
     if task == "classification":
         return None
-    filled = torch.nan_to_num(x_missing_norm, 0.0)
-    if task == "regression":
-        return filled.mean(dim=(1, 2), keepdim=False).unsqueeze(-1)
-    if task == "forecasting":
-        horizon = filled.shape[1] if forecast_horizon is None else max(1, int(forecast_horizon))
-        horizon = min(horizon, filled.shape[1])
-        return filled[:, -horizon:, :]
-    if task == "imputation":
-        return filled
-    if task == "outlier_detection":
-        labels = torch.as_tensor(y, device=filled.device)
-        normal = torch.tensor(0, device=labels.device, dtype=labels.dtype)
-        if not torch.any(labels == normal):
-            normal = torch.min(labels)
-        return (labels != normal).to(dtype=filled.dtype).unsqueeze(-1)
-    if task == "change_detection":
-        raise ValueError("change_detection requires --target-source dataset")
-    raise ValueError(f"Unsupported task: {task}")
+    raise ValueError(
+        f"non-classification tasks require --target-source dataset; got task={task!r}"
+    )
 
 
 def report_tune_loss(loss_value, *, epoch=None):
@@ -1119,7 +1181,7 @@ def report_tune_loss(loss_value, *, epoch=None):
 
 
 def _trial_reported_iteration(trial) -> int:
-    last_result = getattr(trial, "last_result", None) or {}
+    last_result = _safe_trial_attr(trial, "last_result") or {}
     iteration = 0
     for key in ("training_iteration", "epoch"):
         value = last_result.get(key)
@@ -1133,7 +1195,7 @@ def _trial_reported_iteration(trial) -> int:
 
 
 def _trial_reported_loss(trial) -> float | None:
-    last_result = getattr(trial, "last_result", None) or {}
+    last_result = _safe_trial_attr(trial, "last_result") or {}
     if "loss" not in last_result:
         return None
     try:
@@ -1158,7 +1220,7 @@ def _json_safe(value):
 
 
 def _trial_candidate_id(trial) -> str:
-    config = getattr(trial, "config", None) or {}
+    config = _safe_trial_attr(trial, "config") or {}
     return stable_hash({"trial_config": _json_safe(config)})
 
 
@@ -1170,8 +1232,15 @@ class SearchNoCompletedTrialError(RuntimeError):
     """Raised when ASHA prunes every single-repeat trial before max_t."""
 
 
+def _safe_trial_attr(trial, attr, default=None):
+    try:
+        return getattr(trial, attr, default)
+    except Exception:
+        return default
+
+
 def _trial_status(trial) -> str:
-    status = str(getattr(trial, "status", "") or "").upper()
+    status = str(_safe_trial_attr(trial, "status", "") or "").upper()
     return status or "UNKNOWN"
 
 
@@ -1181,7 +1250,7 @@ def _trial_is_terminated(trial) -> bool:
 
 def _trial_id(trial) -> str | None:
     for attr in ("trial_id", "trial_name"):
-        value = getattr(trial, attr, None)
+        value = _safe_trial_attr(trial, attr)
         if value:
             return str(value)
     return None
@@ -1190,21 +1259,39 @@ def _trial_id(trial) -> str | None:
 def _trial_error_text(trial) -> str:
     fragments = []
     for attr in ("error_msg", "last_error"):
-        value = getattr(trial, attr, None)
+        value = _safe_trial_attr(trial, attr)
         if value:
             fragments.append(str(value))
-    error_file = getattr(trial, "error_file", None)
-    if error_file:
+
+    candidate_paths = []
+    error_file = _safe_trial_attr(trial, "error_file")
+    if error_file not in {None, ""}:
+        candidate_paths.append(Path(str(error_file)))
+    trial_dir = None
+    for attr in ("local_path", "path", "logdir"):
+        value = _safe_trial_attr(trial, attr)
+        if value not in {None, ""}:
+            trial_dir = Path(str(value))
+            break
+    if trial_dir is not None:
+        candidate_paths.append(trial_dir / "error.txt")
+
+    seen_paths = set()
+    for candidate in candidate_paths:
+        key = str(candidate)
+        if key in seen_paths:
+            continue
+        seen_paths.add(key)
         try:
-            with open(error_file, "r", encoding="utf-8", errors="ignore") as f:
+            with candidate.open("r", encoding="utf-8", errors="ignore") as f:
                 fragments.append(f.read(4096))
-        except OSError:
+        except (OSError, TypeError, ValueError):
             pass
     return "\n".join(fragments)
 
 
 def _trial_has_nonfinite_loss(trial) -> bool:
-    last_result = getattr(trial, "last_result", None) or {}
+    last_result = _safe_trial_attr(trial, "last_result") or {}
     if "loss" not in last_result:
         return False
     try:
@@ -1415,7 +1502,7 @@ def _train_single_seed(
     split_root,
     task="classification",
     forecast_horizon=None,
-    target_source="surrogate",
+    target_source="dataset",
     targets_root="targets",
     dataset_source="default",
     dataset_npz=None,
@@ -1463,6 +1550,32 @@ def _train_single_seed(
     )
     batch_size = int(batch_policy["batch_size"])
 
+    task_targets = None
+    target_masks = None
+    target_spec = None
+    preprocess_X = X
+    if task != "classification" and target_source == "dataset":
+        task_targets, target_masks, target_spec = load_task_targets_npz(
+            dataset=data_name,
+            targets_root=targets_root,
+            task=task,
+            horizon=forecast_horizon,
+            num_samples=int(num_data),
+            seq_len=int(seq_len),
+            input_dim=int(num_dim),
+        )
+        target_spec = dict(target_spec)
+        target_spec["split_supervision"] = validate_task_splits(
+            task=task,
+            target=task_targets,
+            target_mask=target_masks,
+            splits={"training": train_idx, "validation": valid_idx, "test": test_idx},
+        )
+        if task == "imputation":
+            preprocess_X = mask_imputation_inputs(X, target_masks)
+    elif task != "classification":
+        _build_task_targets(task, None, None, forecast_horizon)
+
     # Set learning rate
     lr_policy = resolve_learning_rate_policy(model_config.get("lr"))
     lr = float(lr_policy["lr"])
@@ -1492,7 +1605,7 @@ def _train_single_seed(
 
     # Preprocess data
     X_missing, X_mask, X_delta, coeffs = preprocess(
-        X,
+        preprocess_X,
         missing_rate=missing_rate,
         interpolate=interpolate,
         use_intensity=use_intensity,
@@ -1501,13 +1614,12 @@ def _train_single_seed(
         channel_sync=False,
         timestamps=timestamps,
         timestamp_delta_scale=timestamp_delta_scale,
-        missingness_reference=X[train_idx],
+        missingness_reference=preprocess_X[train_idx],
     )
     X_missing_norm, normalization_summary = normalize_with_train_stats(X_missing, train_idx)
     train_missing_summary = compute_train_missing_summary(X_missing, train_idx)
     train_missing_summary.update(normalization_summary)
 
-    target_masks = None
     if task == "classification":
         task_targets = None
         target_masks = None
@@ -1517,32 +1629,8 @@ def _train_single_seed(
             "target_shape": [int(num_data)],
             "target_dtype": str(np.asarray(Y).dtype),
         }
-    elif target_source == "dataset":
-        task_targets, target_masks, target_spec = load_task_targets_npz(
-            dataset=data_name,
-            targets_root=targets_root,
-            task=task,
-            horizon=forecast_horizon,
-            num_samples=int(num_data),
-            seq_len=int(seq_len),
-            input_dim=int(num_dim),
-        )
     else:
-        if task == "change_detection":
-            raise ValueError("change_detection requires --target-source dataset")
-        task_targets = _build_task_targets(
-            task=task,
-            x_missing_norm=X_missing_norm,
-            y=Y,
-            forecast_horizon=forecast_horizon,
-        )
-        target_masks = None
-        target_spec = {
-            "task": task,
-            "target_key": f"surrogate::{task}",
-            "target_shape": None,
-            "target_dtype": "torch.float32",
-        }
+        assert task_targets is not None and target_spec is not None
     target_spec = dict(target_spec)
     target_spec["target_source"] = target_source if task != "classification" else "label"
     supervised_missing_count = None
@@ -1678,7 +1766,7 @@ def tune_model(
     split_root="split",
     task="classification",
     forecast_horizon=None,
-    target_source="surrogate",
+    target_source="dataset",
     targets_root="targets",
     dataset_source="default",
     dataset_npz=None,
@@ -1805,7 +1893,7 @@ def optimize(
     search_profile=DEFAULT_SEARCH_PROFILE,
     task="classification",
     forecast_horizon=None,
-    target_source="surrogate",
+    target_source="dataset",
     targets_root="targets",
     dataset_source="default",
     dataset_npz=None,
@@ -1865,10 +1953,17 @@ def optimize(
             constrained_capacity_config["metadata"]["capacity_target"],
         )
     metadata_seed = _fixed_search_seed_set(search_repeat, SEED)[0]
-    artifact_identity = build_param_artifact_identity(
+    artifact_identity = _build_expected_param_artifact_identity(
         data_name=data_name,
         model_name=model_name,
         task=task,
+        target_source=target_source,
+        targets_root=targets_root,
+        forecast_horizon=forecast_horizon,
+        dataset_source=dataset_source,
+        dataset_npz=dataset_npz,
+        split_root=split_root,
+        split_seeds=_fixed_search_seed_set(search_repeat, SEED),
     )
     if num_samples <= 1:
         LOGGER.info(
@@ -2011,8 +2106,8 @@ def optimize(
             "best_loss": float(best_loss),
             "param_config": saved_model_config,
             "param_hash": saved_model_config["param_hash"],
-            "param_path": str(param_path),
-            "split_path": str(split_path),
+            "param_path": portable_artifact_reference(param_path),
+            "split_path": portable_artifact_reference(split_path),
             "param_file_sha256": param_file_sha256,
             "split_sha256": metadata["split_sha256"],
             "dataset_npz_sha256": metadata["dataset_npz_sha256"],
@@ -2055,7 +2150,7 @@ def optimize(
             "target_source": metadata["target_source"],
             "timestamp_summary": metadata["timestamp_summary"],
             "dataset_source": str(dataset_source),
-            "dataset_npz": None if dataset_npz is None else str(dataset_npz),
+            "dataset_npz": portable_artifact_reference(dataset_npz, root=True),
             "runtime_baseline_id": runtime_baseline_id,
         }
 
@@ -2260,8 +2355,8 @@ def optimize(
         "best_loss": float(best_trial.last_result["loss"]),
         "param_config": saved_param_config,
         "param_hash": saved_param_config["param_hash"],
-        "param_path": str(param_path),
-        "split_path": str(split_path),
+        "param_path": portable_artifact_reference(param_path),
+        "split_path": portable_artifact_reference(split_path),
         "param_file_sha256": param_file_sha256,
         "split_sha256": metadata["split_sha256"],
         "dataset_npz_sha256": metadata["dataset_npz_sha256"],
@@ -2310,7 +2405,7 @@ def optimize(
         "target_source": metadata["target_source"],
         "timestamp_summary": metadata["timestamp_summary"],
         "dataset_source": str(dataset_source),
-        "dataset_npz": None if dataset_npz is None else str(dataset_npz),
+        "dataset_npz": portable_artifact_reference(dataset_npz, root=True),
         "runtime_baseline_id": runtime_baseline_id,
     }
 
@@ -2409,15 +2504,33 @@ def main():
                         policy_violations.append(f"{data_name}/{model_name}: {reason}")
                         continue
                     try:
+                        expected_artifact_identity = _build_expected_param_artifact_identity(
+                            data_name=data_name,
+                            model_name=model_name,
+                            task=args.task,
+                            target_source=args.target_source,
+                            targets_root=args.targets_root,
+                            forecast_horizon=args.forecast_horizon,
+                            dataset_source=args.dataset_source,
+                            dataset_npz=args.dataset_npz,
+                            split_root=args.split_root,
+                            split_seeds=split_seeds,
+                        )
                         existing_profile = _validate_existing_param_artifact_for_reuse(
                             existing_cfg,
                             existing_param_path=existing_param_path,
                             data_name=data_name,
                             model_name=model_name,
                             task=args.task,
+                            target_source=expected_artifact_identity["target_source"],
+                            target_sha256=expected_artifact_identity["target_sha256"],
+                            forecast_horizon=expected_artifact_identity["forecast_horizon"],
+                            dataset_source=expected_artifact_identity["dataset_source"],
+                            dataset_npz_sha256=expected_artifact_identity["dataset_npz_sha256"],
+                            split_sha256s=expected_artifact_identity["split_sha256s"],
                             allow_legacy_search_profile=args.allow_legacy_search_profile,
                         )
-                    except ValueError as exc:
+                    except (FileNotFoundError, ValueError) as exc:
                         reason = f"param artifact reuse check failed: {exc}"
                         LOGGER.error("[FAIL] %s/%s: %s", data_name, model_name, reason)
                         skipped.append({"dataset": data_name, "model": model_name, "task": args.task, "reason": reason})
@@ -2463,7 +2576,7 @@ def main():
                         {
                             "dataset": data_name,
                             "dataset_source": str(args.dataset_source),
-                            "dataset_npz": None if args.dataset_npz is None else str(args.dataset_npz),
+                            "dataset_npz": portable_artifact_reference(args.dataset_npz, root=True),
                             "dataset_npz_sha256": dataset_npz_sha256,
                             "model": model_name,
                             "seed": SEED,
@@ -2510,8 +2623,8 @@ def main():
                             "architecture_axes": existing_cfg.get("architecture_axes"),
                             "effective_params": existing_cfg.get("effective_params"),
                             "capacity_metadata": _capacity_metadata_from_config(existing_cfg),
-                            "split_path": str(split_path),
-                            "param_path": str(existing_param_path),
+                            "split_path": portable_artifact_reference(split_path),
+                            "param_path": portable_artifact_reference(existing_param_path),
                             "param_hash": str(param_hash),
                             "split_sha256": existing_split_sha256,
                             "param_file_sha256": existing_param_file_sha256,
@@ -2581,8 +2694,8 @@ def main():
                         "train_missing_summary": search_result["train_missing_summary"],
                         "target_spec": search_result["target_spec"],
                         "timestamp_summary": search_result["timestamp_summary"],
-                        "split_path": str(search_result["split_path"]),
-                        "param_path": str(search_result["param_path"]),
+                        "split_path": portable_artifact_reference(search_result["split_path"]),
+                        "param_path": portable_artifact_reference(search_result["param_path"]),
                         "param_hash": str(search_result["param_hash"]),
                         "split_sha256": search_result["split_sha256"],
                         "param_file_sha256": search_result["param_file_sha256"],
@@ -2700,7 +2813,7 @@ def main():
             "missing_rate": float(args.missing_rate),
             "task": args.task,
             "dataset_source": str(args.dataset_source),
-            "dataset_npz": None if args.dataset_npz is None else str(args.dataset_npz),
+            "dataset_npz": portable_artifact_reference(args.dataset_npz, root=True),
             "target_source": args.target_source if args.task != "classification" else "label",
             "search_policy": args.search_policy,
             "search_policy_axis": args.search_policy,
@@ -2723,8 +2836,8 @@ def main():
             "search_seed_set": _fixed_search_seed_set(args.search_repeat, SEED),
             "search_profile": args.search_profile,
             **search_contract_metadata,
-            "split_root": str(args.split_root),
-            "param_root": str(args.param_root),
+            "split_root": portable_artifact_reference(args.split_root, root=True),
+            "param_root": portable_artifact_reference(args.param_root, root=True),
             "records": records,
             "reused_records": reused_records,
             "skipped": skipped,

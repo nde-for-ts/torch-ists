@@ -63,7 +63,7 @@ from dataset_source_contracts import (
     normalize_dataset_source,
     resolve_timestamp_delta_metadata,
 )
-from script_chain_contracts import atomic_pickle_dump, file_sha256, generate_run_id, write_manifest
+from script_chain_contracts import atomic_pickle_dump, file_sha256, generate_run_id, portable_artifact_reference, write_manifest
 
 sys.dont_write_bytecode = True
 
@@ -221,6 +221,62 @@ def _resolve_param_artifact_path(
     return param_name, param_path
 
 
+def _expected_param_target_identity(
+    *,
+    data_name: str,
+    task: str,
+    target_source: str,
+    targets_root: str,
+    forecast_horizon,
+    model_config: dict,
+    dataset_source: str,
+    dataset_npz: str | None,
+    split_root: str,
+    param_repeat: str,
+) -> dict:
+    task_name = str(task).strip().lower()
+    source = "label" if task_name == "classification" else str(target_source).strip().lower()
+    target_sha256 = None
+    if task_name != "classification" and source == "dataset":
+        target_path = Path(targets_root) / f"{data_name}.npz"
+        if not target_path.exists():
+            raise FileNotFoundError(f"Target bundle not found for dataset={data_name}: {target_path}")
+        target_sha256 = file_sha256(target_path)
+    normalized_dataset_source = str(dataset_source).strip().lower()
+    dataset_npz_sha256 = None
+    if normalized_dataset_source == "npz":
+        if dataset_npz is None or not Path(dataset_npz).exists():
+            raise FileNotFoundError(f"Dataset NPZ not found: {dataset_npz}")
+        dataset_npz_sha256 = file_sha256(dataset_npz)
+    identity = model_config.get("artifact_identity", {})
+    stored_splits = identity.get("split_sha256s") if isinstance(identity, dict) else None
+    if not isinstance(stored_splits, list):
+        raise ValueError("Param artifact is missing split_sha256s identity")
+    split_seeds = [int(item["seed"]) for item in stored_splits if isinstance(item, dict) and "seed" in item]
+    if param_repeat == AGGREGATED_SEARCH_REPEAT and split_seeds != [0, 1, 2, 3, 4]:
+        raise ValueError("Aggregated param artifact split seeds must be [0, 1, 2, 3, 4]")
+    if param_repeat == SINGLE_SEARCH_REPEAT and len(split_seeds) != 1:
+        raise ValueError("Single-repeat param artifact must bind exactly one split seed")
+    split_sha256s = []
+    for split_seed in split_seeds:
+        split_path = Path(split_root) / data_name / f"{data_name}_{split_seed}"
+        if not split_path.exists():
+            raise FileNotFoundError(f"Split artifact not found: {split_path}")
+        split_sha256s.append({"seed": split_seed, "sha256": file_sha256(split_path)})
+    return {
+        "target_source": source,
+        "target_sha256": target_sha256,
+        "forecast_horizon": (
+            int(forecast_horizon)
+            if task_name == "forecasting" and forecast_horizon is not None
+            else None
+        ),
+        "dataset_source": normalized_dataset_source,
+        "dataset_npz_sha256": dataset_npz_sha256,
+        "split_sha256s": split_sha256s,
+    }
+
+
 def _infer_cli_search_policy(model_config: dict) -> str:
     raw = str(model_config.get("search_policy", STANDARD_SEARCH_POLICY)).strip().lower()
     if raw in {STANDARD_SEARCH_POLICY, CONSTRAINED_SEARCH_POLICY}:
@@ -268,6 +324,12 @@ def _validate_param_search_profile(
     expected_data_name: str,
     expected_model_name: str,
     expected_task: str,
+    expected_target_source: str,
+    expected_target_sha256: str | None,
+    expected_forecast_horizon,
+    expected_dataset_source: str,
+    expected_dataset_npz_sha256: str | None,
+    expected_split_sha256s,
     param_path: str,
     allow_legacy_search_profile: bool = False,
 ) -> str:
@@ -308,6 +370,12 @@ def _validate_param_search_profile(
             data_name=expected_data_name,
             model_name=expected_model_name,
             task=expected_task,
+            target_source=expected_target_source,
+            target_sha256=expected_target_sha256,
+            forecast_horizon=expected_forecast_horizon,
+            dataset_source=expected_dataset_source,
+            dataset_npz_sha256=expected_dataset_npz_sha256,
+            split_sha256s=expected_split_sha256s,
             context=f"Param artifact {param_path}",
         )
     return actual
@@ -757,8 +825,11 @@ def parse_cli_args():
     parser.add_argument(
         "--robustness-profile",
         choices=["custom", "100-cell"],
-        default="custom",
-        help="Robustness axis profile. 100-cell selects the production universal grid.",
+        default=None,
+        help=(
+            "Robustness axis profile. --robustness-mode defaults to the 100-cell grid; "
+            "custom keeps explicitly configured axes."
+        ),
     )
     parser.add_argument(
         "--robustness-test-rates",
@@ -874,23 +945,29 @@ def parse_cli_args():
     )
     parser.add_argument(
         "--task",
-        type=str,
-        choices=["classification"],
+        choices=[
+            "classification",
+            "regression",
+            "forecasting",
+            "imputation",
+            "outlier_detection",
+            "change_detection",
+        ],
         default="classification",
-        help="Task head for this package runtime.",
+        help="Task head. Classification is stable; other task heads are experimental.",
     )
     parser.add_argument(
         "--forecast-horizon",
         type=int,
         default=None,
-        help=argparse.SUPPRESS,
+        help="Required positive forecasting horizon when --task=forecasting.",
     )
     parser.add_argument(
         "--target-source",
         type=str,
-        choices=["surrogate"],
-        default="surrogate",
-        help=argparse.SUPPRESS,
+        choices=["dataset", "surrogate"],
+        default="dataset",
+        help="Target source for non-classification tasks; surrogate targets are rejected.",
     )
     parser.add_argument(
         "--targets-root",
@@ -900,7 +977,6 @@ def parse_cli_args():
     )
     parser.add_argument(
         "--model-scope-variant",
-        type=str,
         choices=["active"],
         default="active",
         help="Model scope for this package runtime.",
@@ -914,6 +990,8 @@ def parse_cli_args():
     args.param_repeat = args.param_repeat or SINGLE_SEARCH_REPEAT
     if args.seed is None:
         args.seed = args.seed_positional if args.seed_positional is not None else 0
+    if args.robustness_profile is None:
+        args.robustness_profile = "100-cell" if args.robustness_mode else "custom"
     args.datasets = _parse_csv_list(args.datasets)
     args.models = _parse_csv_list(args.models)
     args.missing_rates = _parse_missing_rates(args.missing_rates)
@@ -979,6 +1057,7 @@ def _resolve_run_device(device_mode: str) -> torch.device:
 # Import from the packaged torch_ists runtime.
 from torch_ists.preprocessing import apply_missingness, preprocess
 from torch_ists import __version__ as TORCH_ISTS_PACKAGE_VERSION, ists_classifier, ists_model
+from torch_ists.channel_drop import build_channel_drop_plan
 from _training_runtime import (
     _align_prediction_target,
     apply_train_normalization_stats,
@@ -991,7 +1070,11 @@ from _training_runtime import (
     run_train_valid_loop,
     train,
 )
-from task_target_contracts import load_task_targets_npz
+from task_target_contracts import (
+    load_task_targets_npz,
+    mask_imputation_inputs,
+    validate_task_splits,
+)
 from torch_ists.config import (
     get_data_config,
     get_active_model_list,
@@ -1115,7 +1198,7 @@ def _build_output_contract(
     return {
         "dataset": str(data_name),
         "dataset_source": str(dataset_source),
-        "dataset_npz": None if dataset_npz is None else str(dataset_npz),
+        "dataset_npz": portable_artifact_reference(dataset_npz, root=True),
         "dataset_npz_sha256": dataset_npz_sha256,
         "data_shape": [int(value) for value in data_shape],
         "num_class": int(num_class),
@@ -1129,9 +1212,9 @@ def _build_output_contract(
         "train_missing_type": str(train_missing_type).upper(),
         "train_channel_sync": None if train_channel_sync is None else bool(train_channel_sync),
         "evaluation_regime": str(evaluation_regime),
-        "split_path": str(split_path),
+        "split_path": portable_artifact_reference(split_path),
         "split_sha256": split_sha256,
-        "target_path": target_path,
+        "target_path": portable_artifact_reference(target_path),
         "target_sha256": target_sha256,
         "epochs": int(epochs),
         "save_predictions": str(save_predictions),
@@ -1140,7 +1223,6 @@ def _build_output_contract(
         "use_intensity": bool(use_intensity),
         "batch_policy": batch_policy,
         "lr_policy": lr_policy,
-        "param_search_contract": dict(param_search_contract),
         "timestamp_summary": timestamp_summary,
         "robustness_axes": robustness_axes,
         "training_loop_policy": training_loop_policy,
@@ -1193,7 +1275,42 @@ def _evaluation_axis_key(evaluation):
     )
 
 
-def _validate_prediction_payload(predictions, *, expected_storage, task, output_path):
+def _expected_task_prediction_shape(task, count, expected_contract, output_path):
+    data_shape = expected_contract.get("data_shape") if isinstance(expected_contract, dict) else None
+    if not isinstance(data_shape, (list, tuple)) or len(data_shape) != 3:
+        raise OutputArtifactContractError(
+            f"Output artifact {output_path} cannot be reused: task prediction shape details are missing."
+        )
+    input_dim = int(data_shape[1])
+    seq_len = int(data_shape[2])
+    if task in {"regression", "outlier_detection"}:
+        return (count, 1)
+    if task == "forecasting":
+        horizon = expected_contract.get("forecast_horizon")
+        if horizon is None or int(horizon) <= 0:
+            raise OutputArtifactContractError(
+                f"Output artifact {output_path} cannot be reused: forecasting horizon is invalid."
+            )
+        return (count, int(horizon), input_dim)
+    if task == "imputation":
+        return (count, seq_len, input_dim)
+    if task == "change_detection":
+        return (count, seq_len, 1)
+    raise OutputArtifactContractError(
+        f"Output artifact {output_path} cannot be reused: unsupported task {task!r}."
+    )
+
+
+def _validate_prediction_payload(
+    predictions,
+    *,
+    expected_storage,
+    task,
+    expected_contract=None,
+    expected_sample_indices=None,
+    expected_y_true=None,
+    output_path,
+):
     if not isinstance(predictions, dict):
         raise OutputArtifactContractError(
             f"Output artifact {output_path} cannot be reused: missing predictions object."
@@ -1204,12 +1321,27 @@ def _validate_prediction_payload(predictions, *, expected_storage, task, output_
             f"Output artifact {output_path} cannot be reused: prediction storage "
             f"{storage!r} does not match {expected_storage!r}."
         )
+    if predictions.get("prediction_identity_schema") != PREDICTION_IDENTITY_SCHEMA:
+        raise OutputArtifactContractError(
+            f"Output artifact {output_path} cannot be reused: prediction identity schema is invalid."
+        )
+    if predictions.get("sample_index_dtype") != "int64":
+        raise OutputArtifactContractError(
+            f"Output artifact {output_path} cannot be reused: sample index dtype is invalid."
+        )
     count = predictions.get("sample_index_count")
     if count is None or int(count) < 0:
         raise OutputArtifactContractError(
             f"Output artifact {output_path} cannot be reused: sample_index_count is missing or invalid."
         )
     count = int(count)
+    expected_indices = None
+    expected_index_hash = None
+    if expected_sample_indices is not None:
+        expected_indices = np.ascontiguousarray(
+            np.asarray(expected_sample_indices, dtype=np.int64).reshape(-1)
+        )
+        expected_index_hash = hashlib.sha256(expected_indices.tobytes()).hexdigest()
     sample_indices = predictions.get("sample_indices")
     if storage == "full":
         if sample_indices is None:
@@ -1227,13 +1359,87 @@ def _validate_prediction_payload(predictions, *, expected_storage, task, output_
             raise OutputArtifactContractError(
                 f"Output artifact {output_path} cannot be reused: sample index hash is invalid."
             )
+        if expected_indices is not None and not np.array_equal(indices, expected_indices):
+            raise OutputArtifactContractError(
+                f"Output artifact {output_path} cannot be reused: sample indices do not match current split."
+            )
         if task == "classification":
-            for key in ("y_true", "y_pred", "logit_list"):
+            num_class = int((expected_contract or {}).get("num_class", 0))
+            y_true_array = np.asarray(predictions.get("y_true"))
+            y_pred_array = np.asarray(predictions.get("y_pred"))
+            logit_array = np.asarray(predictions.get("logit_list"))
+            if y_true_array.shape != (count,):
+                raise OutputArtifactContractError(
+                    f"Output artifact {output_path} cannot be reused: y_true does not match sample_index_count."
+                )
+            if expected_y_true is not None and not np.array_equal(
+                y_true_array,
+                np.asarray(expected_y_true).reshape(-1),
+            ):
+                raise OutputArtifactContractError(
+                    f"Output artifact {output_path} cannot be reused: y_true does not match current split."
+                )
+            if (
+                y_pred_array.shape != (count,)
+                or not np.isfinite(y_pred_array).all()
+                or not np.equal(y_pred_array, np.floor(y_pred_array)).all()
+                or np.any(y_pred_array < 0)
+                or np.any(y_pred_array >= num_class)
+            ):
+                raise OutputArtifactContractError(
+                    f"Output artifact {output_path} cannot be reused: y_pred is invalid."
+                )
+            if logit_array.shape != (count, num_class) or not np.isfinite(logit_array).all():
+                raise OutputArtifactContractError(
+                    f"Output artifact {output_path} cannot be reused: logit_list is invalid."
+                )
+        else:
+            expected_shape = _expected_task_prediction_shape(
+                task,
+                count,
+                expected_contract,
+                output_path,
+            )
+            if any(predictions.get(key) is not None for key in ("y_true", "y_pred", "logit_list")):
+                raise OutputArtifactContractError(
+                    f"Output artifact {output_path} cannot be reused: non-classification predictions "
+                    "contain classification arrays."
+                )
+            for key in ("target", "pred"):
                 values = predictions.get(key)
-                if values is None or np.asarray(values).shape[0] != count:
+                if values is None:
                     raise OutputArtifactContractError(
-                        f"Output artifact {output_path} cannot be reused: {key} does not match "
-                        "sample_index_count."
+                        f"Output artifact {output_path} cannot be reused: {key} is missing."
+                    )
+                array = np.asarray(values)
+                if tuple(array.shape) != expected_shape:
+                    raise OutputArtifactContractError(
+                        f"Output artifact {output_path} cannot be reused: {key} shape "
+                        f"{tuple(array.shape)} does not match {expected_shape}."
+                    )
+                if not np.isfinite(array).all():
+                    raise OutputArtifactContractError(
+                        f"Output artifact {output_path} cannot be reused: {key} must be finite."
+                    )
+            if task in {"imputation", "change_detection"}:
+                target_mask = predictions.get("target_mask")
+                if target_mask is None:
+                    raise OutputArtifactContractError(
+                        f"Output artifact {output_path} cannot be reused: target_mask is missing."
+                    )
+                mask_array = np.asarray(target_mask)
+                if tuple(mask_array.shape) != expected_shape:
+                    raise OutputArtifactContractError(
+                        f"Output artifact {output_path} cannot be reused: target_mask shape is invalid."
+                    )
+                if (
+                    not np.isfinite(mask_array).all()
+                    or not np.isin(mask_array, [0, 1]).all()
+                    or int(np.count_nonzero(mask_array)) <= 0
+                ):
+                    raise OutputArtifactContractError(
+                        f"Output artifact {output_path} cannot be reused: target_mask must contain "
+                        "finite binary supervision."
                     )
     else:
         if sample_indices is not None or any(
@@ -1247,9 +1453,53 @@ def _validate_prediction_payload(predictions, *, expected_storage, task, output_
                 f"Output artifact {output_path} cannot be reused: sample_index_count does not match "
                 "the summary sample count."
             )
+        if expected_indices is not None and len(expected_indices) != count:
+            raise OutputArtifactContractError(
+                f"Output artifact {output_path} cannot be reused: summary sample indices do not match current split."
+            )
+        if expected_index_hash is not None and predictions.get("sample_index_hash") != expected_index_hash:
+            raise OutputArtifactContractError(
+                f"Output artifact {output_path} cannot be reused: summary sample indices do not match current split."
+            )
+        if task == "classification" and int(predictions.get("n_classes", -1)) != int(
+            (expected_contract or {}).get("num_class", -1)
+        ):
+            raise OutputArtifactContractError(
+                f"Output artifact {output_path} cannot be reused: summary class count is invalid."
+            )
+        if task != "classification":
+            if any(predictions.get(key) is not None for key in ("target", "pred", "target_mask")):
+                raise OutputArtifactContractError(
+                    f"Output artifact {output_path} cannot be reused: summary predictions contain task arrays."
+                )
+            expected_shape = list(
+                _expected_task_prediction_shape(task, count, expected_contract, output_path)
+            )
+            for key in ("task_target_shape", "task_pred_shape"):
+                if predictions.get(key) != expected_shape:
+                    raise OutputArtifactContractError(
+                        f"Output artifact {output_path} cannot be reused: {key} shape is invalid."
+                    )
+            if task in {"imputation", "change_detection"}:
+                if predictions.get("task_mask_shape") != expected_shape:
+                    raise OutputArtifactContractError(
+                        f"Output artifact {output_path} cannot be reused: task_mask_shape is invalid."
+                    )
+                if int(predictions.get("supervised_element_count", 0)) <= 0:
+                    raise OutputArtifactContractError(
+                        f"Output artifact {output_path} cannot be reused: supervised_element_count "
+                        "is missing or invalid."
+                    )
 
 
-def _validate_output_payload(payload, expected_contract, output_path):
+def _validate_output_payload(
+    payload,
+    expected_contract,
+    output_path,
+    *,
+    expected_sample_indices=None,
+    expected_y_true=None,
+):
     for payload_key, contract_key in (
         ("dataset", "dataset"),
         ("model", "model"),
@@ -1312,47 +1562,53 @@ def _validate_output_payload(payload, expected_contract, output_path):
             evaluation.get("predictions"),
             expected_storage=expected_storage,
             task=task,
+            expected_contract=expected_contract,
+            expected_sample_indices=expected_sample_indices,
+            expected_y_true=expected_y_true,
             output_path=output_path,
         )
-        if regime == "robustness" and evaluation.get("test_missing_type") == "CHANNEL_DROP":
-            required = (
-                "channel_count",
-                "requested_channel_drop_count",
-                "dropped_channel_count",
-                "dropped_channel_indices",
-                "realized_channel_drop_rate",
-                "channel_drop_applicable",
-                "analysis_exclusion_reason",
-                "all_missing_sequence_count",
+        if regime == "robustness" and not evaluation.get("mask_hash"):
+            raise OutputArtifactContractError(
+                f"Output artifact {output_path} cannot be reused: evaluated mask hash is missing."
             )
+        if regime == "robustness" and evaluation.get("test_missing_type") == "CHANNEL_DROP":
+            expected_plan = build_channel_drop_plan(
+                channel_count=channel_count,
+                rate=float(evaluation.get("test_missing_rate")),
+                seed=int(evaluation.get("missing_seed")),
+            )
+            required = tuple(expected_plan) + ("all_missing_sequence_count",)
             if any(key not in evaluation for key in required):
                 raise OutputArtifactContractError(
                     f"Output artifact {output_path} cannot be reused: channel-drop provenance is incomplete."
                 )
-            if int(evaluation["channel_count"]) != channel_count:
-                raise OutputArtifactContractError(
-                    f"Output artifact {output_path} cannot be reused: channel_count is inconsistent."
+            for key, expected_value in expected_plan.items():
+                actual_value = evaluation.get(key)
+                matches = (
+                    np.isclose(float(actual_value), float(expected_value))
+                    if isinstance(expected_value, float)
+                    else actual_value == expected_value
                 )
-            if channel_count == 1:
-                if (
-                    evaluation["channel_drop_applicable"] is not False
-                    or int(evaluation["dropped_channel_count"]) != 0
-                    or not evaluation["analysis_exclusion_reason"]
-                ):
+                if not matches:
                     raise OutputArtifactContractError(
-                        f"Output artifact {output_path} cannot be reused: univariate channel-drop "
-                        "exclusion is invalid."
+                        f"Output artifact {output_path} cannot be reused: channel-drop provenance "
+                        f"is inconsistent for {key}."
                     )
-            elif (
-                evaluation["channel_drop_applicable"] is not True
-                or evaluation["analysis_exclusion_reason"] is not None
-            ):
+            all_missing_count = int(evaluation["all_missing_sequence_count"])
+            prediction_count = int(evaluation["predictions"]["sample_index_count"])
+            if all_missing_count < 0 or all_missing_count > prediction_count:
                 raise OutputArtifactContractError(
-                    f"Output artifact {output_path} cannot be reused: channel-drop applicability is invalid."
+                    f"Output artifact {output_path} cannot be reused: all-missing sequence count is invalid."
                 )
 
 
-def _validate_existing_output_contract(output_path, expected_contract):
+def _validate_existing_output_contract(
+    output_path,
+    expected_contract,
+    *,
+    expected_sample_indices=None,
+    expected_y_true=None,
+):
     expected_hash = _output_contract_hash(expected_contract)
     try:
         payload = _read_output_payload(output_path)
@@ -1390,7 +1646,13 @@ def _validate_existing_output_contract(output_path, expected_contract):
             f"(stored={actual_hash}, expected={expected_hash}). "
             "Remove the artifact or rerun with --no-check to overwrite."
         )
-    _validate_output_payload(payload, expected_contract, output_path)
+    _validate_output_payload(
+        payload,
+        expected_contract,
+        output_path,
+        expected_sample_indices=expected_sample_indices,
+        expected_y_true=expected_y_true,
+    )
     return str(actual_hash)
 
 
@@ -1406,6 +1668,7 @@ def _build_output_path(
     robustness_test_mechanisms=None,
     robustness_channel_sync_options=None,
 ):
+    task_name = str(task).strip().lower()
     if robustness_mode:
         suffix = _build_robustness_axis_suffix(
             robustness_test_rates=robustness_test_rates,
@@ -1413,9 +1676,10 @@ def _build_output_path(
             robustness_channel_sync_options=robustness_channel_sync_options,
         )
         out_name = "_".join([data_name, "robustness", model_name, str(seed)]) + suffix
+        if task_name != "classification":
+            out_name = f"{out_name}__task_{task_name}"
         return os.path.join(out_root, data_name, "robustness", out_name)
     out_name = "_".join([data_name, str(missing_rate), model_name, str(seed)])
-    task_name = str(task).strip().lower()
     if task_name != "classification":
         out_name = f"{out_name}__task_{task_name}"
     return os.path.join(out_root, data_name, str(missing_rate), out_name)
@@ -1507,54 +1771,98 @@ def _compute_metrics(y_true, y_pred, logit_list=None):
 
 
 def _build_task_targets(task, x_missing_norm, y, forecast_horizon=None):
+    del x_missing_norm, y, forecast_horizon
     if task == "classification":
         return None
-    filled = torch.nan_to_num(x_missing_norm, 0.0)
-    if task == "regression":
-        return filled.mean(dim=(1, 2), keepdim=False).unsqueeze(-1)
-    if task == "forecasting":
-        horizon = filled.shape[1] if forecast_horizon is None else max(1, int(forecast_horizon))
-        horizon = min(horizon, filled.shape[1])
-        return filled[:, -horizon:, :]
-    if task == "imputation":
-        return filled
-    if task == "outlier_detection":
-        labels = torch.as_tensor(y, device=filled.device)
-        normal = torch.tensor(0, device=labels.device, dtype=labels.dtype)
-        if not torch.any(labels == normal):
-            normal = torch.min(labels)
-        return (labels != normal).to(dtype=filled.dtype).unsqueeze(-1)
-    if task == "change_detection":
-        raise ValueError("change_detection requires --target-source dataset")
-    raise ValueError(f"Unsupported task: {task}")
+    raise ValueError(
+        f"non-classification tasks require --target-source dataset; got task={task!r}"
+    )
 
 
-def _compute_task_metrics(pred: np.ndarray, target: np.ndarray):
+def _masked_metric_arrays(pred, target, target_mask, *, task: str):
     pred = np.asarray(pred, dtype=np.float64)
     target = np.asarray(target, dtype=np.float64)
     if pred.shape != target.shape:
         raise ValueError(f"shape mismatch for task metrics: {pred.shape} != {target.shape}")
+    if target_mask is None:
+        raise ValueError(f"{task} metrics require target_mask")
+    mask = np.asarray(target_mask)
+    if mask.shape != target.shape:
+        raise ValueError(f"shape mismatch for task mask: {mask.shape} != {target.shape}")
+    if not np.isfinite(mask).all() or not np.isin(mask, [0, 1]).all():
+        raise ValueError(f"{task} target_mask must be finite binary 0/1")
+    selected = mask.astype(bool)
+    count = int(np.count_nonzero(selected))
+    if count <= 0:
+        raise ValueError(f"{task} target_mask has zero supervised entries")
+    return pred[selected], target[selected], count
+
+
+def _compute_task_metrics(
+    pred: np.ndarray,
+    target: np.ndarray,
+    *,
+    target_mask=None,
+    task="regression",
+):
+    pred = np.asarray(pred, dtype=np.float64)
+    target = np.asarray(target, dtype=np.float64)
+    if pred.shape != target.shape:
+        raise ValueError(f"shape mismatch for task metrics: {pred.shape} != {target.shape}")
+    supervised_count = int(pred.size)
+    if target_mask is not None or task == "imputation":
+        pred, target, supervised_count = _masked_metric_arrays(
+            pred,
+            target,
+            target_mask,
+            task=task,
+        )
     diff = pred - target
     mse = float(np.mean(np.square(diff)))
     mae = float(np.mean(np.abs(diff)))
-    return {"mse": mse, "mae": mae}
+    return {"mse": mse, "mae": mae, "supervised_element_count": supervised_count}
 
 
-def _compute_binary_detection_metrics(pred: np.ndarray, target: np.ndarray, *, accuracy_key: str):
+def _compute_binary_detection_metrics(
+    pred: np.ndarray,
+    target: np.ndarray,
+    *,
+    accuracy_key: str,
+    target_mask=None,
+    task="outlier_detection",
+):
     pred = np.asarray(pred, dtype=np.float32)
     target = np.asarray(target, dtype=np.float32)
     if pred.shape != target.shape:
         raise ValueError(f"shape mismatch for binary detection metrics: {pred.shape} != {target.shape}")
+    supervised_count = int(pred.size)
+    if target_mask is not None or task == "change_detection":
+        pred, target, supervised_count = _masked_metric_arrays(
+            pred,
+            target,
+            target_mask,
+            task=task,
+        )
 
     logits = torch.from_numpy(pred)
     labels = torch.from_numpy(target)
     bce = float(torch.nn.functional.binary_cross_entropy_with_logits(logits, labels).item())
 
-    probs = 1.0 / (1.0 + np.exp(-pred))
+    probs = torch.sigmoid(logits).numpy()
     pred_label = probs >= 0.5
     true_label = target >= 0.5
+    if np.unique(true_label).size != 2:
+        raise ValueError(f"{task} metrics require both binary classes")
     acc = float(np.mean(pred_label == true_label))
-    return {"bce": bce, accuracy_key: acc}
+    return {
+        "bce": bce,
+        accuracy_key: acc,
+        "balanced_accuracy": float(balanced_accuracy_score(true_label.ravel(), pred_label.ravel())),
+        "f1": float(f1_score(true_label.ravel(), pred_label.ravel(), zero_division=0)),
+        "auroc": float(roc_auc_score(true_label.ravel(), probs.ravel())),
+        "auprc": float(average_precision_score(true_label.ravel(), probs.ravel())),
+        "supervised_element_count": supervised_count,
+    }
 
 
 def _prediction_identity_fields(sample_indices, *, include_indices: bool, expected_n: int | None = None) -> dict:
@@ -1608,16 +1916,85 @@ def _build_predictions_payload(y_true, y_pred, logit_list, save_predictions="ful
     raise ValueError(f"save_predictions must be 'full' or 'summary', got {save_predictions!r}")
 
 
+def _build_task_predictions_payload(
+    task_pred,
+    task_target,
+    *,
+    task_mask,
+    save_predictions,
+    sample_indices,
+):
+    pred_np = np.asarray(task_pred)
+    target_np = np.asarray(task_target)
+    if pred_np.shape != target_np.shape:
+        raise ValueError(f"task prediction/target shape mismatch: {pred_np.shape} != {target_np.shape}")
+    n_samples = int(pred_np.shape[0]) if pred_np.ndim > 0 else 0
+    mask_np = None if task_mask is None else np.asarray(task_mask)
+    mask_fields = {}
+    if mask_np is not None:
+        if mask_np.shape != target_np.shape:
+            raise ValueError(f"task mask/target shape mismatch: {mask_np.shape} != {target_np.shape}")
+        mask_fields = {
+            "task_mask_shape": list(mask_np.shape),
+            "task_mask_dtype": str(mask_np.dtype),
+            "supervised_element_count": int(np.count_nonzero(mask_np)),
+        }
+    if save_predictions == "full":
+        return {
+            "storage": "full",
+            **_prediction_identity_fields(sample_indices, include_indices=True, expected_n=n_samples),
+            "y_true": None,
+            "y_pred": None,
+            "logit_list": None,
+            "target": task_target,
+            "pred": task_pred,
+            **({"target_mask": task_mask} if mask_np is not None else {}),
+        }
+    if save_predictions == "summary":
+        return {
+            "storage": "summary",
+            **_prediction_identity_fields(sample_indices, include_indices=False, expected_n=n_samples),
+            "n_samples": n_samples,
+            "n_classes": 0,
+            "y_true_dtype": None,
+            "y_pred_dtype": None,
+            "logit_dtype": None,
+            "task_pred_shape": list(pred_np.shape),
+            "task_target_shape": list(target_np.shape),
+            "task_pred_dtype": str(pred_np.dtype),
+            "task_target_dtype": str(target_np.dtype),
+            **mask_fields,
+            "y_true": None,
+            "y_pred": None,
+            "logit_list": None,
+            "target": None,
+            "pred": None,
+            "target_mask": None,
+        }
+    raise ValueError(f"save_predictions must be 'full' or 'summary', got {save_predictions!r}")
+
+
 def _build_missingness_provenance(
     X,
     X_missing,
     mask_observed,
     requested_missing_rate,
     floor_stats=None,
+    sample_indices=None,
 ):
-    x_np = np.asarray(X, dtype=np.float32)
-    missing_np = np.asarray(X_missing, dtype=np.float32)
-    _ = mask_observed
+    x_full = np.asarray(X, dtype=np.float32)
+    missing_full = np.asarray(X_missing, dtype=np.float32)
+    mask_full = np.asarray(mask_observed)
+    indices = (
+        np.arange(x_full.shape[0], dtype=np.int64)
+        if sample_indices is None
+        else np.asarray(sample_indices, dtype=np.int64).reshape(-1)
+    )
+    if np.any(indices < 0) or np.any(indices >= x_full.shape[0]):
+        raise ValueError("missingness provenance sample indices are out of range")
+    x_np = x_full[indices]
+    missing_np = missing_full[indices]
+    mask_np = mask_full[indices]
     observed_before = ~np.isnan(x_np)
     observed_value_count = int(np.count_nonzero(observed_before))
     synthetic_missing = observed_before & np.isnan(missing_np)
@@ -1628,29 +2005,47 @@ def _build_missingness_provenance(
         else 0.0
     )
     floor_stats = floor_stats or {}
+    floor_indices = floor_stats.get("fully_masked_before_floor_indices")
+    if floor_indices is None:
+        full_floor_count = int(floor_stats.get("fully_masked_before_floor", 0))
+        if len(indices) != x_full.shape[0] and full_floor_count > 0:
+            raise ValueError("subset floor provenance requires per-sequence indices")
+        scoped_floor_count = full_floor_count
+    else:
+        scoped_floor_count = len(
+            set(int(value) for value in floor_indices) & set(indices.tolist())
+        )
     provenance = {
         "requested_missing_rate": float(requested_missing_rate),
         "realized_missing_rate": realized_missing_rate,
         "realized_missing_count": realized_missing_count,
         "observed_value_count": observed_value_count,
-        "fully_masked_before_floor": int(floor_stats.get("fully_masked_before_floor", 0)),
-        "floor_n_sequences": int(floor_stats.get("n_sequences", x_np.shape[0])),
+        "fully_masked_before_floor": int(scoped_floor_count),
+        "floor_n_sequences": int(x_np.shape[0]),
+        "mask_hash": hashlib.sha256(
+            np.ascontiguousarray(mask_np > 0, dtype=np.uint8).tobytes()
+        ).hexdigest(),
     }
     for key in (
         "channel_count",
         "requested_channel_drop_count",
         "dropped_channel_count",
         "dropped_channel_indices",
+        "channel_permutation",
+        "channel_mask_hash",
         "minimum_one_channel_forced",
         "maximum_one_channel_retained",
         "channel_count_quantized",
         "realized_channel_drop_rate",
         "channel_drop_applicable",
         "analysis_exclusion_reason",
-        "all_missing_sequence_count",
     ):
         if key in floor_stats:
             provenance[key] = floor_stats[key]
+    if "all_missing_sequence_count" in floor_stats:
+        provenance["all_missing_sequence_count"] = int(
+            np.count_nonzero(~(mask_np > 0).any(axis=(1, 2)))
+        )
     return provenance
 
 
@@ -1661,6 +2056,7 @@ def _build_evaluation_result(
     logit_list=None,
     task_pred=None,
     task_target=None,
+    task_mask=None,
     *,
     task="classification",
     test_missing_type="MCAR",
@@ -1689,125 +2085,61 @@ def _build_evaluation_result(
         metrics = {
             "bce": float(binary_metrics["bce"]),
             "outlier_acc": float(binary_metrics["outlier_acc"]),
+            "balanced_accuracy": float(binary_metrics["balanced_accuracy"]),
+            "f1": float(binary_metrics["f1"]),
+            "auroc": float(binary_metrics["auroc"]),
+            "auprc": float(binary_metrics["auprc"]),
         }
-        task_pred_np = np.asarray(task_pred)
-        task_target_np = np.asarray(task_target)
-        n_samples = int(task_pred_np.shape[0]) if task_pred_np.ndim > 0 else 0
-        if save_predictions == "full":
-            predictions = {
-                "storage": "full",
-                **_prediction_identity_fields(sample_indices, include_indices=True, expected_n=n_samples),
-                "y_true": None,
-                "y_pred": None,
-                "logit_list": None,
-                "target": task_target,
-                "pred": task_pred,
-            }
-        elif save_predictions == "summary":
-            predictions = {
-                "storage": "summary",
-                **_prediction_identity_fields(sample_indices, include_indices=False, expected_n=n_samples),
-                "n_samples": n_samples,
-                "n_classes": 0,
-                "y_true_dtype": None,
-                "y_pred_dtype": None,
-                "logit_dtype": None,
-                "task_pred_shape": list(task_pred_np.shape),
-                "task_target_shape": list(task_target_np.shape),
-                "task_pred_dtype": str(task_pred_np.dtype),
-                "task_target_dtype": str(task_target_np.dtype),
-                "y_true": None,
-                "y_pred": None,
-                "logit_list": None,
-                "target": None,
-                "pred": None,
-            }
-        else:
-            raise ValueError(f"save_predictions must be 'full' or 'summary', got {save_predictions!r}")
+        predictions = _build_task_predictions_payload(
+            task_pred,
+            task_target,
+            task_mask=None,
+            save_predictions=save_predictions,
+            sample_indices=sample_indices,
+        )
     elif task == "change_detection":
         binary_metrics = _compute_binary_detection_metrics(
             task_pred,
             task_target,
             accuracy_key="change_acc",
+            target_mask=task_mask,
+            task=task,
         )
         metrics = {
             "bce": float(binary_metrics["bce"]),
             "change_acc": float(binary_metrics["change_acc"]),
+            "balanced_accuracy": float(binary_metrics["balanced_accuracy"]),
+            "f1": float(binary_metrics["f1"]),
+            "auroc": float(binary_metrics["auroc"]),
+            "auprc": float(binary_metrics["auprc"]),
+            "supervised_element_count": int(binary_metrics["supervised_element_count"]),
         }
-        task_pred_np = np.asarray(task_pred)
-        task_target_np = np.asarray(task_target)
-        n_samples = int(task_pred_np.shape[0]) if task_pred_np.ndim > 0 else 0
-        if save_predictions == "full":
-            predictions = {
-                "storage": "full",
-                **_prediction_identity_fields(sample_indices, include_indices=True, expected_n=n_samples),
-                "y_true": None,
-                "y_pred": None,
-                "logit_list": None,
-                "target": task_target,
-                "pred": task_pred,
-            }
-        elif save_predictions == "summary":
-            predictions = {
-                "storage": "summary",
-                **_prediction_identity_fields(sample_indices, include_indices=False, expected_n=n_samples),
-                "n_samples": n_samples,
-                "n_classes": 0,
-                "y_true_dtype": None,
-                "y_pred_dtype": None,
-                "logit_dtype": None,
-                "task_pred_shape": list(task_pred_np.shape),
-                "task_target_shape": list(task_target_np.shape),
-                "task_pred_dtype": str(task_pred_np.dtype),
-                "task_target_dtype": str(task_target_np.dtype),
-                "y_true": None,
-                "y_pred": None,
-                "logit_list": None,
-                "target": None,
-                "pred": None,
-            }
-        else:
-            raise ValueError(f"save_predictions must be 'full' or 'summary', got {save_predictions!r}")
+        predictions = _build_task_predictions_payload(
+            task_pred,
+            task_target,
+            task_mask=task_mask,
+            save_predictions=save_predictions,
+            sample_indices=sample_indices,
+        )
     else:
-        task_metrics = _compute_task_metrics(task_pred, task_target)
+        task_metrics = _compute_task_metrics(
+            task_pred,
+            task_target,
+            target_mask=task_mask,
+            task=task,
+        )
         metrics = {
             "mse": float(task_metrics["mse"]),
             "mae": float(task_metrics["mae"]),
+            "supervised_element_count": int(task_metrics["supervised_element_count"]),
         }
-        task_pred_np = np.asarray(task_pred)
-        task_target_np = np.asarray(task_target)
-        n_samples = int(task_pred_np.shape[0]) if task_pred_np.ndim > 0 else 0
-        if save_predictions == "full":
-            predictions = {
-                "storage": "full",
-                **_prediction_identity_fields(sample_indices, include_indices=True, expected_n=n_samples),
-                "y_true": None,
-                "y_pred": None,
-                "logit_list": None,
-                "target": task_target,
-                "pred": task_pred,
-            }
-        elif save_predictions == "summary":
-            predictions = {
-                "storage": "summary",
-                **_prediction_identity_fields(sample_indices, include_indices=False, expected_n=n_samples),
-                "n_samples": n_samples,
-                "n_classes": 0,
-                "y_true_dtype": None,
-                "y_pred_dtype": None,
-                "logit_dtype": None,
-                "task_pred_shape": list(task_pred_np.shape),
-                "task_target_shape": list(task_target_np.shape),
-                "task_pred_dtype": str(task_pred_np.dtype),
-                "task_target_dtype": str(task_target_np.dtype),
-                "y_true": None,
-                "y_pred": None,
-                "logit_list": None,
-                "target": None,
-                "pred": None,
-            }
-        else:
-            raise ValueError(f"save_predictions must be 'full' or 'summary', got {save_predictions!r}")
+        predictions = _build_task_predictions_payload(
+            task_pred,
+            task_target,
+            task_mask=task_mask if task == "imputation" else None,
+            save_predictions=save_predictions,
+            sample_indices=sample_indices,
+        )
     result = {
         "missing_seed": int(missing_seed),
         "test_missing_rate": float(test_missing_rate),
@@ -1902,6 +2234,7 @@ def run_model(
     SEED=SEED,
     CHECK=False,
     robustness_mode=False,
+    robustness_profile="custom",
     robustness_test_rates=None,
     robustness_test_mechanisms=None,
     robustness_channel_sync_options=None,
@@ -1911,7 +2244,7 @@ def run_model(
     save_predictions="full",
     task="classification",
     forecast_horizon=None,
-    target_source="surrogate",
+    target_source="dataset",
     targets_root="targets",
     dataset_source="default",
     dataset_npz=None,
@@ -1939,8 +2272,8 @@ def run_model(
     else:
         LOGGER.info("Run start dataset=%s missing=%.1f model=%s", data_name, missing_rate, model_name)
 
-    if task != "classification" and robustness_mode:
-        raise ValueError("robustness mode currently supports classification only")
+    if task != "classification" and robustness_mode and robustness_profile == "100-cell":
+        raise ValueError("the 100-condition robustness profile supports classification only")
 
     # check exist
     out_path = _build_output_path(
@@ -2008,10 +2341,39 @@ def run_model(
     dataset_npz_sha256 = file_sha256(dataset_npz) if dataset_npz is not None else None
     target_path_for_contract = None
     target_sha256 = None
+    task_targets = None
+    target_masks = None
+    target_spec = None
+    preprocess_X = X
     if task != "classification" and target_source == "dataset":
         target_path_for_contract = str(Path(targets_root) / f"{data_name}.npz")
         if os.path.exists(target_path_for_contract):
             target_sha256 = file_sha256(target_path_for_contract)
+        task_targets, target_masks, target_spec = load_task_targets_npz(
+            dataset=data_name,
+            targets_root=targets_root,
+            task=task,
+            horizon=forecast_horizon,
+            num_samples=int(num_data),
+            seq_len=int(seq_len),
+            input_dim=int(num_dim),
+        )
+        target_spec = dict(target_spec)
+        target_spec["split_supervision"] = validate_task_splits(
+            task=task,
+            target=task_targets,
+            target_mask=target_masks,
+            splits={"training": train_idx, "validation": valid_idx, "test": test_idx},
+        )
+        if task == "imputation":
+            preprocess_X = mask_imputation_inputs(X, target_masks)
+    elif task != "classification":
+        _build_task_targets(
+            task=task,
+            x_missing_norm=None,
+            y=None,
+            forecast_horizon=forecast_horizon,
+        )
     timestamp_delta_scale, timestamp_summary = resolve_timestamp_delta_metadata(
         timestamps,
         train_idx=train_idx,
@@ -2082,7 +2444,12 @@ def run_model(
     )
     output_contract_hash = _output_contract_hash(output_contract)
     if CHECK and os.path.exists(out_path):
-        _validate_existing_output_contract(out_path, output_contract)
+        _validate_existing_output_contract(
+            out_path,
+            output_contract,
+            expected_sample_indices=test_idx,
+            expected_y_true=np.asarray(Y)[np.asarray(test_idx, dtype=np.int64)],
+        )
         return None
     lr = float(lr_policy["lr"])
     weight_decay = float(lr_policy["weight_decay"])
@@ -2120,7 +2487,7 @@ def run_model(
         no_coeff_cache=no_coeff_cache,
         cache_events=coeff_cache_events,
         model_name=model_name,
-        X=X,
+        X=preprocess_X,
         missing_rate=missing_rate,
         interpolate=interpolate,
         use_intensity=use_intensity,
@@ -2129,12 +2496,11 @@ def run_model(
         channel_sync=train_channel_sync,
         timestamps=timestamps,
         timestamp_delta_scale=timestamp_delta_scale,
-        missingness_reference=X[train_idx],
+        missingness_reference=preprocess_X[train_idx],
     )
     X_missing_norm, normalization_summary = normalize_with_train_stats(X_missing, train_idx)
     train_missing_summary = compute_train_missing_summary(X_missing, train_idx)
     train_missing_summary.update(normalization_summary)
-    target_masks = None
     if task == "classification":
         task_targets = _build_task_targets(
             task=task,
@@ -2142,32 +2508,8 @@ def run_model(
             y=Y,
             forecast_horizon=forecast_horizon,
         )
-    elif target_source == "dataset":
-        task_targets, target_masks, target_spec = load_task_targets_npz(
-            dataset=data_name,
-            targets_root=targets_root,
-            task=task,
-            horizon=forecast_horizon,
-            num_samples=int(num_data),
-            seq_len=int(seq_len),
-            input_dim=int(num_dim),
-        )
     else:
-        if task == "change_detection":
-            raise ValueError("change_detection requires --target-source dataset")
-        task_targets = _build_task_targets(
-            task=task,
-            x_missing_norm=X_missing_norm,
-            y=Y,
-            forecast_horizon=forecast_horizon,
-        )
-        target_masks = None
-        target_spec = {
-            "task": task,
-            "target_key": f"surrogate::{task}",
-            "target_shape": None,
-            "target_dtype": "torch.float32",
-        }
+        assert task_targets is not None and target_spec is not None
     if task == "classification":
         target_masks = None
         target_spec = {
@@ -2430,7 +2772,7 @@ def run_model(
         return {
             "dataset": data_name,
             "dataset_source": str(dataset_source),
-            "dataset_npz": None if dataset_npz is None else str(dataset_npz),
+            "dataset_npz": portable_artifact_reference(dataset_npz, root=True),
             "dataset_npz_sha256": dataset_npz_sha256,
             "timestamp_summary": timestamp_summary,
             "task": task,
@@ -2442,8 +2784,8 @@ def run_model(
             "robustness_test_mechanisms": list(robustness_test_mechanisms),
             "robustness_channel_sync_options": list(robustness_channel_sync_options),
             "robustness_evaluations": int(len(evaluations)),
-            "split_path": str(split_path),
-            "output_path": str(output_path),
+            "split_path": portable_artifact_reference(split_path),
+            "output_path": portable_artifact_reference(output_path),
             "split_sha256": split_sha256,
             "output_file_sha256": output_file_sha256,
             "batch_policy": batch_policy,
@@ -2509,7 +2851,7 @@ def run_model(
             save_predictions,
         )
     else:
-        pred_list, target_list = [], []
+        pred_list, target_list, target_mask_list = [], [], []
         with torch.no_grad():
             for batch in test_batch:
                 mask = _expand_mask_or_delta(batch['x_mask'], batch['x_missing'])
@@ -2526,9 +2868,19 @@ def run_model(
                 pred, target = _align_prediction_target(pred, target, task)
                 pred_list.append(pred.detach().cpu().numpy())
                 target_list.append(target.detach().cpu().numpy())
+                if task in {"imputation", "change_detection"}:
+                    target_mask = batch.get("target_mask")
+                    if target_mask is None or tuple(target_mask.shape) != tuple(target.shape):
+                        raise ValueError(f"{task} evaluation requires a target_mask matching target")
+                    target_mask_list.append(target_mask.detach().cpu().numpy())
 
         task_pred = np.concatenate(pred_list, axis=0)
         task_target = np.concatenate(target_list, axis=0)
+        task_mask = (
+            np.concatenate(target_mask_list, axis=0)
+            if target_mask_list
+            else None
+        )
         eval_result = _build_evaluation_result(
             task=task,
             test_missing_rate=missing_rate,
@@ -2536,6 +2888,7 @@ def run_model(
             test_channel_sync=False,
             task_pred=task_pred,
             task_target=task_target,
+            task_mask=task_mask,
             missing_seed=SEED,
             save_predictions=save_predictions,
             sample_indices=test_idx,
@@ -2575,8 +2928,14 @@ def run_model(
                 save_predictions,
             )
 
-    out_name = '_'.join([data_name, str(missing_rate), model_name, str(SEED)])
-    output_path = os.path.join(out_root, data_name, str(missing_rate), out_name)
+    output_path = _build_output_path(
+        data_name,
+        missing_rate,
+        model_name,
+        SEED,
+        out_root,
+        task=task,
+    )
     coeff_cache_summary = _summarize_cache_events(coeff_cache_events)
     payload = _build_result_payload(
         mode=evaluation_regime,
@@ -2609,7 +2968,7 @@ def run_model(
     return {
         "dataset": data_name,
         "dataset_source": str(dataset_source),
-        "dataset_npz": None if dataset_npz is None else str(dataset_npz),
+        "dataset_npz": portable_artifact_reference(dataset_npz, root=True),
         "dataset_npz_sha256": dataset_npz_sha256,
         "timestamp_summary": timestamp_summary,
         "task": task,
@@ -2618,8 +2977,8 @@ def run_model(
         **param_search_contract,
         "seed": int(SEED),
         "missing_rate": float(missing_rate),
-        "split_path": str(split_path),
-        "output_path": str(output_path),
+        "split_path": portable_artifact_reference(split_path),
+        "output_path": portable_artifact_reference(output_path),
         "split_sha256": split_sha256,
         "output_file_sha256": output_file_sha256,
         "batch_policy": batch_policy,
@@ -2771,6 +3130,7 @@ def _evaluate_robustness(
                         stats_mask_np,
                         requested_missing_rate=test_rate,
                         floor_stats=floor_stats,
+                        sample_indices=test_idx,
                     )
                     X_missing, X_mask, X_delta, coeffs = _preprocess_with_optional_cache(
                         coeff_cache_dir=coeff_cache_dir,
@@ -2918,16 +3278,6 @@ def main():
     global device, use_cuda
     device = _resolve_run_device(args.device)
     use_cuda = device.type == "cuda"
-    if (
-        args.task == "forecasting"
-        and getattr(args, "target_source", "surrogate") == "surrogate"
-        and getattr(args, "forecast_horizon", None) is None
-    ):
-        LOGGER.warning(
-            "forecasting with --target-source surrogate and no --forecast-horizon: the surrogate "
-            "target is the full sequence, so forecasting degenerates to imputation. Pass "
-            "--forecast-horizon < seq_len for genuine forecasting, or use --target-source dataset."
-        )
     scope_override = _resolve_model_scope_variant(args.model_scope_variant)
     apply_model_scope_variant(scope_override)
     seed = int(args.seed)
@@ -2990,12 +3340,24 @@ def main():
                     if not os.path.exists(param_path):
                         raise FileNotFoundError(
                             f"Params file not found: {param_path}. "
-                            "Run release/scripts/param_search.py with "
+                            "Run scripts/param_search.py with "
                             f"--search-policy {args.param_policy} --search-repeat {args.param_repeat} first."
                         )
 
                     with open(param_path, 'rb') as f:
                         model_config = pickle.load(f)
+                    expected_target_identity = _expected_param_target_identity(
+                        data_name=data_name,
+                        task=args.task,
+                        target_source=args.target_source,
+                        targets_root=args.targets_root,
+                        forecast_horizon=args.forecast_horizon,
+                        model_config=model_config,
+                        dataset_source=args.dataset_source,
+                        dataset_npz=args.dataset_npz,
+                        split_root=args.split_root,
+                        param_repeat=args.param_repeat,
+                    )
                     param_search_profile = _validate_param_search_profile(
                         model_config,
                         expected_search_profile=args.search_profile,
@@ -3004,6 +3366,12 @@ def main():
                         expected_data_name=data_name,
                         expected_model_name=model_name,
                         expected_task=args.task,
+                        expected_target_source=expected_target_identity["target_source"],
+                        expected_target_sha256=expected_target_identity["target_sha256"],
+                        expected_forecast_horizon=expected_target_identity["forecast_horizon"],
+                        expected_dataset_source=expected_target_identity["dataset_source"],
+                        expected_dataset_npz_sha256=expected_target_identity["dataset_npz_sha256"],
+                        expected_split_sha256s=expected_target_identity["split_sha256s"],
                         param_path=str(param_path),
                         allow_legacy_search_profile=args.allow_legacy_search_profile,
                     )
@@ -3023,6 +3391,7 @@ def main():
                             SEED=seed,
                             CHECK=args.check,
                             robustness_mode=True,
+                            robustness_profile=args.robustness_profile,
                             robustness_test_rates=args.robustness_test_rates,
                             robustness_test_mechanisms=args.robustness_test_mechanisms,
                             robustness_channel_sync_options=args.robustness_channel_sync_options,
@@ -3080,7 +3449,7 @@ def main():
                                 {
                                     "dataset": data_name,
                                     "dataset_source": str(args.dataset_source),
-                                    "dataset_npz": None if args.dataset_npz is None else str(args.dataset_npz),
+                                    "dataset_npz": portable_artifact_reference(args.dataset_npz, root=True),
                                     "dataset_npz_sha256": file_sha256(args.dataset_npz) if args.dataset_npz is not None else None,
                                     "model": model_name,
                                     "seed": seed,
@@ -3094,9 +3463,9 @@ def main():
                                     "search_policy": args.param_policy,
                                     "search_repeat": args.param_repeat,
                                     **param_search_contract,
-                                    "split_path": str(split_path),
-                                    "param_path": str(param_path),
-                                    "output_path": str(output_path),
+                                    "split_path": portable_artifact_reference(split_path),
+                                    "param_path": portable_artifact_reference(param_path),
+                                    "output_path": portable_artifact_reference(output_path),
                                     "split_sha256": file_sha256(split_path),
                                     "param_file_sha256": file_sha256(param_path),
                                     "output_file_sha256": file_sha256(output_path),
@@ -3117,7 +3486,7 @@ def main():
                             f"cell wall-clock {cell_elapsed_s:.3f}s exceeded "
                             f"performance limit {float(args.performance_limit_seconds):.3f}s"
                         )
-                    run_result["param_path"] = str(param_path)
+                    run_result["param_path"] = portable_artifact_reference(param_path)
                     run_result["param_file_sha256"] = file_sha256(param_path)
                     run_result["search_profile"] = param_search_profile
                     run_result["search_policy"] = args.param_policy
@@ -3177,12 +3546,24 @@ def main():
                         if not os.path.exists(param_path):
                             raise FileNotFoundError(
                                 f"Params file not found: {param_path}. "
-                                "Run release/scripts/param_search.py with "
+                                "Run scripts/param_search.py with "
                                 f"--search-policy {args.param_policy} --search-repeat {args.param_repeat} first."
                             )
 
                         with open(param_path, 'rb') as f:
                             model_config = pickle.load(f)
+                        expected_target_identity = _expected_param_target_identity(
+                            data_name=data_name,
+                            task=args.task,
+                            target_source=args.target_source,
+                            targets_root=args.targets_root,
+                            forecast_horizon=args.forecast_horizon,
+                            model_config=model_config,
+                            dataset_source=args.dataset_source,
+                            dataset_npz=args.dataset_npz,
+                            split_root=args.split_root,
+                            param_repeat=args.param_repeat,
+                        )
                         param_search_profile = _validate_param_search_profile(
                             model_config,
                             expected_search_profile=args.search_profile,
@@ -3191,6 +3572,12 @@ def main():
                             expected_data_name=data_name,
                             expected_model_name=model_name,
                             expected_task=args.task,
+                            expected_target_source=expected_target_identity["target_source"],
+                            expected_target_sha256=expected_target_identity["target_sha256"],
+                            expected_forecast_horizon=expected_target_identity["forecast_horizon"],
+                            expected_dataset_source=expected_target_identity["dataset_source"],
+                            expected_dataset_npz_sha256=expected_target_identity["dataset_npz_sha256"],
+                            expected_split_sha256s=expected_target_identity["split_sha256s"],
                             param_path=str(param_path),
                             allow_legacy_search_profile=args.allow_legacy_search_profile,
                         )
@@ -3254,7 +3641,7 @@ def main():
                                     {
                                         "dataset": data_name,
                                         "dataset_source": str(args.dataset_source),
-                                        "dataset_npz": None if args.dataset_npz is None else str(args.dataset_npz),
+                                        "dataset_npz": portable_artifact_reference(args.dataset_npz, root=True),
                                         "dataset_npz_sha256": file_sha256(args.dataset_npz) if args.dataset_npz is not None else None,
                                         "model": model_name,
                                         "seed": seed,
@@ -3267,9 +3654,9 @@ def main():
                                         "search_policy": args.param_policy,
                                         "search_repeat": args.param_repeat,
                                         **param_search_contract,
-                                        "split_path": str(split_path),
-                                        "param_path": str(param_path),
-                                        "output_path": str(output_path),
+                                        "split_path": portable_artifact_reference(split_path),
+                                        "param_path": portable_artifact_reference(param_path),
+                                        "output_path": portable_artifact_reference(output_path),
                                         "split_sha256": file_sha256(split_path),
                                         "param_file_sha256": file_sha256(param_path),
                                         "output_file_sha256": file_sha256(output_path),
@@ -3290,7 +3677,7 @@ def main():
                                 f"cell wall-clock {cell_elapsed_s:.3f}s exceeded "
                                 f"performance limit {float(args.performance_limit_seconds):.3f}s"
                             )
-                        run_result["param_path"] = str(param_path)
+                        run_result["param_path"] = portable_artifact_reference(param_path)
                         run_result["param_file_sha256"] = file_sha256(param_path)
                         run_result["search_profile"] = param_search_profile
                         run_result["search_policy"] = args.param_policy
@@ -3374,15 +3761,15 @@ def main():
             "seed": seed,
             "task": args.task,
             "dataset_source": str(args.dataset_source),
-            "dataset_npz": None if args.dataset_npz is None else str(args.dataset_npz),
+            "dataset_npz": portable_artifact_reference(args.dataset_npz, root=True),
             "target_source": args.target_source if args.task != "classification" else "label",
             "param_policy": args.param_policy,
             "param_repeat": args.param_repeat,
             "search_profile": args.search_profile,
             **describe_search_profile(args.search_profile),
-            "split_root": str(args.split_root),
-            "param_root": str(args.param_root),
-            "out_root": str(args.out_root),
+            "split_root": portable_artifact_reference(args.split_root, root=True),
+            "param_root": portable_artifact_reference(args.param_root, root=True),
+            "out_root": portable_artifact_reference(args.out_root, root=True),
             "records": records,
             "reused_records": reused_records,
             "skipped": skipped,

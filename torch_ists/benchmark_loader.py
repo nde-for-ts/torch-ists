@@ -19,7 +19,10 @@ def _require_pandas():
     try:
         import pandas as pd  # type: ignore
     except ImportError as exc:
-        raise ImportError("torch_ists.benchmark_loader requires pandas. Install torch-ists[data].") from exc
+        raise ImportError(
+            "torch_ists.benchmark_loader requires pandas. From this source checkout, run "
+            "`python -m pip install -e \".[data]\"`."
+        ) from exc
     return pd
 
 
@@ -27,7 +30,10 @@ def _load_ucr_uea_dataset_lazy(*args, **kwargs):
     try:
         from sktime.datasets import load_UCR_UEA_dataset as loader  # type: ignore
     except ImportError as exc:
-        raise ImportError("torch_ists.benchmark_loader requires sktime. Install torch-ists[data].") from exc
+        raise ImportError(
+            "torch_ists.benchmark_loader requires sktime. From this source checkout, run "
+            "`python -m pip install -e \".[data]\"`."
+        ) from exc
     return loader(*args, **kwargs)
 
 
@@ -35,7 +41,10 @@ def _load_from_tsfile_to_dataframe_lazy(*args, **kwargs):
     try:
         from sktime.datasets import load_from_tsfile_to_dataframe as loader  # type: ignore
     except ImportError as exc:
-        raise ImportError("torch_ists.benchmark_loader requires sktime. Install torch-ists[data].") from exc
+        raise ImportError(
+            "torch_ists.benchmark_loader requires sktime. From this source checkout, run "
+            "`python -m pip install -e \".[data]\"`."
+        ) from exc
     return loader(*args, **kwargs)
 
 

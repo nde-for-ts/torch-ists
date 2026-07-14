@@ -163,7 +163,7 @@ class NeuralCDE_Learnable(torch.nn.Module):
         ######################
 
         # Upstream LEAP assumes integer-grid time with rk4 step_size=1.0.
-        # The current deployment/release runtime builds coeffs on normalized
+        # The current packaged runtime builds coeffs on normalized
         # [0, 1] times, so inject a data-driven step size here and leave the
         # low-level 1.0 fallback as provenance-only context.
         kwargs = apply_advanced_cde_solver_defaults(times, kwargs)

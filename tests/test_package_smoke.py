@@ -117,7 +117,7 @@ def test_missingness_floor_provenance_stats():
     assert np.all((mask > 0).any(axis=1).sum(axis=1) >= 1)
 
 
-def test_param_search_uses_repeat_axis_for_internal_branching():
+def test_param_search_uses_repeat_axis_for_policy_branching():
     script = Path(__file__).resolve().parents[1] / "scripts" / "param_search.py"
     source = script.read_text()
 

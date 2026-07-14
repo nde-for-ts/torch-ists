@@ -44,7 +44,7 @@ from .preprocessing import SUPPORTED_IMPUTATION_STRATEGIES
 configure_handler_registry_bootstrap()
 
 
-INTERNAL_SDE_CODE_PATTERN = re.compile(r"^neuralsde_\d+_\d+$")
+SDE_CODE_PATTERN = re.compile(r"^neuralsde_\d+_\d+$")
 
 
 def _resolve_device(device: str) -> str:
@@ -81,7 +81,7 @@ def _enforce_active_scope_or_raise(model_name: str, *, allow_flow_extension: boo
 def _normalize_model_name_or_raise(model_name: str) -> str:
     # Alias normalization mapping:
     # - flow aliases: config.alias_policy.normalize_flow_alias
-    # - SDE numeric codes are internal and intentionally not public aliases
+    # - SDE numeric codes are implementation selectors and not public aliases
     if model_name == "latentsde-kl":
         raise ValueError(
             "Model 'latentsde-kl' is not available in this package. "
@@ -94,9 +94,9 @@ def _normalize_model_name_or_raise(model_name: str) -> str:
     alias = SDE_MODEL_ALIASES.get(model_name)
     if alias is not None:
         return alias
-    if INTERNAL_SDE_CODE_PATTERN.fullmatch(model_name):
+    if SDE_CODE_PATTERN.fullmatch(model_name):
         raise ValueError(
-            "Numeric SDE codes are internal implementation details and are not accepted "
+            "Numeric SDE codes are implementation details and are not accepted "
             "as public model names. Use public names such as 'neural_lsde', "
             "'neural_lnsde', or 'neural_gsde'."
         )

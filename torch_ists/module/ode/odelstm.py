@@ -57,14 +57,32 @@ class ODELSTMCell(nn.Module):
         if self.fixed_step_solver:
             new_h = self.solve_fixed(new_h, ts)
         else:
-            indices = torch.argsort(ts)
-            batch_size = ts.size(0)
-            device = input_x.device
-            s_sort = ts[indices] + torch.linspace(0, 1e-4, batch_size, device=device)
-            trajectory = self.node.trajectory(new_h, s_sort)
-            new_h = trajectory[indices, torch.arange(batch_size, device=device)]
+            new_h = self.solve_adaptive(new_h, ts)
 
         return new_h, new_c
+
+    def solve_adaptive(self, x: torch.Tensor, ts: torch.Tensor) -> torch.Tensor:
+        durations = ts.reshape(-1).to(dtype=x.dtype, device=x.device)
+        if durations.numel() != x.size(0):
+            raise ValueError(
+                f"Expected one ODE duration per sample, got {durations.numel()} for batch {x.size(0)}"
+            )
+        if not bool(torch.isfinite(durations).all()) or bool((durations < 0).any()):
+            raise ValueError("ODE-LSTM durations must be finite and non-negative")
+
+        positive_indices = torch.nonzero(durations > 0, as_tuple=False).reshape(-1)
+        if positive_indices.numel() == 0:
+            return x
+        positive_durations = durations.index_select(0, positive_indices)
+        unique_durations, inverse = torch.unique(
+            positive_durations,
+            sorted=True,
+            return_inverse=True,
+        )
+        time_span = torch.cat([x.new_zeros(1), unique_durations])
+        trajectory = self.node.trajectory(x, time_span)
+        selected = trajectory[inverse + 1, positive_indices]
+        return x.index_copy(0, positive_indices, selected)
 
     def solve_fixed(self, x: torch.Tensor, ts: torch.Tensor) -> torch.Tensor:
         ts = ts.view(-1, 1)
@@ -131,7 +149,7 @@ class ODELSTM(nn.Module):
         last_output = torch.zeros((batch_size, self.out_feature), device=device)
         for t in range(seq_len):
             inputs = x[:, t]
-            ts = timespans[:, t].squeeze()
+            ts = timespans[:, t].reshape(batch_size)
             hidden_state = self.rnn_cell(inputs, hidden_state, ts)
             current_output = self.fc(hidden_state[0])
             outputs.append(current_output)

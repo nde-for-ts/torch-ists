@@ -92,7 +92,7 @@ def cdeint(dX_dt, z0, func, t, adjoint=True, **kwargs):
     elif method == "rk4":
         kwargs.setdefault("options", {})
         # Preserve the upstream LEAP integer-grid rk4 default for provenance.
-        # The current deployment/release handler now aligns LEAP forward times to
+        # The current packaged handler now aligns LEAP forward times to
         # the normalized coeff time base, so this fixed step_size only describes
         # the upstream-style branch, not the active runtime time scale.
         kwargs["options"].setdefault("step_size", 1.0)
@@ -162,7 +162,7 @@ def cdeint_Learnable(
     elif method == "rk4":
         kwargs.setdefault("options", {})
         # Preserve the upstream LEAP integer-grid rk4 default for provenance.
-        # The current deployment/release handler now aligns LEAP forward times to
+        # The current packaged handler now aligns LEAP forward times to
         # the normalized coeff time base, so this fixed step_size only describes
         # the upstream-style branch, not the active runtime time scale.
         kwargs["options"].setdefault("step_size", 1.0)
