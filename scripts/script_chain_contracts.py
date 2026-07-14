@@ -12,8 +12,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 
-# Schema token for packaged JSON run logs.
-SCHEMA_VERSION = "run_manifest_v1"
 SUPPORTED_TASKS = frozenset(
     {
         "classification",
@@ -139,7 +137,6 @@ def write_manifest(
         )
 
     body = {
-        "schema_version": SCHEMA_VERSION,
         "stage": stage,
         "run_id": run_id,
         "created_at": utc_now_iso(),
@@ -242,16 +239,20 @@ def _validate_target_source(record: Dict[str, Any], path: str, errors: List[str]
 
 def _validate_metric_values(metrics: Dict[str, Any], *, task: str, path: str, errors: List[str]) -> None:
     if task == "classification":
-        has_v2 = all(metric in metrics for metric in ("accuracy", "f1", "wf1"))
-        has_v1 = all(metric in metrics for metric in ("accuracy", "f1_weighted"))
-        if not (has_v2 or has_v1):
+        has_current_metrics = all(metric in metrics for metric in ("accuracy", "f1", "wf1"))
+        has_compat_metrics = all(metric in metrics for metric in ("accuracy", "f1_weighted"))
+        if not (has_current_metrics or has_compat_metrics):
             errors.append(
                 f"{path}.metrics missing required keys: "
                 "expect (accuracy,f1,wf1) or compatibility tuple (accuracy,f1_weighted)"
             )
             return
 
-        required_metrics = ("accuracy", "f1", "wf1") if has_v2 else ("accuracy", "f1_weighted")
+        required_metrics = (
+            ("accuracy", "f1", "wf1")
+            if has_current_metrics
+            else ("accuracy", "f1_weighted")
+        )
         for metric in required_metrics:
             if not _is_finite_number(metrics.get(metric)):
                 errors.append(f"{path}.metrics.{metric} must be finite")
@@ -260,7 +261,7 @@ def _validate_metric_values(metrics: Dict[str, Any], *, task: str, path: str, er
             if value < 0.0 or value > 1.0:
                 errors.append(f"{path}.metrics.{metric} out of range [0, 1]")
 
-        if has_v2 and "f1_weighted" in metrics:
+        if has_current_metrics and "f1_weighted" in metrics:
             if not _is_finite_number(metrics["f1_weighted"]):
                 errors.append(f"{path}.metrics.f1_weighted must be finite")
             else:
@@ -342,6 +343,19 @@ def _validate_output_payload(record: Dict[str, Any], *, path: str, errors: List[
             f"{path}.output_contract_hash mismatch: "
             f"{record['output_contract_hash']} != {output_contract_hash}"
         )
+    record_regime = record.get("evaluation_regime") or record.get("mode")
+    payload_regime = (
+        payload.get("evaluation_regime")
+        or payload.get("mode")
+        or meta.get("evaluation_regime")
+        or output_contract.get("evaluation_regime")
+    )
+    if record_regime and payload_regime and str(record_regime) != str(payload_regime):
+        errors.append(
+            f"{path} output payload evaluation_regime mismatch: "
+            f"{payload_regime!r} != {record_regime!r}"
+        )
+    evaluation_regime = str(record_regime or payload_regime or "")
 
     evaluations = payload.get("evaluations")
     if not isinstance(evaluations, list) or not evaluations:
@@ -361,7 +375,7 @@ def _validate_output_payload(record: Dict[str, Any], *, path: str, errors: List[
     record_metrics = record.get("metrics")
     if isinstance(record_metrics, dict):
         reference_evaluation = evaluations[0]
-        if str(record.get("mode", record.get("evaluation_regime", ""))) == "robustness":
+        if evaluation_regime == "robustness":
             reference_evaluation = next(
                 (
                     evaluation
@@ -384,7 +398,7 @@ def _validate_output_payload(record: Dict[str, Any], *, path: str, errors: List[
                         f"{record_value} != {payload_metrics[metric]}"
                     )
 
-    if str(record.get("mode", record.get("evaluation_regime", ""))) == "robustness":
+    if evaluation_regime == "robustness":
         anchors = [
             evaluation
             for evaluation in evaluations
@@ -401,7 +415,6 @@ def validate_split_manifest(doc: Dict[str, Any]) -> List[str]:
     errors = _require_fields(
         doc,
         [
-            "schema_version",
             "stage",
             "run_id",
             "created_at",
@@ -438,7 +451,6 @@ def validate_search_manifest(doc: Dict[str, Any]) -> List[str]:
     errors = _require_fields(
         doc,
         [
-            "schema_version",
             "stage",
             "run_id",
             "created_at",
@@ -522,7 +534,6 @@ def validate_run_manifest(doc: Dict[str, Any]) -> List[str]:
     errors = _require_fields(
         doc,
         [
-            "schema_version",
             "stage",
             "run_id",
             "created_at",
@@ -574,16 +585,20 @@ def validate_run_manifest(doc: Dict[str, Any]) -> List[str]:
         _validate_file_sha256_field(record, f"records[{idx}]", "param_path", "param_file_sha256", errors)
         _validate_target_spec_sha256(record, f"records[{idx}]", errors)
         if task == "classification":
-            has_v2 = all(metric in metrics for metric in ("accuracy", "f1", "wf1"))
-            has_v1 = all(metric in metrics for metric in ("accuracy", "f1_weighted"))
-            if not (has_v2 or has_v1):
+            has_current_metrics = all(metric in metrics for metric in ("accuracy", "f1", "wf1"))
+            has_compat_metrics = all(metric in metrics for metric in ("accuracy", "f1_weighted"))
+            if not (has_current_metrics or has_compat_metrics):
                 errors.append(
                     f"records[{idx}].metrics missing required keys: "
                     "expect (accuracy,f1,wf1) or compatibility tuple (accuracy,f1_weighted)"
                 )
                 continue
 
-            required_metrics = ("accuracy", "f1", "wf1") if has_v2 else ("accuracy", "f1_weighted")
+            required_metrics = (
+                ("accuracy", "f1", "wf1")
+                if has_current_metrics
+                else ("accuracy", "f1_weighted")
+            )
             for metric in required_metrics:
                 if not _is_finite_number(metrics[metric]):
                     errors.append(f"records[{idx}].metrics.{metric} must be finite")
@@ -592,7 +607,7 @@ def validate_run_manifest(doc: Dict[str, Any]) -> List[str]:
                 if value < 0.0 or value > 1.0:
                     errors.append(f"records[{idx}].metrics.{metric} out of range [0, 1]")
 
-            if has_v2 and "f1_weighted" in metrics:
+            if has_current_metrics and "f1_weighted" in metrics:
                 if not _is_finite_number(metrics["f1_weighted"]):
                     errors.append(f"records[{idx}].metrics.f1_weighted must be finite")
                 else:

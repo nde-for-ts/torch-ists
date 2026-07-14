@@ -1,4 +1,4 @@
-"""Task target contracts for non-classification release runs."""
+"""Task target helpers for packaged runs."""
 
 from __future__ import annotations
 

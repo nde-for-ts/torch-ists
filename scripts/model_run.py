@@ -82,12 +82,6 @@ def _parse_csv_list(raw):
     return items or None
 
 
-def _abspath_or_none(path):
-    if path is None:
-        return None
-    return os.path.abspath(os.path.expanduser(str(path)))
-
-
 def _normalize_dataset_source_arg(raw: str) -> str:
     try:
         return normalize_dataset_source(raw)
@@ -104,6 +98,12 @@ def _normalize_param_mode(raw: str) -> str:
     raise argparse.ArgumentTypeError("parameter mode must be one of {'default', 'cv'}.")
 
 
+def _abspath_or_none(path):
+    if path is None:
+        return None
+    return os.path.abspath(os.path.expanduser(str(path)))
+
+
 def _normalize_search_profile_arg(raw: str) -> str:
     try:
         return normalize_search_profile(raw)
@@ -114,6 +114,16 @@ def _normalize_search_profile_arg(raw: str) -> str:
 CONSTRAINED_SEARCH_POLICY = "constrained"
 AGGREGATED_SEARCH_REPEAT = "aggregated"
 PREDICTION_IDENTITY_SCHEMA = "sample_indices"
+UNIVERSAL_100_CELL_RATES = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+UNIVERSAL_100_CELL_MECHANISMS = [
+    "MCAR",
+    "MAR",
+    "MNAR",
+    "BLOCK",
+    "BURST",
+    "CHANNEL_DROP",
+]
+UNIVERSAL_100_CELL_SYNC_OPTIONS = ["false", "true"]
 
 
 def _normalize_param_policy_arg(raw: str) -> str:
@@ -376,7 +386,7 @@ def _parse_robustness_mechanisms(raw):
         tokens = [token.strip().upper() for token in raw.split(",") if token.strip()]
     else:
         tokens = [str(token).strip().upper() for token in raw if str(token).strip()]
-    supported = {"MCAR", "MAR", "MNAR", "BLOCK", "BURST"}
+    supported = {"MCAR", "MAR", "MNAR", "BLOCK", "BURST", "CHANNEL_DROP"}
     if not tokens:
         raise ValueError("At least one robustness missingness mechanism must be provided.")
     invalid = sorted(set(tokens) - supported)
@@ -523,7 +533,6 @@ def _preprocess_cache_contract(
     missingness_reference,
 ):
     return {
-        "cache_contract": "torch-ists-preprocess-cache-v1",
         "package_version": str(globals().get("TORCH_ISTS_PACKAGE_VERSION", "unknown")),
         "model_name": str(model_name),
         "x_hash": _hash_array_for_cache(X),
@@ -596,7 +605,7 @@ def _missing_type_for_missing_rate(rate):
 
 def _axis_token(values):
     return "-".join(
-        str(value).strip().lower().replace("_", "-").replace(".", "p").replace("-", "m")
+        str(value).strip().lower().replace("-", "m").replace("_", "-").replace(".", "p")
         for value in values
     )
 
@@ -746,6 +755,12 @@ def parse_cli_args():
         help="Robustness evaluation: train on missing=0.0 and test on configured rates.",
     )
     parser.add_argument(
+        "--robustness-profile",
+        choices=["custom", "100-cell"],
+        default="custom",
+        help="Robustness axis profile. 100-cell selects the production universal grid.",
+    )
+    parser.add_argument(
         "--robustness-test-rates",
         type=str,
         default="0.0",
@@ -758,7 +773,10 @@ def parse_cli_args():
         "--robustness-test-mechanisms",
         type=str,
         default="MCAR",
-        help="Comma-separated test missingness mechanisms for robustness mode: MCAR,MAR,MNAR,BLOCK,BURST",
+        help=(
+            "Comma-separated test missingness mechanisms for robustness mode: "
+            "MCAR,MAR,MNAR,BLOCK,BURST,CHANNEL_DROP"
+        ),
     )
     parser.add_argument(
         "--robustness-channel-sync-options",
@@ -902,6 +920,12 @@ def parse_cli_args():
     args.robustness_test_rates = _parse_missing_rates(args.robustness_test_rates)
     args.robustness_test_mechanisms = _parse_robustness_mechanisms(args.robustness_test_mechanisms)
     args.robustness_channel_sync_options = _parse_robustness_channel_sync_options(args.robustness_channel_sync_options)
+    if args.robustness_profile == "100-cell":
+        args.robustness_mode = True
+        args.robustness_test_rates = list(UNIVERSAL_100_CELL_RATES)
+        args.robustness_test_mechanisms = list(UNIVERSAL_100_CELL_MECHANISMS)
+        args.robustness_channel_sync_options = list(UNIVERSAL_100_CELL_SYNC_OPTIONS)
+        args.save_predictions = "full"
     args.dataset_source = normalize_dataset_source(args.dataset_source)
     if args.dataset_source == "npz":
         if args.dataset_npz is None:
@@ -1031,15 +1055,27 @@ def _build_robustness_axes_metadata(
         robustness_channel_sync_options,
         use_raw_flow_input,
     )
+    mechanisms = _parse_robustness_mechanisms(robustness_test_mechanisms)
+    positive_rate_count = sum(not _is_zero_missing_rate(rate) for rate in effective_rates)
+    temporal_mechanism_count = sum(mechanism != "CHANNEL_DROP" for mechanism in mechanisms)
+    channel_drop_count = int("CHANNEL_DROP" in mechanisms)
+    expected_evaluations = 1 + positive_rate_count * (
+        temporal_mechanism_count * len(resolved_sync_options) + channel_drop_count
+    )
+    is_universal_100_cell = (
+        len(effective_rates) == len(UNIVERSAL_100_CELL_RATES)
+        and np.allclose(effective_rates, UNIVERSAL_100_CELL_RATES, rtol=0.0, atol=1e-12)
+        and mechanisms == UNIVERSAL_100_CELL_MECHANISMS
+        and resolved_sync_options == [False, True]
+    )
+    if is_universal_100_cell and expected_evaluations != 100:
+        raise RuntimeError(f"100-cell profile materialized {expected_evaluations} axes")
     return {
         "missing_seed": int(seed),
         "test_missing_rates": [float(rate) for rate in effective_rates],
-        "test_missing_types": list(robustness_test_mechanisms),
+        "test_missing_types": mechanisms,
         "test_channel_sync_options": resolved_sync_options,
-        "anchor_policy": "singleton_standard",
-        "perturbation_missing_rates": [
-            float(rate) for rate in effective_rates if not _is_zero_missing_rate(rate)
-        ],
+        "expected_evaluations": int(expected_evaluations),
     }
 
 
@@ -1077,7 +1113,6 @@ def _build_output_contract(
     training_loop_policy=None,
 ):
     return {
-        "contract_version": "model_run_output_contract_v1",
         "dataset": str(data_name),
         "dataset_source": str(dataset_source),
         "dataset_npz": None if dataset_npz is None else str(dataset_npz),
@@ -1131,6 +1166,192 @@ def _read_output_contract_hash(output_path):
     return None if value is None else str(value)
 
 
+def _expected_robustness_axis_keys(axes):
+    rates = [float(rate) for rate in axes.get("test_missing_rates", [])]
+    mechanisms = [str(value).upper() for value in axes.get("test_missing_types", [])]
+    sync_options = [bool(value) for value in axes.get("test_channel_sync_options", [])]
+    seed = int(axes.get("missing_seed", 0))
+    positive_rates = [rate for rate in rates if not _is_zero_missing_rate(rate)]
+    expected = [(0.0, "STANDARD", None, seed)]
+    for rate in positive_rates:
+        for mechanism in mechanisms:
+            if mechanism == "CHANNEL_DROP":
+                continue
+            for channel_sync in sync_options:
+                expected.append((rate, mechanism, channel_sync, seed))
+    if "CHANNEL_DROP" in mechanisms:
+        expected.extend((rate, "CHANNEL_DROP", None, seed) for rate in positive_rates)
+    return expected
+
+
+def _evaluation_axis_key(evaluation):
+    return (
+        float(evaluation.get("test_missing_rate")),
+        str(evaluation.get("test_missing_type", "")).upper(),
+        evaluation.get("test_channel_sync"),
+        int(evaluation.get("missing_seed")),
+    )
+
+
+def _validate_prediction_payload(predictions, *, expected_storage, task, output_path):
+    if not isinstance(predictions, dict):
+        raise OutputArtifactContractError(
+            f"Output artifact {output_path} cannot be reused: missing predictions object."
+        )
+    storage = predictions.get("storage")
+    if storage != expected_storage:
+        raise OutputArtifactContractError(
+            f"Output artifact {output_path} cannot be reused: prediction storage "
+            f"{storage!r} does not match {expected_storage!r}."
+        )
+    count = predictions.get("sample_index_count")
+    if count is None or int(count) < 0:
+        raise OutputArtifactContractError(
+            f"Output artifact {output_path} cannot be reused: sample_index_count is missing or invalid."
+        )
+    count = int(count)
+    sample_indices = predictions.get("sample_indices")
+    if storage == "full":
+        if sample_indices is None:
+            raise OutputArtifactContractError(
+                f"Output artifact {output_path} cannot be reused: full predictions require sample indices."
+            )
+        indices = np.ascontiguousarray(np.asarray(sample_indices, dtype=np.int64).reshape(-1))
+        if len(indices) != count:
+            raise OutputArtifactContractError(
+                f"Output artifact {output_path} cannot be reused: sample_index_count does not match "
+                "the stored sample indices."
+            )
+        expected_hash = hashlib.sha256(indices.tobytes()).hexdigest()
+        if predictions.get("sample_index_hash") != expected_hash:
+            raise OutputArtifactContractError(
+                f"Output artifact {output_path} cannot be reused: sample index hash is invalid."
+            )
+        if task == "classification":
+            for key in ("y_true", "y_pred", "logit_list"):
+                values = predictions.get(key)
+                if values is None or np.asarray(values).shape[0] != count:
+                    raise OutputArtifactContractError(
+                        f"Output artifact {output_path} cannot be reused: {key} does not match "
+                        "sample_index_count."
+                    )
+    else:
+        if sample_indices is not None or any(
+            predictions.get(key) is not None for key in ("y_true", "y_pred", "logit_list")
+        ):
+            raise OutputArtifactContractError(
+                f"Output artifact {output_path} cannot be reused: summary predictions contain full arrays."
+            )
+        if int(predictions.get("n_samples", -1)) != count:
+            raise OutputArtifactContractError(
+                f"Output artifact {output_path} cannot be reused: sample_index_count does not match "
+                "the summary sample count."
+            )
+
+
+def _validate_output_payload(payload, expected_contract, output_path):
+    for payload_key, contract_key in (
+        ("dataset", "dataset"),
+        ("model", "model"),
+        ("seed", "seed"),
+        ("task", "task"),
+    ):
+        if payload.get(payload_key) != expected_contract.get(contract_key):
+            raise OutputArtifactContractError(
+                f"Output artifact {output_path} cannot be reused: payload {payload_key} does not "
+                "match the stored output details."
+            )
+
+    evaluations = payload.get("evaluations")
+    if not isinstance(evaluations, list):
+        raise OutputArtifactContractError(
+            f"Output artifact {output_path} cannot be reused: evaluations must be a list."
+        )
+    task = str(expected_contract.get("task", "classification"))
+    expected_storage = str(expected_contract.get("save_predictions"))
+    regime = str(expected_contract.get("evaluation_regime"))
+    axes = expected_contract.get("robustness_axes")
+    if regime == "robustness":
+        if task != "classification" or not isinstance(axes, dict):
+            raise OutputArtifactContractError(
+                f"Output artifact {output_path} cannot be reused: robustness output details are invalid."
+            )
+        expected_axes = _expected_robustness_axis_keys(axes)
+        expected_count = int(axes.get("expected_evaluations", len(expected_axes)))
+        if len(evaluations) != expected_count or len(expected_axes) != expected_count:
+            raise OutputArtifactContractError(
+                f"Output artifact {output_path} cannot be reused: expected {expected_count} evaluations, "
+                f"got {len(evaluations)}."
+            )
+        try:
+            actual_axes = [_evaluation_axis_key(evaluation) for evaluation in evaluations]
+        except (TypeError, ValueError) as exc:
+            raise OutputArtifactContractError(
+                f"Output artifact {output_path} cannot be reused: robustness axis values are invalid."
+            ) from exc
+        if actual_axes != expected_axes or len(set(actual_axes)) != len(actual_axes):
+            raise OutputArtifactContractError(
+                f"Output artifact {output_path} cannot be reused: robustness axis order or uniqueness is invalid."
+            )
+        if expected_count == 100 and expected_storage != "full":
+            raise OutputArtifactContractError(
+                f"Output artifact {output_path} cannot be reused: 100-cell evaluation requires full predictions."
+            )
+    elif len(evaluations) != 1:
+        raise OutputArtifactContractError(
+            f"Output artifact {output_path} cannot be reused: non-robustness output must have one evaluation."
+        )
+
+    channel_count = int(expected_contract.get("data_shape", [0, 0])[1])
+    for evaluation in evaluations:
+        if not isinstance(evaluation, dict):
+            raise OutputArtifactContractError(
+                f"Output artifact {output_path} cannot be reused: evaluation rows must be objects."
+            )
+        _validate_prediction_payload(
+            evaluation.get("predictions"),
+            expected_storage=expected_storage,
+            task=task,
+            output_path=output_path,
+        )
+        if regime == "robustness" and evaluation.get("test_missing_type") == "CHANNEL_DROP":
+            required = (
+                "channel_count",
+                "requested_channel_drop_count",
+                "dropped_channel_count",
+                "dropped_channel_indices",
+                "realized_channel_drop_rate",
+                "channel_drop_applicable",
+                "analysis_exclusion_reason",
+                "all_missing_sequence_count",
+            )
+            if any(key not in evaluation for key in required):
+                raise OutputArtifactContractError(
+                    f"Output artifact {output_path} cannot be reused: channel-drop provenance is incomplete."
+                )
+            if int(evaluation["channel_count"]) != channel_count:
+                raise OutputArtifactContractError(
+                    f"Output artifact {output_path} cannot be reused: channel_count is inconsistent."
+                )
+            if channel_count == 1:
+                if (
+                    evaluation["channel_drop_applicable"] is not False
+                    or int(evaluation["dropped_channel_count"]) != 0
+                    or not evaluation["analysis_exclusion_reason"]
+                ):
+                    raise OutputArtifactContractError(
+                        f"Output artifact {output_path} cannot be reused: univariate channel-drop "
+                        "exclusion is invalid."
+                    )
+            elif (
+                evaluation["channel_drop_applicable"] is not True
+                or evaluation["analysis_exclusion_reason"] is not None
+            ):
+                raise OutputArtifactContractError(
+                    f"Output artifact {output_path} cannot be reused: channel-drop applicability is invalid."
+                )
+
+
 def _validate_existing_output_contract(output_path, expected_contract):
     expected_hash = _output_contract_hash(expected_contract)
     try:
@@ -1169,6 +1390,7 @@ def _validate_existing_output_contract(output_path, expected_contract):
             f"(stored={actual_hash}, expected={expected_hash}). "
             "Remove the artifact or rerun with --no-check to overwrite."
         )
+    _validate_output_payload(payload, expected_contract, output_path)
     return str(actual_hash)
 
 
@@ -1179,6 +1401,7 @@ def _build_output_path(
     seed,
     out_root,
     robustness_mode=False,
+    task="classification",
     robustness_test_rates=None,
     robustness_test_mechanisms=None,
     robustness_channel_sync_options=None,
@@ -1192,6 +1415,9 @@ def _build_output_path(
         out_name = "_".join([data_name, "robustness", model_name, str(seed)]) + suffix
         return os.path.join(out_root, data_name, "robustness", out_name)
     out_name = "_".join([data_name, str(missing_rate), model_name, str(seed)])
+    task_name = str(task).strip().lower()
+    if task_name != "classification":
+        out_name = f"{out_name}__task_{task_name}"
     return os.path.join(out_root, data_name, str(missing_rate), out_name)
 
 
@@ -1254,7 +1480,6 @@ def _compute_metrics(y_true, y_pred, logit_list=None):
         mean_confidence_incorrect = float(np.mean(confidence[~correct])) if np.any(~correct) else None
 
     metrics = {
-        "metrics_schema_version": 2,
         "accuracy": float(accuracy),
         "balanced_accuracy": float(balanced_accuracy),
         "precision_macro": float(precision_macro),
@@ -1392,7 +1617,7 @@ def _build_missingness_provenance(
 ):
     x_np = np.asarray(X, dtype=np.float32)
     missing_np = np.asarray(X_missing, dtype=np.float32)
-    mask_np = np.asarray(mask_observed, dtype=np.float32)
+    _ = mask_observed
     observed_before = ~np.isnan(x_np)
     observed_value_count = int(np.count_nonzero(observed_before))
     synthetic_missing = observed_before & np.isnan(missing_np)
@@ -1403,18 +1628,30 @@ def _build_missingness_provenance(
         else 0.0
     )
     floor_stats = floor_stats or {}
-    mask_hash = hashlib.sha256(
-        np.ascontiguousarray((mask_np > 0).astype(np.uint8)).tobytes()
-    ).hexdigest()
-    return {
+    provenance = {
         "requested_missing_rate": float(requested_missing_rate),
         "realized_missing_rate": realized_missing_rate,
         "realized_missing_count": realized_missing_count,
         "observed_value_count": observed_value_count,
         "fully_masked_before_floor": int(floor_stats.get("fully_masked_before_floor", 0)),
         "floor_n_sequences": int(floor_stats.get("n_sequences", x_np.shape[0])),
-        "mask_hash": mask_hash,
     }
+    for key in (
+        "channel_count",
+        "requested_channel_drop_count",
+        "dropped_channel_count",
+        "dropped_channel_indices",
+        "minimum_one_channel_forced",
+        "maximum_one_channel_retained",
+        "channel_count_quantized",
+        "realized_channel_drop_rate",
+        "channel_drop_applicable",
+        "analysis_exclusion_reason",
+        "all_missing_sequence_count",
+    ):
+        if key in floor_stats:
+            provenance[key] = floor_stats[key]
+    return provenance
 
 
 def _build_evaluation_result(
@@ -1702,6 +1939,9 @@ def run_model(
     else:
         LOGGER.info("Run start dataset=%s missing=%.1f model=%s", data_name, missing_rate, model_name)
 
+    if task != "classification" and robustness_mode:
+        raise ValueError("robustness mode currently supports classification only")
+
     # check exist
     out_path = _build_output_path(
         data_name,
@@ -1710,6 +1950,7 @@ def run_model(
         SEED,
         out_root,
         robustness_mode=robustness_mode,
+        task=task,
         robustness_test_rates=robustness_test_rates,
         robustness_test_mechanisms=robustness_test_mechanisms,
         robustness_channel_sync_options=robustness_channel_sync_options,
@@ -2106,6 +2347,11 @@ def run_model(
             no_coeff_cache=no_coeff_cache,
             coeff_cache_events=coeff_cache_events,
         )
+        if len(evaluations) != int(robustness_axes["expected_evaluations"]):
+            raise RuntimeError(
+                "Robustness evaluation count mismatch: "
+                f"expected {robustness_axes['expected_evaluations']}, got {len(evaluations)}"
+            )
         coeff_cache_summary = _summarize_cache_events(coeff_cache_events)
 
         payload = _build_result_payload(
@@ -2145,6 +2391,7 @@ def run_model(
             SEED,
             out_root,
             robustness_mode=True,
+            task=task,
             robustness_test_rates=effective_robustness_test_rates,
             robustness_test_mechanisms=robustness_test_mechanisms,
             robustness_channel_sync_options=robustness_channel_sync_options,
@@ -2449,6 +2696,12 @@ def _evaluate_robustness(
     use_raw_flow_input = _requires_flow_raw_input(model_name)
     test_missing_rates = _effective_robustness_test_rates(test_missing_rates)
     test_missing_mechanisms = _parse_robustness_mechanisms(test_missing_mechanisms)
+    positive_test_rates = [
+        rate for rate in test_missing_rates if not _is_zero_missing_rate(rate)
+    ]
+    ordered_test_rates = list(test_missing_rates)
+    if "CHANNEL_DROP" in test_missing_mechanisms:
+        ordered_test_rates.extend(positive_test_rates)
     missing_seed = int(SEED)
     resolved_channel_sync_options = _resolve_channel_sync_options(
         channel_sync_options,
@@ -2472,15 +2725,24 @@ def _evaluate_robustness(
     )
     train_stats, _normalization_summary = compute_train_normalization_stats(train_missing_ref, train_idx)
 
-    for test_rate in test_missing_rates:
+    for axis_rate_index, test_rate in enumerate(ordered_test_rates):
         if _is_zero_missing_rate(test_rate):
             mechanism_options = ["STANDARD"]
             channel_sync_values = [None]
-        else:
-            mechanism_options = test_missing_mechanisms
+        elif axis_rate_index <= len(positive_test_rates):
+            mechanism_options = [
+                mechanism for mechanism in test_missing_mechanisms
+                if mechanism != "CHANNEL_DROP"
+            ]
             channel_sync_values = resolved_channel_sync_options
+        else:
+            mechanism_options = ["CHANNEL_DROP"]
+            channel_sync_values = [None]
         for test_mechanism in mechanism_options:
-            for test_channel_sync in channel_sync_values:
+            mechanism_channel_sync_values = (
+                [None] if test_mechanism == "CHANNEL_DROP" else channel_sync_values
+            )
+            for test_channel_sync in mechanism_channel_sync_values:
                     LOGGER.info(
                         "Robustness eval dataset=%s model=%s test_missing=%.1f type=%s channel_sync=%s missing_seed=%d",
                         data_name,
@@ -2789,6 +3051,7 @@ def main():
                             seed,
                             args.out_root,
                             robustness_mode=True,
+                            task=args.task,
                             robustness_test_rates=args.robustness_test_rates,
                             robustness_test_mechanisms=args.robustness_test_mechanisms,
                             robustness_channel_sync_options=args.robustness_channel_sync_options,
@@ -2804,6 +3067,9 @@ def main():
                                     "robustness_test_rates": [float(rate) for rate in args.robustness_test_rates],
                                     "robustness_test_mechanisms": list(args.robustness_test_mechanisms),
                                     "robustness_channel_sync_options": list(args.robustness_channel_sync_options),
+                                    "missing_seed": int(seed),
+                                    "mode": "robustness",
+                                    "evaluation_regime": "robustness",
                                     "task": args.task,
                                     "reason": reason,
                                 }
@@ -2968,6 +3234,7 @@ def main():
                                 seed,
                                 args.out_root,
                                 robustness_mode=False,
+                                task=args.task,
                             )
                             split_path = os.path.join(args.split_root, data_name, f"{data_name}_{seed}")
                             if args.existing_policy == "fail":
@@ -2992,6 +3259,8 @@ def main():
                                         "model": model_name,
                                         "seed": seed,
                                         "missing_rate": float(missing_rate),
+                                        "mode": _evaluation_regime_for_missing_rate(missing_rate),
+                                        "evaluation_regime": _evaluation_regime_for_missing_rate(missing_rate),
                                         "task": args.task,
                                         "target_source": args.target_source,
                                         "search_profile": param_search_profile,

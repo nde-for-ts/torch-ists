@@ -131,8 +131,8 @@ class ists_model(nn.Module):
         """Remap legacy checkpoint keys to current layout.
 
         Handles three legacy formats:
-        - fc.* / seq_layer.*  (prior ists_classifier layout)
-        - _model.head.* / _model.seq_layer.*  (pre-v1.1 ists_classifier wrapper)
+        - fc.* / seq_layer.*  (historical classifier checkpoints)
+        - _model.head.* / _model.seq_layer.*  (historical wrapped classifier checkpoints)
         - head.* / seq_layer.*  (current format, pass-through)
         """
         mapped = OrderedDict()
@@ -149,11 +149,6 @@ class ists_model(nn.Module):
             else:
                 mapped.setdefault(key, value)
         return mapped
-
-    @staticmethod
-    def _map_legacy_checkpoint_keys(state_dict):
-        """Compatibility alias for older checkpoint layouts."""
-        return ists_model._map_checkpoint_keys(state_dict)
 
     @staticmethod
     def _last_observed_readout(out: torch.Tensor, seq: torch.Tensor) -> torch.Tensor:
@@ -178,6 +173,11 @@ class ists_model(nn.Module):
         final_index = final_index.to(device=out.device, dtype=torch.long)
         gather_index = final_index.view(-1, 1, 1).expand(-1, 1, out.size(-1))
         return out[:, :time_steps, :].gather(dim=1, index=gather_index).squeeze(1)
+
+    @staticmethod
+    def _map_legacy_checkpoint_keys(state_dict):
+        """Compatibility alias for older checkpoint layouts."""
+        return ists_model._map_checkpoint_keys(state_dict)
 
     def load_state_dict(self, state_dict, strict: bool = True):
         remapped = self._map_checkpoint_keys(state_dict)

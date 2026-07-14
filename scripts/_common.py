@@ -37,24 +37,21 @@ HISTORICAL_SEARCH_CONTRACT_NAME = "historical-reproducibility"
 PUBLIC_SEARCH_PROFILE_VISIBILITY = "public"
 COMPATIBILITY_SEARCH_PROFILE_VISIBILITY = "compatibility"
 
-_SEARCH_PROFILE_ALIASES = {
+_SEARCH_POLICY_ALIASES = {
     "default": MODEL_NATIVE_SEARCH_PROFILE,
     "model-native": MODEL_NATIVE_SEARCH_PROFILE,
-    "model-native-v1": MODEL_NATIVE_SEARCH_PROFILE,
     "model-specific": MODEL_NATIVE_SEARCH_PROFILE,
     MODEL_NATIVE_SEARCH_PROFILE: MODEL_NATIVE_SEARCH_PROFILE,
     "legacy": LEGACY_EXPANDED_SEARCH_PROFILE,
     "expanded": LEGACY_EXPANDED_SEARCH_PROFILE,
     "legacy-expanded": LEGACY_EXPANDED_SEARCH_PROFILE,
-    "legacy-expanded-v1": LEGACY_EXPANDED_SEARCH_PROFILE,
     LEGACY_EXPANDED_SEARCH_PROFILE: LEGACY_EXPANDED_SEARCH_PROFILE,
     "iclr2024": LEGACY_ICLR2024_SEARCH_PROFILE,
     "legacy-iclr2024": LEGACY_ICLR2024_SEARCH_PROFILE,
-    "legacy-iclr2024-v0": LEGACY_ICLR2024_SEARCH_PROFILE,
     LEGACY_ICLR2024_SEARCH_PROFILE: LEGACY_ICLR2024_SEARCH_PROFILE,
 }
 
-_SEARCH_PROFILE_GRIDS = {
+_SEARCH_POLICY_GRIDS = {
     MODEL_NATIVE_SEARCH_PROFILE: {
         "hidden_dim_values": list(DEFAULT_MODEL_NATIVE_HIDDEN_DIM_VALUES),
         "depth_level_values": [1, 2, 3, 4, 5],
@@ -359,15 +356,18 @@ def apply_model_scope_variant(variant: str | None) -> str:
 
 def normalize_search_profile(raw: str | None) -> str:
     normalized = DEFAULT_SEARCH_PROFILE if raw is None else str(raw).strip().lower()
+    stem, separator, generation = normalized.rpartition("-v")
+    if separator and stem and generation.isdecimal():
+        normalized = stem
     try:
-        return _SEARCH_PROFILE_ALIASES[normalized]
+        return _SEARCH_POLICY_ALIASES[normalized]
     except KeyError as exc:
-        allowed = ", ".join(sorted(_SEARCH_PROFILE_GRIDS))
+        allowed = ", ".join(sorted(_SEARCH_POLICY_GRIDS))
         raise ValueError(f"Unknown search profile: {raw!r}. Allowed: {allowed}.") from exc
 
 
 def describe_search_profile(raw: str | None) -> dict:
-    """Return public search details for a saved artifact profile."""
+    """Return compatibility metadata for a search configuration."""
     profile = normalize_search_profile(raw)
     if profile == LEGACY_ICLR2024_SEARCH_PROFILE:
         return {
@@ -708,7 +708,7 @@ def resolve_model_search_space(model_name: str, search_profile: str | None = Non
     """Return the meaningful sampled axes for a model under a search profile."""
     profile = normalize_search_profile(search_profile)
     contract = describe_search_profile(profile)
-    grid = _SEARCH_PROFILE_GRIDS[profile]
+    grid = _SEARCH_POLICY_GRIDS[profile]
     normalized_model = _canonical_model_name(model_name)
     depth_values = list(grid["depth_level_values"])
     depth_collapsed = normalized_model in _DEPTH_COLLAPSED_MODELS

@@ -8,7 +8,7 @@ Implementation scope:
 - Utility methods: preprocess_input(), get_final_index()
 
 Reference:
-    - consensus_v2.0.md (Handler pattern principle)
+    - HandlerRegistry routing principle
 """
 
 from abc import ABC, abstractmethod

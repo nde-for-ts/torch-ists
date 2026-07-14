@@ -5,8 +5,6 @@ from __future__ import annotations
 import copy
 import logging
 import math
-import sys
-from pathlib import Path
 from typing import Dict, Optional
 
 import torch
@@ -189,16 +187,12 @@ def _align_prediction_target(
 def _load_flow_policy_helpers():
     try:
         from torch_ists.config.alias_policy import is_flow_strict_raw_name
-        return is_flow_strict_raw_name
-    except ModuleNotFoundError:
-        repo_root = Path(__file__).resolve().parents[2]
-        deployment_root = repo_root / "deployment"
-        for path in (deployment_root, repo_root):
-            path_str = str(path)
-            if path_str not in sys.path:
-                sys.path.insert(0, path_str)
-        from torch_ists.config.alias_policy import is_flow_strict_raw_name
-        return is_flow_strict_raw_name
+    except ModuleNotFoundError as exc:
+        raise ImportError(
+            "Failed to import torch_ists.config.alias_policy. "
+            "Set TORCH_ISTS_RUNTIME_ROOT to a package root that contains torch_ists/."
+        ) from exc
+    return is_flow_strict_raw_name
 
 
 _is_flow_strict_raw_name = _load_flow_policy_helpers()

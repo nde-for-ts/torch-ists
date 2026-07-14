@@ -6,7 +6,14 @@ import warnings
 import numpy as np
 
 MISSINGNESS_EXPERIMENTAL = True
-SUPPORTED_MISSINGNESS_MECHANISMS = {"MCAR", "MAR", "MNAR", "BLOCK", "BURST"}
+SUPPORTED_MISSINGNESS_MECHANISMS = {
+    "MCAR",
+    "MAR",
+    "MNAR",
+    "BLOCK",
+    "BURST",
+    "CHANNEL_DROP",
+}
 SUPPORTED_IMPUTATION_STRATEGIES = ("zero", "last_observed", "channel_mean")
 
 
@@ -293,7 +300,7 @@ def _compute_timestamp_delta(
     *,
     timestamp_delta_scale: float,
     ) -> np.ndarray:
-    """Compute scale-normalized elapsed-time delta tensor with shape [N, D, L]."""
+    """Compute elapsed time since the last observation, or sequence start."""
     observed = mask_observed_ndl.astype(bool)
     timestamps = np.asarray(timestamps_nl, dtype=np.float32)
     n, d, l = observed.shape
@@ -302,8 +309,12 @@ def _compute_timestamp_delta(
     for i in range(n):
         times_i = timestamps[i]
         finite_i = np.isfinite(times_i)
+        finite_indices = np.flatnonzero(finite_i)
+        sequence_start_time = (
+            float(times_i[int(finite_indices[0])]) if finite_indices.size else None
+        )
         for j in range(d):
-            last_observed_time = None
+            last_observed_time = sequence_start_time
             for t in range(l):
                 if finite_i[t] and last_observed_time is not None:
                     elapsed = max(float(times_i[t] - last_observed_time), 0.0)
@@ -439,18 +450,31 @@ def apply_missingness(
     - MAR/MNAR: advanced missingness modes intended mainly for comparative analysis.
     - BLOCK: one contiguous temporal gap per sample/channel (or per sample if channel_sync=True).
     - BURST: several short contiguous temporal gaps per sample/channel (or per sample if channel_sync=True).
+    - CHANNEL_DROP: one seed-stable global channel subset; channel_sync is not an axis.
 
     Returns:
         X_missing: [N, D, L], with missing values as NaN.
         mask_observed: [N, D, L], 1.0 observed / 0.0 missing.
-        stats (only when return_stats=True): dict with
-            fully_masked_before_floor and n_sequences.
+        stats (only when return_stats=True): mechanism-specific provenance.
     """
     _validate_inputs(X, rate)
 
     mechanism = mechanism.upper()
     if mechanism not in SUPPORTED_MISSINGNESS_MECHANISMS:
         raise ValueError(f"Unsupported mechanism: {mechanism}")
+    if mechanism == "CHANNEL_DROP":
+        if channel_sync:
+            raise ValueError("CHANNEL_DROP does not define channel_sync; use False")
+        from .channel_drop import apply_channel_drop
+
+        X_missing, mask_observed, stats = apply_channel_drop(X, rate, seed=seed)
+        stats = dict(stats)
+        stats["all_missing_sequence_count"] = int(
+            np.count_nonzero(~(mask_observed > 0).any(axis=(1, 2)))
+        )
+        if return_stats:
+            return X_missing, mask_observed, stats
+        return X_missing, mask_observed
 
     X = np.asarray(X, dtype=np.float32)
     n, d, l = X.shape
@@ -542,7 +566,8 @@ def preprocess(
             from `model_name` (or defaults to True for backward compatibility).
         seed: RNG seed for missingness.
         channel_sync: If True, synchronize missing indices across channels.
-        mechanism: Missing mechanism {"MCAR", "MAR", "MNAR", "BLOCK", "BURST"}.
+        mechanism: Missing mechanism {"MCAR", "MAR", "MNAR", "BLOCK", "BURST",
+            "CHANNEL_DROP"}.
             MCAR is default/recommended. MAR/MNAR are value/probability-oriented modes;
             BLOCK/BURST are temporal-gap robustness modes.
         model_name: Optional model name. When set, `interpolate` and

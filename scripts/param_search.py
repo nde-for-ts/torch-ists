@@ -96,17 +96,26 @@ def _parse_csv_list(raw):
     return items or None
 
 
-def _abspath_or_none(path):
-    if path is None:
-        return None
-    return os.path.abspath(os.path.expanduser(str(path)))
-
-
 def _normalize_dataset_source_arg(raw: str) -> str:
     try:
         return normalize_dataset_source(raw)
     except ValueError as exc:
         raise argparse.ArgumentTypeError(str(exc)) from exc
+
+
+def _normalize_search_mode(raw: str) -> str:
+    normalized = str(raw).strip().lower()
+    if normalized in {"default", "legacy"}:
+        return "default"
+    if normalized in {"cv", "improved"}:
+        return "cv"
+    raise argparse.ArgumentTypeError("search mode must be one of {'default', 'cv'}.")
+
+
+def _abspath_or_none(path):
+    if path is None:
+        return None
+    return os.path.abspath(os.path.expanduser(str(path)))
 
 
 def _normalize_search_profile_arg(raw: str) -> str:
@@ -2059,7 +2068,7 @@ def optimize(
     # Propagate a package-relative import context to Ray workers.
     repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     script_root = os.path.abspath(os.path.dirname(__file__))
-    package_root = repo_root
+    package_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     pythonpath = _ray_worker_pythonpath(repo_root, script_root, package_root)
     if not ray.is_initialized():
         runtime_env = {
@@ -2283,12 +2292,12 @@ def optimize(
         "search_ray_selector": saved_param_config.get("search_ray_selector"),
         "search_selected_candidate_id": saved_param_config.get("search_selected_candidate_id"),
         "search_selected_trial_id": saved_param_config.get("search_selected_trial_id"),
-        "search_best_loss_tie_count": saved_param_config.get("search_best_loss_tie_count"),
         "ray_trial_count": saved_param_config.get("ray_trial_count"),
         "ray_terminated_count": saved_param_config.get("ray_terminated_count"),
         "ray_error_count": saved_param_config.get("ray_error_count"),
         "ray_oom_count": saved_param_config.get("ray_oom_count"),
         "ray_failed_trial_examples": saved_param_config.get("ray_failed_trial_examples"),
+        "search_best_loss_tie_count": saved_param_config.get("search_best_loss_tie_count"),
         "search_partial_trial_failure": saved_param_config.get("search_partial_trial_failure"),
         "search_execution_backend": saved_param_config["search_execution_backend"],
         "search_budget_class": saved_param_config["search_budget_class"],

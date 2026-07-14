@@ -5,29 +5,32 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import pickle
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 
-INTERNAL_FIELD_FRAGMENTS = (
+
+REDACTED_FIELD_FRAGMENTS = (
     "hash",
     "backend",
     "architecture_axes",
     "capacity_config",
-    "canonical_profile",
-    "profile_alias",
+    "profile",
 )
-FORBIDDEN_PUBLIC_VALUE_FRAGMENTS = (
+REDACTED_VALUE_FRAGMENTS = (
     "/home/",
     "/media/",
     ".claude",
     "session_",
-    "canonical_profile",
-    "profile_alias",
-    "search_profile_visibility=internal",
+    "profile",
 )
+PUBLIC_ROBUSTNESS_RATES = [round(index / 10, 1) for index in range(10)]
+PUBLIC_ROBUSTNESS_MECHANISMS = ["MCAR", "MAR", "MNAR", "BLOCK", "BURST", "CHANNEL_DROP"]
+PUBLIC_ROBUSTNESS_SYNC_OPTIONS = [False, True]
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -39,6 +42,14 @@ def _read_json(path: Path) -> dict[str, Any]:
 def _read_pickle(path: Path) -> Any:
     with path.open("rb") as f:
         return pickle.load(f)
+
+
+def _file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _as_bool(value: Any) -> bool:
@@ -112,17 +123,168 @@ def _copy_metrics(row: dict[str, Any], metrics: dict[str, Any] | None) -> None:
             row[key] = value
 
 
+def _expected_axis_keys(axes: dict[str, Any]) -> list[tuple[float, str, bool | None, int]]:
+    rates = [float(rate) for rate in axes.get("test_missing_rates", [])]
+    mechanisms = [str(value).upper() for value in axes.get("test_missing_types", [])]
+    sync_options = [bool(value) for value in axes.get("test_channel_sync_options", [])]
+    seed = int(axes.get("missing_seed", 0))
+    positive_rates = [rate for rate in rates if rate != 0.0]
+    expected = [(0.0, "STANDARD", None, seed)]
+    for rate in positive_rates:
+        for mechanism in mechanisms:
+            if mechanism == "CHANNEL_DROP":
+                continue
+            for channel_sync in sync_options:
+                expected.append((rate, mechanism, channel_sync, seed))
+    if "CHANNEL_DROP" in mechanisms:
+        expected.extend((rate, "CHANNEL_DROP", None, seed) for rate in positive_rates)
+    return expected
+
+
+def _evaluation_axis_key(evaluation: dict[str, Any]) -> tuple[float, str, bool | None, int]:
+    return (
+        float(evaluation.get("test_missing_rate")),
+        str(evaluation.get("test_missing_type", "")).upper(),
+        evaluation.get("test_channel_sync"),
+        int(evaluation.get("missing_seed")),
+    )
+
+
+def _validate_full_predictions(predictions: Any, output_path: Path) -> None:
+    if not isinstance(predictions, dict) or predictions.get("storage") != "full":
+        raise ValueError(f"{output_path}: public 100-cell output requires full prediction storage")
+    indices = predictions.get("sample_indices")
+    count = predictions.get("sample_index_count")
+    if indices is None or count is None:
+        raise ValueError(f"{output_path}: full prediction identity is incomplete")
+    index_array = np.ascontiguousarray(np.asarray(indices, dtype=np.int64).reshape(-1))
+    if len(index_array) != int(count):
+        raise ValueError(f"{output_path}: sample_index_count does not match stored indices")
+    if predictions.get("sample_index_hash") != hashlib.sha256(index_array.tobytes()).hexdigest():
+        raise ValueError(f"{output_path}: sample index hash is invalid")
+    for key in ("y_true", "y_pred", "logit_list"):
+        values = predictions.get(key)
+        if values is None or np.asarray(values).shape[0] != int(count):
+            raise ValueError(f"{output_path}: {key} does not match sample_index_count")
+
+
+def _validate_channel_drop_rows(evaluations: list[dict[str, Any]], output_path: Path) -> None:
+    required = (
+        "channel_count",
+        "requested_channel_drop_count",
+        "dropped_channel_count",
+        "dropped_channel_indices",
+        "realized_channel_drop_rate",
+        "channel_drop_applicable",
+        "analysis_exclusion_reason",
+        "all_missing_sequence_count",
+    )
+    for evaluation in evaluations:
+        if str(evaluation.get("test_missing_type", "")).upper() != "CHANNEL_DROP":
+            continue
+        if any(key not in evaluation for key in required):
+            raise ValueError(f"{output_path}: channel-drop provenance is incomplete")
+        channel_count = int(evaluation["channel_count"])
+        dropped_count = int(evaluation["dropped_channel_count"])
+        dropped_indices = evaluation["dropped_channel_indices"]
+        if (
+            not isinstance(dropped_indices, list)
+            or len(dropped_indices) != dropped_count
+            or len(set(dropped_indices)) != dropped_count
+            or any(int(index) < 0 or int(index) >= channel_count for index in dropped_indices)
+        ):
+            raise ValueError(f"{output_path}: dropped channel indices are inconsistent")
+        if int(evaluation["all_missing_sequence_count"]) < 0:
+            raise ValueError(f"{output_path}: all-missing sequence count is invalid")
+        if channel_count == 1:
+            if (
+                evaluation["channel_drop_applicable"] is not False
+                or dropped_count != 0
+                or not evaluation["analysis_exclusion_reason"]
+            ):
+                raise ValueError(f"{output_path}: univariate channel-drop exclusion is invalid")
+        elif (
+            evaluation["channel_drop_applicable"] is not True
+            or evaluation["analysis_exclusion_reason"] is not None
+        ):
+            raise ValueError(f"{output_path}: channel-drop applicability is invalid")
+
+
+def _validate_robustness_output(
+    payload: dict[str, Any],
+    output_path: Path,
+    *,
+    public_export: bool,
+) -> tuple[int, str] | None:
+    evaluations = payload.get("evaluations")
+    if not isinstance(evaluations, list):
+        raise ValueError(f"{output_path}: evaluations must be a list")
+    meta = payload.get("meta") if isinstance(payload.get("meta"), dict) else {}
+    regime = payload.get("evaluation_regime") or payload.get("mode") or meta.get("evaluation_regime")
+    if not regime and evaluations:
+        regime = evaluations[0].get("evaluation_regime") if isinstance(evaluations[0], dict) else None
+    axes = meta.get("robustness_axes")
+    if not isinstance(axes, dict):
+        contract = meta.get("output_contract") if isinstance(meta.get("output_contract"), dict) else {}
+        axes = contract.get("robustness_axes")
+    is_multicell = str(regime).lower() == "robustness" and (
+        len(evaluations) > 1 or isinstance(axes, dict)
+    )
+    if not is_multicell:
+        return None
+
+    if isinstance(axes, dict):
+        expected_axes = _expected_axis_keys(axes)
+        expected_count = int(axes.get("expected_evaluations", len(expected_axes)))
+    elif len(evaluations) == 100:
+        expected_count = 100
+        expected_axes = _expected_axis_keys(
+            {
+                "missing_seed": payload.get("seed", 0),
+                "test_missing_rates": PUBLIC_ROBUSTNESS_RATES,
+                "test_missing_types": PUBLIC_ROBUSTNESS_MECHANISMS,
+                "test_channel_sync_options": PUBLIC_ROBUSTNESS_SYNC_OPTIONS,
+            }
+        )
+    else:
+        expected_count = len(evaluations)
+        expected_axes = []
+
+    if public_export and (expected_count != 100 or len(evaluations) != 100):
+        raise ValueError(f"{output_path}: public robustness export requires exactly 100 evaluations")
+    if len(evaluations) != expected_count or (expected_axes and len(expected_axes) != expected_count):
+        raise ValueError(f"{output_path}: robustness output requires exactly {expected_count} evaluations")
+    if expected_axes:
+        try:
+            actual_axes = [_evaluation_axis_key(evaluation) for evaluation in evaluations]
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{output_path}: robustness axis values are invalid") from exc
+        if actual_axes != expected_axes or len(set(actual_axes)) != len(actual_axes):
+            raise ValueError(f"{output_path}: robustness axis order or uniqueness is invalid")
+
+    storages = {
+        evaluation.get("predictions", {}).get("storage")
+        for evaluation in evaluations
+        if isinstance(evaluation, dict)
+    }
+    storage = next(iter(storages)) if len(storages) == 1 else "mixed"
+    if expected_count == 100:
+        if payload.get("task", "classification") != "classification":
+            raise ValueError(f"{output_path}: public 100-cell output supports classification only")
+        for evaluation in evaluations:
+            _validate_full_predictions(evaluation.get("predictions"), output_path)
+        _validate_channel_drop_rows(evaluations, output_path)
+        storage = "full"
+    return expected_count, str(storage)
+
+
 def _evaluation_rows_from_output(
     *,
     record: dict[str, Any],
     manifest: dict[str, Any],
     output_path: Path,
+    payload: dict[str, Any],
 ) -> list[dict[str, Any]]:
-    if not output_path.exists():
-        return []
-    payload = _read_pickle(output_path)
-    if not isinstance(payload, dict):
-        return []
     rows: list[dict[str, Any]] = []
     evaluations = payload.get("evaluations")
     if not isinstance(evaluations, list):
@@ -160,6 +322,17 @@ def _evaluation_rows_from_output(
                 "observed_value_count",
                 "fully_masked_before_floor",
                 "floor_n_sequences",
+                "channel_count",
+                "requested_channel_drop_count",
+                "dropped_channel_count",
+                "dropped_channel_indices",
+                "minimum_one_channel_forced",
+                "maximum_one_channel_retained",
+                "channel_count_quantized",
+                "realized_channel_drop_rate",
+                "channel_drop_applicable",
+                "analysis_exclusion_reason",
+                "all_missing_sequence_count",
                 "missing_seed",
                 "output_path",
                 "param_path",
@@ -170,6 +343,11 @@ def _evaluation_rows_from_output(
             ],
         )
         _copy_metrics(row, evaluation.get("metrics"))
+        if str(evaluation.get("test_missing_type", "")).upper() == "CHANNEL_DROP":
+            row["analysis_excluded"] = bool(
+                evaluation.get("analysis_exclusion_reason")
+                or evaluation.get("channel_drop_applicable") is False
+            )
         _copy_runtime_baseline_id(row, evaluation, payload, meta, record, manifest)
         row.update(_flatten_timestamp_summary(timestamp_summary))
         rows.append(row)
@@ -244,9 +422,9 @@ def _is_public_safe_row(row: dict[str, Any]) -> bool:
     for key, value in row.items():
         key_text = str(key)
         value_text = str(value)
-        if any(fragment in key_text for fragment in INTERNAL_FIELD_FRAGMENTS):
+        if any(fragment in key_text for fragment in REDACTED_FIELD_FRAGMENTS):
             return False
-        if any(fragment in value_text for fragment in FORBIDDEN_PUBLIC_VALUE_FRAGMENTS):
+        if any(fragment in value_text for fragment in REDACTED_VALUE_FRAGMENTS):
             return False
     return True
 
@@ -278,6 +456,10 @@ def aggregate(
     search_cells: list[dict[str, Any]] = []
     exclusions: list[dict[str, Any]] = []
     fallbacks: list[dict[str, Any]] = []
+    seen_output_artifacts: set[tuple[str, str]] = set()
+    logical_output_artifacts: dict[tuple[Any, ...], tuple[str, str]] = {}
+    robustness_signature: tuple[int, str] | None = None
+    duplicate_output_references = 0
 
     for manifest_path in manifests:
         manifest = _read_json(manifest_path)
@@ -292,16 +474,55 @@ def aggregate(
                     if not isinstance(record, dict):
                         continue
                     record = {**record, "record_kind": kind}
-                    runs.append(_run_record_row(record, manifest, kind=kind))
                     output_path = record.get("output_path")
                     if output_path:
+                        resolved_path = _resolve_output_path(output_path, out_root)
+                        if not resolved_path.exists():
+                            raise ValueError(f"Output artifact {resolved_path} does not exist")
+                        try:
+                            payload = _read_pickle(resolved_path)
+                        except Exception as exc:
+                            raise ValueError(f"Output artifact {resolved_path} cannot be read: {exc}") from exc
+                        if not isinstance(payload, dict):
+                            raise ValueError(f"Output artifact {resolved_path} must contain an object")
+                        artifact_id = (str(resolved_path.resolve()), _file_sha256(resolved_path))
+                        logical_key = tuple(
+                            payload.get(key, record.get(key))
+                            for key in ("dataset", "model", "seed", "task")
+                        )
+                        previous = logical_output_artifacts.get(logical_key)
+                        if previous is not None and previous != artifact_id:
+                            raise ValueError(
+                                f"Logical run {logical_key} has conflicting output artifacts: "
+                                f"{previous[0]} and {artifact_id[0]}"
+                            )
+                        logical_output_artifacts[logical_key] = artifact_id
+                        if artifact_id in seen_output_artifacts:
+                            duplicate_output_references += 1
+                            continue
+                        seen_output_artifacts.add(artifact_id)
+                        signature = _validate_robustness_output(
+                            payload,
+                            resolved_path,
+                            public_export=public_export,
+                        )
+                        if signature is not None:
+                            if robustness_signature is not None and robustness_signature != signature:
+                                raise ValueError(
+                                    "Aggregate contains mixed robustness evaluation counts or prediction storage"
+                                )
+                            robustness_signature = signature
+                        runs.append(_run_record_row(record, manifest, kind=kind))
                         robustness_rows.extend(
                             _evaluation_rows_from_output(
                                 record=record,
                                 manifest=manifest,
-                                output_path=_resolve_output_path(output_path, out_root),
+                                output_path=resolved_path,
+                                payload=payload,
                             )
                         )
+                    else:
+                        runs.append(_run_record_row(record, manifest, kind=kind))
             for record in skipped:
                 if isinstance(record, dict):
                     exclusions.append(_run_record_row(record, manifest, kind="skipped"))
@@ -356,6 +577,7 @@ def aggregate(
         "search_rows": len(search_cells),
         "exclusion_rows": len(exclusions),
         "fallback_rows": len(fallbacks),
+        "duplicate_output_references": duplicate_output_references,
         "public_export": bool(public_export),
         "out_root": _public_path(out_root) if public_export else str(out_root),
     }

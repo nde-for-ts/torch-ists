@@ -2,6 +2,7 @@
 
 from pathlib import Path
 from typing import Dict, Tuple
+import os
 import pickle
 
 import numpy as np
@@ -95,8 +96,27 @@ def save_splits(path: Path, train_idx: np.ndarray, valid_idx: np.ndarray, test_i
         np.asarray(valid_idx, dtype=np.int64),
         np.asarray(test_idx, dtype=np.int64),
     ]
-    with path.open("wb") as f:
-        pickle.dump(payload, f)
+    tmp_path = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        with tmp_path.open("wb") as f:
+            pickle.dump(payload, f)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, path)
+        try:
+            fd = os.open(str(path.parent), os.O_RDONLY)
+        except OSError:
+            return
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    except Exception:
+        try:
+            tmp_path.unlink()
+        except FileNotFoundError:
+            pass
+        raise
 
 
 def load_splits(path: Path) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
