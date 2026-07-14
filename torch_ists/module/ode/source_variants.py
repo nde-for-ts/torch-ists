@@ -247,22 +247,17 @@ class _RawODERNNEncoder(nn.Module):
         hs = []
         for step in range(seq_len):
             if step > 0:
-                next_h = []
                 dt = (sample_times[:, step] - sample_times[:, step - 1]).clamp_min(0.0)
-                for batch_idx in range(batch_size):
-                    next_h.append(
-                        _integrate_scalar_interval(
-                            self.ode_func,
-                            h[batch_idx],
-                            float(dt[batch_idx].item()),
-                            method=method,
-                            options=options,
-                            rtol=rtol,
-                            atol=atol,
-                            adjoint=adjoint,
-                        )
-                    )
-                h = torch.stack(next_h, dim=0)
+                h = _integrate_batch_durations(
+                    self.ode_func,
+                    h,
+                    dt,
+                    method=method,
+                    options=options,
+                    rtol=rtol,
+                    atol=atol,
+                    adjoint=adjoint,
+                )
             obs_input = torch.cat([x[:, step, :] * mask[:, step, :], mask[:, step, :]], dim=-1)
             obs_present = _masked_observation_flag(mask[:, step, :]).unsqueeze(-1)
             updated = self.update(obs_input, h)
@@ -334,6 +329,7 @@ class SourceLatentODEBackbone(nn.Module):
         values: torch.Tensor,
         mask: torch.Tensor,
         sample_times: torch.Tensor,
+        final_index: torch.Tensor,
         *,
         method: str,
         options: dict,
@@ -347,6 +343,11 @@ class SourceLatentODEBackbone(nn.Module):
             if step_index < seq_len - 1:
                 signed_duration = (
                     sample_times[:, step_index] - sample_times[:, step_index + 1]
+                )
+                signed_duration = torch.where(
+                    step_index < final_index,
+                    signed_duration,
+                    torch.zeros_like(signed_duration),
                 )
                 hidden = _integrate_batch_durations(
                     self.recognition_ode_func,
@@ -363,17 +364,24 @@ class SourceLatentODEBackbone(nn.Module):
                 dim=-1,
             )
             updated = self.recognition_update(observation, hidden)
-            observed = (mask[:, step_index] > 0).any(dim=-1, keepdim=True)
+            observed = (
+                (step_index <= final_index)
+                & (mask[:, step_index] > 0).any(dim=-1)
+            ).unsqueeze(-1)
             hidden = torch.where(observed, updated, hidden)
 
         mean, raw_scale = torch.chunk(self.posterior(hidden), 2, dim=-1)
         scale = torch.nn.functional.softplus(raw_scale) + 1e-4
+        has_observation = (mask > 0).any(dim=2).any(dim=1).unsqueeze(-1)
+        mean = torch.where(has_observation, mean, torch.zeros_like(mean))
+        scale = torch.where(has_observation, scale, torch.ones_like(scale))
         return mean, scale
 
     def _decode(
         self,
         z0: torch.Tensor,
         sample_times: torch.Tensor,
+        final_index: torch.Tensor,
         *,
         method: str,
         options: dict,
@@ -387,7 +395,13 @@ class SourceLatentODEBackbone(nn.Module):
         )
         common_times = sample_times[0] - sample_times[0, 0]
         strictly_increasing = bool((common_times[1:] > common_times[:-1]).all())
-        if method not in {"euler", "midpoint", "rk4"} and common_grid and strictly_increasing:
+        full_length = bool((final_index == sample_times.size(1) - 1).all())
+        if (
+            method not in {"euler", "midpoint", "rk4"}
+            and common_grid
+            and strictly_increasing
+            and full_length
+        ):
             odeint_fn = torchdiffeq.odeint_adjoint if bool(adjoint) else torchdiffeq.odeint
             call_kwargs = {"method": method}
             adaptive_options = {
@@ -410,6 +424,11 @@ class SourceLatentODEBackbone(nn.Module):
         current = z0
         for step_index in range(1, sample_times.size(1)):
             duration = sample_times[:, step_index] - sample_times[:, step_index - 1]
+            duration = torch.where(
+                step_index <= final_index,
+                duration,
+                torch.zeros_like(duration),
+            )
             current = _integrate_batch_durations(
                 self.latent_func,
                 current,
@@ -436,14 +455,27 @@ class SourceLatentODEBackbone(nn.Module):
         atol: float | None = None,
         adjoint: bool | None = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        del final_index
+        batch_size, seq_len, _ = x.shape
+        final_index = final_index.to(device=x.device, dtype=torch.long).reshape(-1)
+        if final_index.numel() != batch_size:
+            raise ValueError("LatentODE final_index must contain one index per sample.")
+        final_index = final_index.clamp(min=0, max=max(0, seq_len - 1))
+        valid_grid = (
+            torch.arange(seq_len, device=x.device).unsqueeze(0)
+            <= final_index.unsqueeze(1)
+        )
         values = torch.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
-        observed_mask = (mask > 0.5).to(dtype=values.dtype)
+        observed_mask = (
+            (mask > 0.5) & valid_grid.unsqueeze(-1)
+        ).to(dtype=values.dtype)
+        final_times = sample_times.gather(1, final_index.unsqueeze(1))
+        safe_sample_times = torch.where(valid_grid, sample_times, final_times)
         solver_options = dict(options or {})
         posterior_mean, posterior_scale = self._recognize(
             values,
             observed_mask,
-            sample_times,
+            safe_sample_times,
+            final_index,
             method=method,
             options=solver_options,
             rtol=rtol,
@@ -456,7 +488,8 @@ class SourceLatentODEBackbone(nn.Module):
             z0 = posterior_mean
         latent_stream = self._decode(
             z0,
-            sample_times,
+            safe_sample_times,
+            final_index,
             method=method,
             options=solver_options,
             rtol=rtol,

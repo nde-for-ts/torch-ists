@@ -14,13 +14,13 @@ def apply_advanced_cde_solver_defaults(
     *,
     default_method: str = "rk4",
 ) -> dict[str, Any]:
-    """Apply the package runtime defaults for promoted advanced-CDE models.
+    """Apply the package runtime defaults for packaged advanced-CDE models.
 
     The ANCDE/EXIT/LEAP low-level modules preserve upstream-style integer-grid
     fallbacks, including rk4 step_size=1.0 branches. Package
     preprocessing builds coefficients on normalized [0, 1] times, so the
     active wrappers prefill a data-driven fixed-grid step size before those
-    provenance-only fallbacks can fire.
+    compatibility fallbacks can fire.
     """
 
     if "method" not in kwargs:

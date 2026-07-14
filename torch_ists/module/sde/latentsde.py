@@ -94,6 +94,41 @@ class LatentSDE(torchsde.SDEIto):
             f"got {tuple(times.shape)}."
         )
 
+    @staticmethod
+    def _normalize_final_index(
+        final_index: torch.Tensor,
+        *,
+        batch_size: int,
+        seq_len: int,
+        device: torch.device,
+    ) -> torch.Tensor:
+        final_index = final_index.to(device=device, dtype=torch.long).reshape(-1)
+        if final_index.numel() != batch_size:
+            raise ValueError("LatentSDE final_index must contain one index per sample.")
+        return final_index.clamp(min=0, max=max(0, seq_len - 1))
+
+    @staticmethod
+    def _freeze_after_final(
+        path: torch.Tensor,
+        final_index: torch.Tensor,
+        *,
+        output_length: int,
+    ) -> torch.Tensor:
+        if path.dim() != 3 or path.size(1) == 0:
+            raise ValueError("LatentSDE path must be a non-empty [N, L, H] tensor.")
+        if path.size(1) < output_length:
+            padding = path[:, -1:].expand(-1, output_length - path.size(1), -1)
+            path = torch.cat([path, padding], dim=1)
+        elif path.size(1) > output_length:
+            path = path[:, :output_length]
+        gather_index = final_index.view(-1, 1, 1).expand(-1, 1, path.size(-1))
+        terminal = path.gather(1, gather_index).expand(-1, output_length, -1)
+        valid_grid = (
+            torch.arange(output_length, device=path.device).unsqueeze(0)
+            <= final_index.unsqueeze(1)
+        )
+        return torch.where(valid_grid.unsqueeze(-1), path, terminal)
+
     def _infer_initial_posterior(
         self,
         values: torch.Tensor,
@@ -130,22 +165,24 @@ class LatentSDE(torchsde.SDEIto):
             dtype=values.dtype,
             device=values.device,
         )
-        if not bool(torch.isfinite(expanded_times).all()):
-            raise ValueError("LatentSDE times must be finite.")
-
-        final_index = final_index.to(device=values.device, dtype=torch.long).reshape(-1)
-        if final_index.numel() != batch_size:
-            raise ValueError("LatentSDE final_index must contain one index per sample.")
-        final_index = final_index.clamp(min=0, max=max(0, seq_len - 1))
-        final_times = expanded_times.gather(1, final_index.unsqueeze(1))
-        time_span = (final_times - expanded_times[:, :1]).clamp_min(1e-6)
-        normalized_times = (expanded_times - expanded_times[:, :1]) / time_span
-
-        hidden = values.new_zeros(batch_size, self.recognition_cell.hidden_size)
+        final_index = self._normalize_final_index(
+            final_index,
+            batch_size=batch_size,
+            seq_len=seq_len,
+            device=values.device,
+        )
         valid_grid = (
             torch.arange(seq_len, device=values.device).unsqueeze(0)
             <= final_index.unsqueeze(1)
         )
+        if not bool(torch.isfinite(expanded_times[valid_grid]).all()):
+            raise ValueError("LatentSDE valid times must be finite.")
+        final_times = expanded_times.gather(1, final_index.unsqueeze(1))
+        expanded_times = torch.where(valid_grid, expanded_times, final_times)
+        time_span = (final_times - expanded_times[:, :1]).clamp_min(1e-6)
+        normalized_times = (expanded_times - expanded_times[:, :1]) / time_span
+
+        hidden = values.new_zeros(batch_size, self.recognition_cell.hidden_size)
         for step_index in range(seq_len - 1, -1, -1):
             feature = torch.cat(
                 [
@@ -270,6 +307,13 @@ class LatentSDE(torchsde.SDEIto):
         final_index: torch.Tensor,
         **kwargs: Any,
     ) -> Union[Tuple[torch.Tensor, torch.Tensor], Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
+        batch_size, seq_len, _ = values.shape
+        final_index = self._normalize_final_index(
+            final_index,
+            batch_size=batch_size,
+            seq_len=seq_len,
+            device=values.device,
+        )
         posterior_mean, posterior_scale = self._infer_initial_posterior(
             values, mask, delta, times, final_index
         )
@@ -285,13 +329,31 @@ class LatentSDE(torchsde.SDEIto):
                 )
         y0 = posterior_mean + posterior_scale * eps
 
-        common_times = times
+        max_final = int(final_index.max().item())
+        common_times = times.to(device=values.device, dtype=values.dtype)
         if common_times.dim() == 2:
-            if not torch.allclose(common_times, common_times[:1].expand_as(common_times)):
-                raise ValueError("LatentSDE solver requires a shared time grid across the batch.")
-            common_times = common_times[0]
-        common_times = common_times.to(device=values.device, dtype=values.dtype)
-        if common_times.dim() != 1 or common_times.numel() != values.size(1):
+            if tuple(common_times.shape) != (batch_size, seq_len):
+                raise ValueError("LatentSDE batched solver times must match [N, L].")
+            reference_row = int(torch.argmax(final_index).item())
+            reference_times = common_times[reference_row, : max_final + 1]
+            active_grid = (
+                torch.arange(max_final + 1, device=values.device).unsqueeze(0)
+                <= final_index.unsqueeze(1)
+            )
+            expected_times = reference_times.unsqueeze(0).expand(batch_size, -1)
+            if not torch.allclose(
+                common_times[:, : max_final + 1][active_grid],
+                expected_times[active_grid],
+            ):
+                raise ValueError(
+                    "LatentSDE solver requires a shared valid time grid across the batch."
+                )
+            common_times = reference_times
+        elif common_times.dim() == 1:
+            if common_times.numel() != seq_len:
+                raise ValueError("LatentSDE solver times must match the input length.")
+            common_times = common_times[: max_final + 1]
+        else:
             raise ValueError("LatentSDE solver times must be a one-dimensional input grid.")
 
         method = str(kwargs.pop("method", "euler")).strip().lower()
@@ -316,7 +378,11 @@ class LatentSDE(torchsde.SDEIto):
             initial_kl = distributions.kl_divergence(posterior, prior).sum(dim=-1)
 
         if common_times.numel() == 1:
-            physical_path = y0.unsqueeze(1)
+            physical_path = self._freeze_after_final(
+                y0.unsqueeze(1),
+                final_index,
+                output_length=seq_len,
+            )
             out = self.embedding(physical_path)
             if self.kl:
                 assert initial_kl is not None
@@ -337,8 +403,13 @@ class LatentSDE(torchsde.SDEIto):
                 rtol=rtol,
                 atol=atol,
             )
-            physical_path = augmented_path[..., :-1].permute(1, 0, 2)
-            path_kl = augmented_path[-1, :, -1]
+            physical_path = self._freeze_after_final(
+                augmented_path[..., :-1].permute(1, 0, 2),
+                final_index,
+                output_length=seq_len,
+            )
+            batch_index = torch.arange(batch_size, device=values.device)
+            path_kl = augmented_path[final_index, batch_index, -1]
             auxiliary_loss = (initial_kl + path_kl).mean().clamp_min(0.0) * self.kl_weight
             return self.embedding(physical_path), physical_path, auxiliary_loss
 
@@ -353,7 +424,11 @@ class LatentSDE(torchsde.SDEIto):
             rtol=rtol,
             atol=atol,
         )
-        physical_path = solved_path.permute(1, 0, 2)
+        physical_path = self._freeze_after_final(
+            solved_path.permute(1, 0, 2),
+            final_index,
+            output_length=seq_len,
+        )
         return self.embedding(physical_path), physical_path
 
     @property
