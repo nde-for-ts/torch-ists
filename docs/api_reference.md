@@ -920,7 +920,7 @@ def get_data_config(model_name: str) -> Dict[str, Any]:
 | `flowpath` and explicit variants | `'hermite'` | `False` | consumes `coeffs` and keeps the raw missing-value path for mask-aware flow handling |
 | `gru-d`, `gru-dt`, `ode-rnn-spline` | `'natural'` | `True` | consumes `coeffs` with intensity channels |
 | `gru-ode` | `'natural'` | `False` | consumes `coeffs` |
-| `ode-lstm` | `'cubic'` | `False` | runtime ignores `coeffs`; uses values, timestamps, and mask directly |
+| `ode-lstm` | `'cubic'` | `False` | runtime ignores `coeffs`; uses imputed values, elapsed time deltas, and the any-channel observation mask directly |
 | `ode-rnn`, `latentode`, `gru-ode-bayes` | `'natural'` | `False` | runtime ignores `coeffs`; uses the sequence stack and reconstructed times directly |
 | `neuralflow` and explicit NeuralFlow variants | `'hermite'` | `False` | `coeffs` ignored; runtime uses the direct value/time path with raw missing-value handling |
 | `naive_cde`, `neural_ode`, `neural_ode_t`, `neural_sde`, `neural_sde_t`, `neural_lsde`, `neural_lnsde`, `neural_gsde` | `'hermite'` | `False` | consumes `coeffs` |

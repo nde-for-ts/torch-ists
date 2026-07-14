@@ -10,6 +10,7 @@ import torch.nn as nn
 
 from .base import BaseHandler
 from ..config import default_method_for_model as resolve_default_method_for_model
+from ..preprocessing import apply_imputation
 
 
 class ODELSTMHandler(BaseHandler):
@@ -200,7 +201,8 @@ class ODELSTMHandler(BaseHandler):
         if int(solver_runtime["fixed_step_count"]) != int(getattr(model, "fixed_step_count", 3)):
             raise ValueError("ode-lstm fixed_step_count is fixed at model creation.")
         data = self.preprocess_input(seq, times)
-        out, hn = model(data["x"], data["seq_delta"], data["seq_mask"])
+        x = apply_imputation(data["x"], kwargs.get("imputation_strategy", "zero"))
+        out, hn = model(x, data["seq_delta"], data["seq_mask"])
 
         if out.dim() == 2:
             out = out.unsqueeze(1)

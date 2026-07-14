@@ -139,26 +139,38 @@ class ODELSTM(nn.Module):
         batch_size = x.size(0)
         seq_len = x.size(1)
 
-        hidden_state = [
+        hidden_state = (
             torch.zeros((batch_size, self.hidden_size), device=device),
             torch.zeros((batch_size, self.hidden_size), device=device),
-        ]
+        )
 
         outputs = []
         hiddens = []
-        last_output = torch.zeros((batch_size, self.out_feature), device=device)
         for t in range(seq_len):
             inputs = x[:, t]
             ts = timespans[:, t].reshape(batch_size)
-            hidden_state = self.rnn_cell(inputs, hidden_state, ts)
+            if mask is None:
+                hidden_state = self.rnn_cell(inputs, hidden_state, ts)
+            else:
+                observed_indices = torch.nonzero(mask[:, t].reshape(batch_size) > 0, as_tuple=False)
+                observed_indices = observed_indices.reshape(-1)
+                if observed_indices.numel() > 0:
+                    observed_state = (
+                        hidden_state[0].index_select(0, observed_indices),
+                        hidden_state[1].index_select(0, observed_indices),
+                    )
+                    updated_state = self.rnn_cell(
+                        inputs.index_select(0, observed_indices),
+                        observed_state,
+                        ts.index_select(0, observed_indices),
+                    )
+                    hidden_state = (
+                        hidden_state[0].index_copy(0, observed_indices, updated_state[0]),
+                        hidden_state[1].index_copy(0, observed_indices, updated_state[1]),
+                    )
             current_output = self.fc(hidden_state[0])
             outputs.append(current_output)
             hiddens.append(hidden_state[0])
-            if mask is not None:
-                cur_mask = mask[:, t].view(batch_size, 1)
-                last_output = cur_mask * current_output + (1.0 - cur_mask) * last_output
-            else:
-                last_output = current_output
 
         outputs = torch.stack(outputs, dim=1)
         hiddens = torch.stack(hiddens, dim=1)

@@ -62,31 +62,31 @@ These models use the sequence stack directly with `coeffs=None`; `NaN` is replac
 
 ## 3. Neural ODE methods
 
-ODE-style recurrent methods. The GRU-D, GRU-ODE, and ODE-RNN-spline rows are built on the NeuralCDE infrastructure; `ode-lstm` is from the ODE-LSTM paper. The canonical ODE-RNN, Latent ODE, and GRU-ODE-Bayes rows are listed in [§4](#4-ode-rnn-latent-ode-and-gru-ode-bayes).
+ODE-style recurrent methods. The GRU-D, GRU-ODE, and ODE-RNN-spline rows are built on the NeuralCDE infrastructure; `ode-lstm` is adapted from the ODE-LSTM implementation. The package adaptations of ODE-RNN, Latent ODE, and GRU-ODE-Bayes are listed in [§4](#4-ode-rnn-latent-ode-and-gru-ode-bayes).
 
 | Model | Package row | Origin paper | Canonical reference repo | Implementation note |
 |---|---|---|---|---|
 | `gru-d` | re-implemented | [Che et al., *Recurrent Neural Networks for Multivariate Time Series with Missing Values* (Scientific Reports 2018)](https://arxiv.org/abs/1606.01865) | [Han-JD/GRU-D](https://github.com/Han-JD/GRU-D) | NeuralCDE-baseline GRU-D variant (missing-data-aware). Discrete-step; no ODE solver runs at inference time. |
 | `gru-dt` | packaged | — (delta-time variant of GRU-D, maintained alongside `gru-d` in the NeuralCDE baseline code) | — | Discrete-step GRU-D with explicit time-gap features. |
-| `gru-ode` | packaged | [Kidger et al., *Neural Controlled Differential Equations* (NeurIPS 2020)](https://arxiv.org/abs/2005.08926) (NeuralCDE-style ODE wrapper) | [patrick-kidger/NeuralCDE](https://github.com/patrick-kidger/NeuralCDE) | GRU-driven ODE field on the NeuralCDE infrastructure. `gru-ode-bayes` in [§4](#4-ode-rnn-latent-ode-and-gru-ode-bayes) is a separate canonical implementation. |
-| `ode-rnn-spline` | packaged | [Kidger et al., *Neural Controlled Differential Equations* (NeurIPS 2020)](https://arxiv.org/abs/2005.08926) (NeuralCDE-style ODE-RNN with spline control path) | [patrick-kidger/NeuralCDE](https://github.com/patrick-kidger/NeuralCDE) | ODE-RNN with a natural-cubic-spline control path on the NeuralCDE infrastructure. `ode-rnn` in [§4](#4-ode-rnn-latent-ode-and-gru-ode-bayes) is a separate canonical implementation. (NeuralCDE-based ODE-RNN with a spline control path - distinct from the canonical 'ode-rnn' in §4, which comes from the Rubanova 2019 repo) |
-| `ode-lstm` | canonical | [Lechner and Hasani, *Learning Long-Term Dependencies in Irregularly-Sampled Time Series* (NeurIPS 2020)](https://arxiv.org/abs/2006.04418) | [mlech26l/ode-lstms](https://github.com/mlech26l/ode-lstms) | LSTM cell with continuous-time hidden state evolved by an ODE between observations. |
+| `gru-ode` | packaged | [Kidger et al., *Neural Controlled Differential Equations* (NeurIPS 2020)](https://arxiv.org/abs/2005.08926) (NeuralCDE-style ODE wrapper) | [patrick-kidger/NeuralCDE](https://github.com/patrick-kidger/NeuralCDE) | GRU-driven ODE field on the NeuralCDE infrastructure. `gru-ode-bayes` in [§4](#4-ode-rnn-latent-ode-and-gru-ode-bayes) is a separate package adaptation. |
+| `ode-rnn-spline` | packaged | [Kidger et al., *Neural Controlled Differential Equations* (NeurIPS 2020)](https://arxiv.org/abs/2005.08926) (NeuralCDE-style ODE-RNN with spline control path) | [patrick-kidger/NeuralCDE](https://github.com/patrick-kidger/NeuralCDE) | ODE-RNN with a natural-cubic-spline control path on the NeuralCDE infrastructure. `ode-rnn` in [§4](#4-ode-rnn-latent-ode-and-gru-ode-bayes) uses a direct value/time path. |
+| `ode-lstm` | adapted | [Lechner and Hasani, *Learning Long-Term Dependencies in Irregularly-Sampled Time Series* (NeurIPS 2020)](https://arxiv.org/abs/2006.04418) | [mlech26l/ode-lstms](https://github.com/mlech26l/ode-lstms) | LSTM cell with continuous-time hidden state evolved by an ODE between observed events. |
 
-**Runtime note.** `ode-lstm` keeps the upstream union-of-times adaptive behavior. This package handles singleton batches with a two-point adaptive grid and passes elapsed durations between observations; fixed/adaptive solver selection remains model-specific.
+**Runtime note.** `ode-lstm` updates only samples with an observed event and holds the other hidden and cell states unchanged. It handles singleton batches with a zero-based adaptive grid and passes elapsed durations between observations; fixed/adaptive solver selection remains model-specific.
 
 ---
 
 ## 4. ODE-RNN, Latent ODE, and GRU-ODE-Bayes
 
-Canonical implementations from the original papers / repositories.
+Package implementations informed by the original papers and repositories. The notes below state where a row is a narrower package adaptation.
 
-| Model | Origin paper | Canonical reference repo |
-|---|---|---|
-| `gru-ode-bayes` | [De Brouwer et al., *GRU-ODE-Bayes: Continuous Modeling of Sporadically-Observed Time Series* (NeurIPS 2019)](https://arxiv.org/abs/1905.12374) | [edebrouwer/gru_ode_bayes](https://github.com/edebrouwer/gru_ode_bayes) |
-| `ode-rnn` | [Rubanova et al., *Latent ODEs for Irregularly-Sampled Time Series* (NeurIPS 2019)](https://arxiv.org/abs/1907.03907) | [YuliaRubanova/latent_ode](https://github.com/YuliaRubanova/latent_ode) |
-| `latentode` | [Rubanova et al., *Latent ODEs for Irregularly-Sampled Time Series* (NeurIPS 2019)](https://arxiv.org/abs/1907.03907) | [YuliaRubanova/latent_ode](https://github.com/YuliaRubanova/latent_ode) |
+| Model | Origin paper | Reference repository | Package implementation |
+|---|---|---|---|
+| `gru-ode-bayes` | [De Brouwer et al., *GRU-ODE-Bayes: Continuous Modeling of Sporadically-Observed Time Series* (NeurIPS 2019)](https://arxiv.org/abs/1905.12374) | [edebrouwer/gru_ode_bayes](https://github.com/edebrouwer/gru_ode_bayes) | Continuous GRU drift with recurrent observation updates. This row does not reproduce the paper's Bayesian observation likelihood and jump objective. |
+| `ode-rnn` | [Rubanova et al., *Latent ODEs for Irregularly-Sampled Time Series* (NeurIPS 2019)](https://arxiv.org/abs/1907.03907) | [YuliaRubanova/latent_ode](https://github.com/YuliaRubanova/latent_ode) | ODE-RNN adaptation for direct sequence representations. |
+| `latentode` | [Rubanova et al., *Latent ODEs for Irregularly-Sampled Time Series* (NeurIPS 2019)](https://arxiv.org/abs/1907.03907) | [YuliaRubanova/latent_ode](https://github.com/YuliaRubanova/latent_ode) | Deterministic ODE-RNN encoder/decoder adaptation. This row does not reproduce the variational posterior or ELBO objective from the paper. |
 
-`ode-rnn` and `latentode` come from the same NeurIPS 2019 paper but are **different models**: `ode-rnn` is the RNN cell with ODE between observations; `latentode` is the encoder–decoder Latent ODE that uses `ode-rnn` as its encoder.
+`ode-rnn` and `latentode` come from the same NeurIPS 2019 paper but expose different package architectures: `ode-rnn` evolves a recurrent state between observations, while `latentode` adds a deterministic latent encoder/decoder path.
 
 ---
 
