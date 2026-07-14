@@ -13,9 +13,9 @@ ODE_MODELS: Dict[str, Dict] = {
 
 ODE_SOURCE_MODELS: Dict[str, Dict] = {
     "ode-rnn": {"description": "ODE-RNN (reference implementation)", "handler": "SourceODEHandler"},
-    "latentode": {"description": "Latent ODE (reference implementation)", "handler": "SourceODEHandler"},
+    "latentode": {"description": "Variational Latent ODE package implementation", "handler": "SourceODEHandler"},
     "gru-ode-bayes": {
-        "description": "GRU-ODE-Bayes (reference implementation)",
+        "description": "GRU-ODE-Bayes with Bayesian observation jumps",
         "handler": "SourceODEHandler",
     },
 }

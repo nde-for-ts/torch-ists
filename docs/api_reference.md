@@ -808,6 +808,15 @@ Behavior notes:
 - `forward(..., return_aux_loss=True)` returns `(prediction, aux_loss)` for auxiliary-loss backbones.
 - Non-finite predictions raise `RuntimeError`.
 
+Source ODE model parameters:
+
+| Model | `model_params` | Runtime behavior |
+|---|---|---|
+| `gru-ode-bayes` | `step_size=0.05`, `p_hidden=hidden_dim`, `prep_hidden=4`, `observation_noise_std=0.01`, `mixing=1.0`, `auxiliary_weight=1e-3` | Uses Euler integration only. `step_size` bounds every observation-interval sub-step; the auxiliary term combines pre-jump likelihood and post-jump KL per observed element. |
+| `latentode` | `observation_std=0.01`, `kl_weight=1.0`, `auxiliary_weight=1e-4` | Uses the selected ODE solver for reverse recognition and generative decoding; the auxiliary term combines masked reconstruction likelihood and initial-state KL. |
+
+The defaults above keep method-specific losses on a practical scale when they are added to a task objective. Applications may tune the weights with the rest of the training configuration.
+
 ### 6.3 `ists_layer`
 
 `ists_layer` is the exported low-level backbone wrapper used inside `ists_model`. It creates the selected packaged sequence model and returns hidden/backbone features before any task head is applied.
@@ -965,7 +974,7 @@ def has_auxiliary_loss(model_name: str) -> bool:
 
 #### Models with Auxiliary Loss
 
-Returns `True` for `exit` and `leap`; `False` for all other packaged models. Use `forward(..., return_aux_loss=True)` to receive the auxiliary term alongside the prediction.
+Returns `True` for `gru-ode-bayes`, `latentode`, `exit`, and `leap`; `False` for the other packaged models. Use `forward(..., return_aux_loss=True)` to receive the auxiliary term alongside the prediction.
 
 #### Example
 

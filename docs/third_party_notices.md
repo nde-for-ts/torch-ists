@@ -15,6 +15,8 @@
 | Time-Aware LSTM | `tlstm` | `basic/tlstm.py` | [duskybomb/tlstm](https://github.com/duskybomb/tlstm) | None |
 | Time-Gated LSTM | `tglstm` | `basic/tglstm.py` | [FedericOldani/TGLSTM](https://github.com/FedericOldani/TGLSTM) | None |
 | ODE-LSTM | `ode-lstm` | `ode/odelstm.py` | [mlech26l/ode-lstms](https://github.com/mlech26l/ode-lstms) | MIT |
+| GRU-ODE-Bayes | `gru-ode-bayes` | `ode/source_variants.py` | [edebrouwer/gru_ode_bayes](https://github.com/edebrouwer/gru_ode_bayes) | MIT |
+| Latent ODE | `latentode` | `ode/source_variants.py` | [YuliaRubanova/latent_ode](https://github.com/YuliaRubanova/latent_ode) | MIT |
 | Neural CDE `controldiffeq` | `neuralcde`, `gru-d`, `gru-dt`, `gru-ode`, `ode-rnn-spline` | `cde/_controldiffeq/` | [patrick-kidger/NeuralCDE](https://github.com/patrick-kidger/NeuralCDE) | Apache-2.0 |
 | Neural RDE | `neuralrde-1/2/3` | `cde/nrde_model.py` | Adapted from the NeuralCDE metamodel lineage; method paper: [Morrill et al. 2021](https://arxiv.org/abs/2009.08295) | Apache-2.0 lineage for copied structure |
 | ANCDE | `ancde` | `cde/ancde/` | [sheoyon-jhin/ANCDE](https://github.com/sheoyon-jhin/ANCDE) | Apache-2.0 |
@@ -22,6 +24,28 @@
 | LEAP | `leap` | `cde/leap/` | [alflsowl12/LEAP](https://github.com/alflsowl12/LEAP) | None |
 | TorchDiffEqPack | `exit`, `leap` | `cde/{exit,leap}/_controldiffeq/TorchDiffEqPack/` | [juntang-zhuang/TorchDiffEqPack](https://github.com/juntang-zhuang/TorchDiffEqPack) | MIT |
 | NeuralFlow NFE backend (optional) | `neuralflow-r/g/c` when `flow_backend='nfe'` | `flow/_neural_flows/` | [mbilos/neural-flows-experiments](https://github.com/mbilos/neural-flows-experiments) | None |
+
+## MIT notices for source ODE adaptations
+
+### GRU-ODE-Bayes
+
+Copyright (c) 2022 Edward De Brouwer
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+### Latent ODE
+
+Copyright (c) 2019 Yulia Rubanova
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 **None** means the upstream publishes no LICENSE file. Such code is all-rights-reserved by default; confirm redistribution rights with the original authors. Included files preserve the upstream URL and author in their headers (the NeuralFlow snapshot records source details in `flow/_neural_flows/PROVENANCE.json`).
 

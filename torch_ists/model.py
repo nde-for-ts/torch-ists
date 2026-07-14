@@ -211,21 +211,26 @@ class ists_model(nn.Module):
             )
 
         last_observed = self._last_observed_readout(out, seq)
+        sample_summary = (
+            _hn
+            if self.seq_layer.model_name == "latentode" and _hn.dim() == 2
+            else last_observed
+        )
 
         if self.task == "classification":
-            pred = self.head(last_observed)
+            pred = self.head(sample_summary)
         elif self.task == "regression":
-            pred = self.head(last_observed)
+            pred = self.head(sample_summary)
         elif self.task == "forecasting":
-            pred = self.head(last_observed).reshape(
-                last_observed.shape[0],
+            pred = self.head(sample_summary).reshape(
+                sample_summary.shape[0],
                 int(self.forecast_horizon),
                 self.output_dim,
             )
         elif self.task == "imputation":
             pred = self.head(out)
         elif self.task == "outlier_detection":
-            pred = self.head(last_observed)
+            pred = self.head(sample_summary)
         elif self.task == "change_detection":
             pred = self.head(out)
         else:  # pragma: no cover - guarded by _normalize_task

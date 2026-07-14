@@ -52,16 +52,6 @@ class _DrivenGRUODEFunc(nn.Module):
         return (1.0 - z) * (n - h)
 
 
-class _FrozenDrivenFunc(nn.Module):
-    def __init__(self, func: _DrivenGRUODEFunc, drive: torch.Tensor):
-        super().__init__()
-        self.func = func
-        self.register_buffer("drive", drive)
-
-    def forward(self, _t: torch.Tensor | None, h: torch.Tensor) -> torch.Tensor:
-        return self.func(self.drive, h)
-
-
 def _manual_step(func: nn.Module, h: torch.Tensor, dt: torch.Tensor, method: str) -> torch.Tensor:
     dt = dt.unsqueeze(-1)
     if method == "euler":
@@ -111,6 +101,76 @@ def _integrate_scalar_interval(
     if atol is not None:
         call_kwargs["atol"] = atol
     return odeint_fn(func, y0, t, **call_kwargs)[-1]
+
+
+def _integrate_batch_durations(
+    func: nn.Module,
+    y0: torch.Tensor,
+    durations: torch.Tensor,
+    *,
+    method: str,
+    options: dict,
+    rtol: float | None,
+    atol: float | None,
+    adjoint: bool | None,
+) -> torch.Tensor:
+    """Integrate autonomous states for per-row signed durations."""
+    durations = torch.nan_to_num(
+        durations.reshape(-1),
+        nan=0.0,
+        posinf=0.0,
+        neginf=0.0,
+    ).to(dtype=y0.dtype, device=y0.device)
+    if durations.numel() != y0.size(0):
+        raise ValueError("Expected one integration duration per batch row.")
+    if method in {"euler", "midpoint", "rk4"}:
+        configured_step = float(dict(options or {}).get("step_size", 0.0) or 0.0)
+        max_duration = float(durations.detach().abs().max().item()) if durations.numel() else 0.0
+        if configured_step > 0:
+            num_steps = max(1, int(math.ceil(max_duration / configured_step)))
+            max_step = configured_step
+        else:
+            num_steps = 1
+            max_step = max_duration
+        current = y0
+        remaining = durations
+        for _ in range(num_steps):
+            step = remaining.sign() * remaining.abs().clamp(max=max_step)
+            current = _manual_step(func, current, step, method)
+            remaining = remaining - step
+        return current
+
+    result = y0
+    nonzero = torch.nonzero(durations != 0, as_tuple=False).reshape(-1)
+    if nonzero.numel() == 0:
+        return result
+    active_durations = durations.index_select(0, nonzero)
+    unique_durations, inverse = torch.unique(active_durations, sorted=True, return_inverse=True)
+    odeint_fn = torchdiffeq.odeint_adjoint if bool(adjoint) else torchdiffeq.odeint
+    for group_index, duration in enumerate(unique_durations):
+        members = nonzero.index_select(
+            0,
+            torch.nonzero(inverse == group_index, as_tuple=False).reshape(-1),
+        )
+        time_span = torch.stack([duration.new_zeros(()), duration])
+        call_kwargs = {"method": method}
+        adaptive_options = {
+            key: value for key, value in dict(options or {}).items() if key != "step_size"
+        }
+        if adaptive_options:
+            call_kwargs["options"] = adaptive_options
+        if rtol is not None:
+            call_kwargs["rtol"] = rtol
+        if atol is not None:
+            call_kwargs["atol"] = atol
+        solved = odeint_fn(
+            func,
+            y0.index_select(0, members),
+            time_span,
+            **call_kwargs,
+        )[-1]
+        result = result.index_copy(0, members, solved)
+    return result
 
 
 def _reconstruct_sample_times(
@@ -244,14 +304,73 @@ class SourceODERNNBackbone(nn.Module):
 
 
 class SourceLatentODEBackbone(nn.Module):
-    def __init__(self, input_dim: int, hidden_dim: int, output_dim: int, num_layers: int):
+    """Variational Latent ODE with reverse recognition and generative decoding."""
+
+    def __init__(
+        self,
+        input_dim: int,
+        hidden_dim: int,
+        output_dim: int,
+        num_layers: int,
+        *,
+        observation_std: float = 0.01,
+        kl_weight: float = 1.0,
+        auxiliary_weight: float = 1e-4,
+    ):
         super().__init__()
-        self.encoder = _RawODERNNEncoder(input_dim, hidden_dim, num_layers)
-        self.latent_init = nn.Linear(hidden_dim, hidden_dim)
+        self.hidden_dim = int(hidden_dim)
+        self.observation_std = float(observation_std)
+        self.kl_weight = float(kl_weight)
+        self.auxiliary_weight = float(auxiliary_weight)
+        self.recognition_ode_func = _ODEFunc(hidden_dim, num_layers=max(1, num_layers))
+        self.recognition_update = nn.GRUCell(2 * input_dim, hidden_dim)
+        self.posterior = nn.Linear(hidden_dim, 2 * hidden_dim)
         self.latent_func = _ODEFunc(hidden_dim, num_layers=max(1, num_layers))
+        self.reconstruction_head = nn.Linear(hidden_dim, input_dim)
         self.readout = nn.Linear(hidden_dim, output_dim)
 
-    def _decode_single(
+    def _recognize(
+        self,
+        values: torch.Tensor,
+        mask: torch.Tensor,
+        sample_times: torch.Tensor,
+        *,
+        method: str,
+        options: dict,
+        rtol: float | None,
+        atol: float | None,
+        adjoint: bool | None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        batch_size, seq_len, _ = values.shape
+        hidden = values.new_zeros(batch_size, self.hidden_dim)
+        for step_index in range(seq_len - 1, -1, -1):
+            if step_index < seq_len - 1:
+                signed_duration = (
+                    sample_times[:, step_index] - sample_times[:, step_index + 1]
+                )
+                hidden = _integrate_batch_durations(
+                    self.recognition_ode_func,
+                    hidden,
+                    signed_duration,
+                    method=method,
+                    options=options,
+                    rtol=rtol,
+                    atol=atol,
+                    adjoint=adjoint,
+                )
+            observation = torch.cat(
+                [values[:, step_index] * mask[:, step_index], mask[:, step_index]],
+                dim=-1,
+            )
+            updated = self.recognition_update(observation, hidden)
+            observed = (mask[:, step_index] > 0).any(dim=-1, keepdim=True)
+            hidden = torch.where(observed, updated, hidden)
+
+        mean, raw_scale = torch.chunk(self.posterior(hidden), 2, dim=-1)
+        scale = torch.nn.functional.softplus(raw_scale) + 1e-4
+        return mean, scale
+
+    def _decode(
         self,
         z0: torch.Tensor,
         sample_times: torch.Tensor,
@@ -262,14 +381,39 @@ class SourceLatentODEBackbone(nn.Module):
         atol: float | None,
         adjoint: bool | None,
     ) -> torch.Tensor:
+        common_grid = torch.allclose(
+            sample_times,
+            sample_times[:1].expand_as(sample_times),
+        )
+        common_times = sample_times[0] - sample_times[0, 0]
+        strictly_increasing = bool((common_times[1:] > common_times[:-1]).all())
+        if method not in {"euler", "midpoint", "rk4"} and common_grid and strictly_increasing:
+            odeint_fn = torchdiffeq.odeint_adjoint if bool(adjoint) else torchdiffeq.odeint
+            call_kwargs = {"method": method}
+            adaptive_options = {
+                key: value for key, value in dict(options or {}).items() if key != "step_size"
+            }
+            if adaptive_options:
+                call_kwargs["options"] = adaptive_options
+            if rtol is not None:
+                call_kwargs["rtol"] = rtol
+            if atol is not None:
+                call_kwargs["atol"] = atol
+            return odeint_fn(
+                self.latent_func,
+                z0,
+                common_times,
+                **call_kwargs,
+            ).permute(1, 0, 2)
+
         states = [z0]
         current = z0
-        for step in range(1, sample_times.numel()):
-            dt = float((sample_times[step] - sample_times[step - 1]).clamp_min(0.0).item())
-            current = _integrate_scalar_interval(
+        for step_index in range(1, sample_times.size(1)):
+            duration = sample_times[:, step_index] - sample_times[:, step_index - 1]
+            current = _integrate_batch_durations(
                 self.latent_func,
                 current,
-                dt,
+                duration,
                 method=method,
                 options=options,
                 rtol=rtol,
@@ -277,7 +421,7 @@ class SourceLatentODEBackbone(nn.Module):
                 adjoint=adjoint,
             )
             states.append(current)
-        return torch.stack(states, dim=0)
+        return torch.stack(states, dim=1)
 
     def forward(
         self,
@@ -291,41 +435,160 @@ class SourceLatentODEBackbone(nn.Module):
         rtol: float | None = None,
         atol: float | None = None,
         adjoint: bool | None = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
-        encoded = self.encoder(
-            x,
-            mask,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        del final_index
+        values = torch.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
+        observed_mask = (mask > 0.5).to(dtype=values.dtype)
+        solver_options = dict(options or {})
+        posterior_mean, posterior_scale = self._recognize(
+            values,
+            observed_mask,
             sample_times,
-            method="euler",
-            options={},
+            method=method,
+            options=solver_options,
             rtol=rtol,
             atol=atol,
-            adjoint=False,
+            adjoint=adjoint,
         )
-        z0 = self.latent_init(_gather_last(encoded, final_index))
-        trajectories = [
-            self._decode_single(
-                z0[idx],
-                sample_times[idx],
-                method=method,
-                options=dict(options or {}),
-                rtol=rtol,
-                atol=atol,
-                adjoint=adjoint,
-            )
-            for idx in range(x.size(0))
-        ]
-        latent_stream = torch.stack(trajectories, dim=0)
-        return self.readout(latent_stream), _gather_last(latent_stream, final_index)
+        if self.training:
+            z0 = posterior_mean + posterior_scale * torch.randn_like(posterior_scale)
+        else:
+            z0 = posterior_mean
+        latent_stream = self._decode(
+            z0,
+            sample_times,
+            method=method,
+            options=solver_options,
+            rtol=rtol,
+            atol=atol,
+            adjoint=adjoint,
+        )
+
+        reconstruction = self.reconstruction_head(latent_stream)
+        observation_std = values.new_tensor(max(self.observation_std, 1e-6))
+        reconstruction_nll = 0.5 * (
+            ((values - reconstruction) / observation_std).square()
+            + 2.0 * torch.log(observation_std)
+            + math.log(2.0 * math.pi)
+        )
+        reconstruction_nll = (
+            reconstruction_nll * observed_mask
+        ).sum() / observed_mask.sum().clamp_min(1.0)
+        posterior_log_scale = torch.log(posterior_scale)
+        initial_kl = 0.5 * (
+            posterior_mean.square()
+            + posterior_scale.square()
+            - 2.0 * posterior_log_scale
+            - 1.0
+        ).sum(dim=-1).mean()
+        native_loss = (
+            reconstruction_nll + self.kl_weight * initial_kl
+        ) * self.auxiliary_weight
+
+        representation_stream = self.readout(latent_stream)
+        return representation_stream, self.readout(z0), native_loss
+
+
+class _GRUObservationCell(nn.Module):
+    """Bayesian observation update adapted from the reference implementation."""
+
+    def __init__(self, input_dim: int, hidden_dim: int, prep_hidden: int):
+        super().__init__()
+        self.input_dim = int(input_dim)
+        self.prep_hidden = max(1, int(prep_hidden))
+        self.gru = nn.GRUCell(self.input_dim * self.prep_hidden, hidden_dim)
+        scale = math.sqrt(2.0 / (4.0 + self.prep_hidden))
+        self.w_prep = nn.Parameter(
+            scale * torch.randn(self.input_dim, 4, self.prep_hidden)
+        )
+        self.bias_prep = nn.Parameter(
+            torch.full((self.input_dim, self.prep_hidden), 0.1)
+        )
+
+    @staticmethod
+    def _distribution(p: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        mean, logvar = torch.chunk(p, 2, dim=-1)
+        return mean, logvar.clamp(min=-12.0, max=12.0)
+
+    def forward(
+        self,
+        h: torch.Tensor,
+        p: torch.Tensor,
+        x: torch.Tensor,
+        mask: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        mean, logvar = self._distribution(p)
+        values = torch.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
+        mask = (mask > 0.5).to(dtype=values.dtype)
+        error = (values - mean) * torch.exp(-0.5 * logvar)
+        nll = 0.5 * (
+            error.square() + logvar + math.log(2.0 * math.pi)
+        ) * mask
+
+        features = torch.stack([values, mean, logvar, error], dim=-1)
+        prepared = torch.einsum("bdk,dkp->bdp", features, self.w_prep)
+        prepared = torch.relu(prepared + self.bias_prep)
+        prepared = (prepared * mask.unsqueeze(-1)).reshape(values.size(0), -1)
+        updated = self.gru(prepared, h)
+        observed = (mask > 0).any(dim=-1, keepdim=True)
+        return torch.where(observed, updated, h), nll.sum()
+
+
+def _gaussian_observation_kl(
+    p: torch.Tensor,
+    x: torch.Tensor,
+    mask: torch.Tensor,
+    *,
+    observation_noise_std: float,
+) -> torch.Tensor:
+    mean, logvar = torch.chunk(p, 2, dim=-1)
+    logvar = logvar.clamp(min=-12.0, max=12.0)
+    values = torch.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
+    mask = (mask > 0.5).to(dtype=values.dtype)
+    noise_std = values.new_tensor(max(float(observation_noise_std), 1e-6))
+    noise_var = noise_std.square()
+    variance = torch.exp(logvar)
+    kl = (
+        torch.log(noise_std)
+        - 0.5 * logvar
+        + (variance + (mean - values).square()) / (2.0 * noise_var)
+        - 0.5
+    )
+    return (kl * mask).sum()
 
 
 class SourceGRUODEBayesBackbone(nn.Module):
-    def __init__(self, input_dim: int, hidden_dim: int, output_dim: int):
+    """GRU-ODE-Bayes with continuous prediction and Bayesian observation jumps."""
+
+    def __init__(
+        self,
+        input_dim: int,
+        hidden_dim: int,
+        output_dim: int,
+        *,
+        p_hidden: int | None = None,
+        prep_hidden: int = 4,
+        step_size: float = 0.05,
+        observation_noise_std: float = 0.01,
+        mixing: float = 1.0,
+        auxiliary_weight: float = 1e-3,
+    ):
         super().__init__()
-        self.hidden_dim = hidden_dim
-        self.update = nn.GRUCell(input_dim * 2, hidden_dim)
-        self.drive = nn.Linear(hidden_dim, input_dim * 2)
-        self.ode_func = _DrivenGRUODEFunc(input_dim * 2, hidden_dim)
+        self.hidden_dim = int(hidden_dim)
+        self.step_size = float(step_size)
+        self.observation_noise_std = float(observation_noise_std)
+        self.mixing = float(mixing)
+        self.auxiliary_weight = float(auxiliary_weight)
+        prediction_hidden = max(1, int(p_hidden or hidden_dim))
+
+        self.initial_hidden = nn.Parameter(torch.zeros(1, hidden_dim))
+        self.p_model = nn.Sequential(
+            nn.Linear(hidden_dim, prediction_hidden),
+            nn.ReLU(),
+            nn.Linear(prediction_hidden, 2 * input_dim),
+        )
+        self.ode_func = _DrivenGRUODEFunc(2 * input_dim, hidden_dim)
+        self.gru_obs = _GRUObservationCell(input_dim, hidden_dim, prep_hidden)
         self.readout = nn.Linear(hidden_dim, output_dim)
 
     def _evolve(
@@ -339,36 +602,24 @@ class SourceGRUODEBayesBackbone(nn.Module):
         atol: float | None,
         adjoint: bool | None,
     ) -> torch.Tensor:
-        drive = self.drive(h)
-        if method == "euler":
-            return h + dt.unsqueeze(-1) * self.ode_func(drive, h)
-        if method == "midpoint":
-            k1 = self.ode_func(drive, h)
-            mid = h + 0.5 * dt.unsqueeze(-1) * k1
-            return h + dt.unsqueeze(-1) * self.ode_func(self.drive(mid), mid)
-        if method == "rk4":
-            k1 = self.ode_func(drive, h)
-            k2 = self.ode_func(drive, h + 0.5 * dt.unsqueeze(-1) * k1)
-            k3 = self.ode_func(drive, h + 0.5 * dt.unsqueeze(-1) * k2)
-            k4 = self.ode_func(drive, h + dt.unsqueeze(-1) * k3)
-            return h + (dt.unsqueeze(-1) / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
-        if method == "dopri5":
-            next_h = []
-            for batch_idx in range(h.size(0)):
-                next_h.append(
-                    _integrate_scalar_interval(
-                        _FrozenDrivenFunc(self.ode_func, drive[batch_idx]),
-                        h[batch_idx],
-                        float(dt[batch_idx].item()),
-                        method="dopri5",
-                        options=dict(options or {}),
-                        rtol=rtol,
-                        atol=atol,
-                        adjoint=adjoint,
-                    )
-                )
-            return torch.stack(next_h, dim=0)
-        raise ValueError(f"Unsupported GRU-ODE-Bayes method: {method}")
+        del rtol, atol, adjoint
+        if method != "euler":
+            raise ValueError("GRU-ODE-Bayes currently supports only Euler integration.")
+        durations = torch.nan_to_num(dt, nan=0.0, posinf=0.0, neginf=0.0).clamp_min(0.0)
+        step_size = float(dict(options or {}).get("step_size", self.step_size))
+        if not math.isfinite(step_size) or step_size <= 0:
+            raise ValueError("GRU-ODE-Bayes step_size must be finite and positive.")
+        max_duration = float(durations.detach().max().item()) if durations.numel() else 0.0
+        num_steps = max(1, int(math.ceil(max_duration / step_size))) if max_duration > 0 else 0
+        remaining = durations
+        p = self.p_model(h)
+        for _ in range(num_steps):
+            step = remaining.clamp(min=0.0, max=step_size)
+            candidate = h + step.unsqueeze(-1) * self.ode_func(p, h)
+            h = torch.where((step > 0).unsqueeze(-1), candidate, h)
+            p = self.p_model(h)
+            remaining = (remaining - step).clamp_min(0.0)
+        return h
 
     def forward(
         self,
@@ -382,29 +633,61 @@ class SourceGRUODEBayesBackbone(nn.Module):
         rtol: float | None = None,
         atol: float | None = None,
         adjoint: bool | None = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        if method != "euler":
+            raise ValueError("GRU-ODE-Bayes currently supports only Euler integration.")
         batch_size, seq_len, _ = x.shape
-        h = x.new_zeros(batch_size, self.hidden_dim)
-        hs = []
-        for step in range(seq_len):
-            if step > 0:
-                dt = (sample_times[:, step] - sample_times[:, step - 1]).clamp_min(0.0)
+        values = torch.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
+        observed_mask = (mask > 0.5).to(dtype=values.dtype)
+        h = self.initial_hidden.to(dtype=values.dtype).expand(batch_size, -1)
+        hidden_stream = []
+        pre_jump_loss = values.new_zeros(())
+        post_jump_loss = values.new_zeros(())
+
+        for step_index in range(seq_len):
+            if step_index > 0:
+                duration = (
+                    sample_times[:, step_index] - sample_times[:, step_index - 1]
+                ).clamp_min(0.0)
                 h = self._evolve(
                     h,
-                    dt,
+                    duration,
                     method,
                     options=options,
                     rtol=rtol,
                     atol=atol,
                     adjoint=adjoint,
                 )
-            obs_input = torch.cat([x[:, step, :] * mask[:, step, :], mask[:, step, :]], dim=-1)
-            obs_present = _masked_observation_flag(mask[:, step, :]).unsqueeze(-1)
-            updated = self.update(obs_input, h)
-            h = torch.where(obs_present, updated, h)
-            hs.append(h)
-        hidden_stream = torch.stack(hs, dim=1)
-        return self.readout(hidden_stream), _gather_last(hidden_stream, final_index)
+
+            prediction = self.p_model(h)
+            h, observation_nll = self.gru_obs(
+                h,
+                prediction,
+                values[:, step_index],
+                observed_mask[:, step_index],
+            )
+            pre_jump_loss = pre_jump_loss + observation_nll
+            posterior_prediction = self.p_model(h)
+            post_jump_loss = post_jump_loss + _gaussian_observation_kl(
+                posterior_prediction,
+                values[:, step_index],
+                observed_mask[:, step_index],
+                observation_noise_std=self.observation_noise_std,
+            )
+            hidden_stream.append(h)
+
+        hidden_stream_tensor = torch.stack(hidden_stream, dim=1)
+        representation_stream = self.readout(hidden_stream_tensor)
+        observed_count = observed_mask.sum().clamp_min(1.0)
+        native_loss = (
+            pre_jump_loss + self.mixing * post_jump_loss
+        ).clamp_min(0.0) / observed_count
+        native_loss = native_loss * self.auxiliary_weight
+        return (
+            representation_stream,
+            _gather_last(representation_stream, final_index),
+            native_loss,
+        )
 
 
 __all__ = [

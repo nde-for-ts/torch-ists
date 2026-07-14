@@ -37,11 +37,24 @@ class SourceODEHandler(BaseHandler):
     DOPRI5_MAX_NUM_STEPS = 10_000
 
     @classmethod
+    def _allowed_methods_for_model(cls, model_name: str) -> set[str]:
+        if model_name == "gru-ode-bayes":
+            return {"euler"}
+        return set(cls.ODE_ALLOWED_METHODS)
+
+    @classmethod
     def _with_operational_solver_options(cls, method: str, options: Dict[str, Any]) -> Dict[str, Any]:
         resolved = dict(options)
         if method == "dopri5" and "max_num_steps" not in resolved:
             resolved["max_num_steps"] = cls.DOPRI5_MAX_NUM_STEPS
         return resolved
+
+    @classmethod
+    def _resolved_solver_options(cls, solver: Dict[str, Any]) -> Dict[str, Any]:
+        options = dict(solver["options"])
+        if solver["step_size"] is not None:
+            options.setdefault("step_size", float(solver["step_size"]))
+        return cls._with_operational_solver_options(solver["method"], options)
 
     def can_handle(self, model_name: str) -> bool:
         return model_name in self.SOURCE_MODELS
@@ -60,7 +73,7 @@ class SourceODEHandler(BaseHandler):
             model_params=model_params,
             model=None,
             default_method=resolve_default_method_for_model(model_name),
-            allowed_methods=self.ODE_ALLOWED_METHODS,
+            allowed_methods=self._allowed_methods_for_model(model_name),
             alias_map=self.ODE_METHOD_ALIASES,
         )
         solver_kwargs = {
@@ -68,17 +81,37 @@ class SourceODEHandler(BaseHandler):
             for key in ("rtol", "atol", "adjoint", "dt")
             if solver[key] is not None
         }
-        solver_options = self._with_operational_solver_options(
-            solver["method"],
-            dict(solver["options"]),
-        )
+        solver_options = self._resolved_solver_options(solver)
         family = self.SOURCE_MODELS[model_name]
         if family == "odernn":
             model = SourceODERNNBackbone(input_dim, hidden_dim, hidden_dim, num_layers)
         elif family == "latentode":
-            model = SourceLatentODEBackbone(input_dim, hidden_dim, hidden_dim, num_layers)
+            model = SourceLatentODEBackbone(
+                input_dim,
+                hidden_dim,
+                hidden_dim,
+                num_layers,
+                observation_std=float(config.get("observation_std", config.get("obsrv_std", 0.01))),
+                kl_weight=float(config.get("kl_weight", 1.0)),
+                auxiliary_weight=float(config.get("auxiliary_weight", 1e-4)),
+            )
         elif family == "gru_ode_bayes":
-            model = SourceGRUODEBayesBackbone(input_dim, hidden_dim, hidden_dim)
+            configured_step_size = config.get("step_size")
+            if configured_step_size is None:
+                configured_step_size = config.get("dt")
+            if configured_step_size is None:
+                configured_step_size = 0.05
+            model = SourceGRUODEBayesBackbone(
+                input_dim,
+                hidden_dim,
+                hidden_dim,
+                p_hidden=config.get("p_hidden"),
+                prep_hidden=int(config.get("prep_hidden", 4)),
+                step_size=float(configured_step_size),
+                observation_noise_std=float(config.get("observation_noise_std", 0.01)),
+                mixing=float(config.get("mixing", 1.0)),
+                auxiliary_weight=float(config.get("auxiliary_weight", 1e-3)),
+            )
         else:  # pragma: no cover
             raise ValueError(f"Unsupported source ODE family: {family}")
         model.model_name = model_name
@@ -104,7 +137,7 @@ class SourceODEHandler(BaseHandler):
             model_params=model_params,
             model=model,
             default_method=resolve_default_method_for_model(model_name),
-            allowed_methods=self.ODE_ALLOWED_METHODS,
+            allowed_methods=self._allowed_methods_for_model(model_name),
             alias_map=self.ODE_METHOD_ALIASES,
         )
         runtime_solver_kwargs = {
@@ -112,10 +145,7 @@ class SourceODEHandler(BaseHandler):
             for key in ("rtol", "atol", "adjoint", "dt")
             if solver[key] is not None
         }
-        solver_options = self._with_operational_solver_options(
-            solver["method"],
-            dict(solver["options"]),
-        )
+        solver_options = self._resolved_solver_options(solver)
         model.solver_method = solver["method"]
         model.solver_options = solver_options
         model.solver_kwargs = runtime_solver_kwargs

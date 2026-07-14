@@ -78,15 +78,15 @@ ODE-style recurrent methods. The GRU-D, GRU-ODE, and ODE-RNN-spline rows are bui
 
 ## 4. ODE-RNN, Latent ODE, and GRU-ODE-Bayes
 
-Package implementations informed by the original papers and repositories. The notes below state where a row is a narrower package adaptation.
+Package implementations informed by the original papers and repositories. They adapt event-based reference code to the package's batched sequence interface while retaining the method-specific training terms described below.
 
 | Model | Origin paper | Reference repository | Package implementation |
 |---|---|---|---|
-| `gru-ode-bayes` | [De Brouwer et al., *GRU-ODE-Bayes: Continuous Modeling of Sporadically-Observed Time Series* (NeurIPS 2019)](https://arxiv.org/abs/1905.12374) | [edebrouwer/gru_ode_bayes](https://github.com/edebrouwer/gru_ode_bayes) | Continuous GRU drift with recurrent observation updates. This row does not reproduce the paper's Bayesian observation likelihood and jump objective. |
+| `gru-ode-bayes` | [De Brouwer et al., *GRU-ODE-Bayes: Continuous Modeling of Sporadically-Observed Time Series* (NeurIPS 2019)](https://arxiv.org/abs/1905.12374) | [edebrouwer/gru_ode_bayes](https://github.com/edebrouwer/gru_ode_bayes) | Learned Gaussian prediction distribution, GRU-ODE drift, mask-aware Bayesian observation preparation, pre-jump negative log-likelihood, and post-jump Gaussian KL. Observation intervals use bounded Euler sub-steps. |
 | `ode-rnn` | [Rubanova et al., *Latent ODEs for Irregularly-Sampled Time Series* (NeurIPS 2019)](https://arxiv.org/abs/1907.03907) | [YuliaRubanova/latent_ode](https://github.com/YuliaRubanova/latent_ode) | ODE-RNN adaptation for direct sequence representations. |
-| `latentode` | [Rubanova et al., *Latent ODEs for Irregularly-Sampled Time Series* (NeurIPS 2019)](https://arxiv.org/abs/1907.03907) | [YuliaRubanova/latent_ode](https://github.com/YuliaRubanova/latent_ode) | Deterministic ODE-RNN encoder/decoder adaptation. This row does not reproduce the variational posterior or ELBO objective from the paper. |
+| `latentode` | [Rubanova et al., *Latent ODEs for Irregularly-Sampled Time Series* (NeurIPS 2019)](https://arxiv.org/abs/1907.03907) | [YuliaRubanova/latent_ode](https://github.com/YuliaRubanova/latent_ode) | Reverse ODE-RNN recognition, learned posterior mean and scale, reparameterized initial latent state, batched generative solve, masked Gaussian reconstruction term, and initial-state KL. |
 
-`ode-rnn` and `latentode` come from the same NeurIPS 2019 paper but expose different package architectures: `ode-rnn` evolves a recurrent state between observations, while `latentode` adds a deterministic latent encoder/decoder path.
+`ode-rnn` and `latentode` come from the same NeurIPS 2019 paper but expose different package architectures: `ode-rnn` evolves a recurrent state directly between observations, while `latentode` learns a variational initial state and decodes a generative latent trajectory. Sample-level task heads use the inferred initial latent representation; sequence-level heads use the decoded trajectory. Both variational rows expose their method-specific objective through `return_aux_loss=True`.
 
 ---
 
