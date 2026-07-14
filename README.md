@@ -114,7 +114,7 @@ seq = torch.stack([X_missing, X_mask, X_delta], dim=1)  # [N, 3, L, D]
 logits = model(seq, coeffs=coeffs)
 ```
 
-Coefficient-driven CDE and SDE rows consume the `coeffs` returned by `preprocess(...)`. Direct sequence, attention, and event-driven rows, including ODE-LSTM, the direct ODE-RNN family, NJODE, and LatentSDE, use the sequence stack and accept `coeffs=None`.
+Coefficient-driven CDE and SDE rows consume the `coeffs` returned by `preprocess(...)`. Direct sequence, attention, and event-driven rows, including ODE-LSTM, the direct ODE-RNN models, NJODE, and LatentSDE, use the sequence stack and accept `coeffs=None`.
 
 See [Model Reference](docs/model_reference.md) for which models need `preprocess(X, model_name=...)` versus the direct sequence stack.
 
