@@ -165,7 +165,9 @@ class LatentSDE(torchsde.SDEIto):
 
         posterior_mean, posterior_raw_scale = self.posterior_head(hidden).chunk(2, dim=-1)
         posterior_scale = F.softplus(posterior_raw_scale) + 1e-4
-        has_observation = (observed & valid_grid.unsqueeze(-1)).any(dim=(1, 2)).unsqueeze(-1)
+        has_observation = (
+            (observed & valid_grid.unsqueeze(-1)).any(dim=2).any(dim=1).unsqueeze(-1)
+        )
         prior_mean = self.py0_mean.to(dtype=values.dtype).expand(batch_size, -1)
         prior_scale = self.py0_std.to(dtype=values.dtype).expand(batch_size, -1)
         posterior_mean = torch.where(has_observation, posterior_mean, prior_mean)
