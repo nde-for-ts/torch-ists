@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
@@ -88,14 +87,6 @@ def validate_task_splits(
 
 def _as_float_tensor(array: np.ndarray) -> torch.Tensor:
     return torch.as_tensor(np.asarray(array), dtype=torch.float32)
-
-
-def _file_sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with Path(path).open("rb") as f:
-        for chunk in iter(lambda: f.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def _require_key(payload: Any, key: str, *, dataset: str, task: str) -> np.ndarray:
@@ -351,7 +342,6 @@ def load_task_targets_npz(
     target_spec: Dict[str, Any] = {
         "target_source": "dataset",
         "target_path": str(target_path),
-        "target_sha256": _file_sha256(target_path),
         "task": task_name,
         "target_key": TASK_TARGET_KEYS[task_name],
         "target_shape": [int(x) for x in target_tensor.shape],

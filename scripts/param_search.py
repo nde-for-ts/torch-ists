@@ -48,7 +48,6 @@ from _common import (
     apply_model_scope_variant,
     build_param_artifact_identity,
     build_model_kwargs_from_config,
-    compute_param_config_hash,
     configure_runtime_paths,
     default_method_for_model,
     describe_search_profile,
@@ -73,7 +72,6 @@ from dataset_source_contracts import (
 )
 from script_chain_contracts import (
     atomic_pickle_dump,
-    file_sha256,
     generate_run_id,
     portable_artifact_reference,
     stable_hash,
@@ -200,34 +198,26 @@ def _build_expected_param_artifact_identity(
 ) -> dict:
     task_name = str(task).strip().lower()
     source = "label" if task_name == "classification" else str(target_source).strip().lower()
-    target_sha256 = None
     if task_name != "classification" and source == "dataset":
         target_path = Path(targets_root) / f"{data_name}.npz"
         if not target_path.exists():
             raise FileNotFoundError(f"Target bundle not found for dataset={data_name}: {target_path}")
-        target_sha256 = file_sha256(target_path)
     normalized_dataset_source = str(dataset_source).strip().lower()
-    dataset_npz_sha256 = None
     if normalized_dataset_source == "npz":
         if dataset_npz is None or not Path(dataset_npz).exists():
             raise FileNotFoundError(f"Dataset NPZ not found: {dataset_npz}")
-        dataset_npz_sha256 = file_sha256(dataset_npz)
-    split_sha256s = []
     for seed in split_seeds:
         split_path = Path(split_root) / data_name / f"{data_name}_{int(seed)}"
         if not split_path.exists():
             raise FileNotFoundError(f"Split artifact not found: {split_path}")
-        split_sha256s.append({"seed": int(seed), "sha256": file_sha256(split_path)})
     return build_param_artifact_identity(
         data_name=data_name,
         model_name=model_name,
         task=task_name,
         target_source=source,
-        target_sha256=target_sha256,
         forecast_horizon=forecast_horizon,
         dataset_source=normalized_dataset_source,
-        dataset_npz_sha256=dataset_npz_sha256,
-        split_sha256s=split_sha256s,
+        split_seeds=split_seeds,
     )
 
 
@@ -257,11 +247,9 @@ def _validate_existing_param_artifact_for_reuse(
     model_name: str,
     task: str,
     target_source: str,
-    target_sha256: str | None,
     forecast_horizon,
     dataset_source: str,
-    dataset_npz_sha256: str | None,
-    split_sha256s,
+    split_seeds,
     allow_legacy_search_profile: bool,
 ) -> str:
     existing_profile = validate_param_artifact_metadata(
@@ -278,11 +266,9 @@ def _validate_existing_param_artifact_for_reuse(
             model_name=model_name,
             task=task,
             target_source=target_source,
-            target_sha256=target_sha256,
             forecast_horizon=forecast_horizon,
             dataset_source=dataset_source,
-            dataset_npz_sha256=dataset_npz_sha256,
-            split_sha256s=split_sha256s,
+            split_seeds=split_seeds,
             context=f"Param artifact {existing_param_path}",
         )
     return existing_profile
@@ -709,8 +695,6 @@ def _collect_task_metadata(
     split_path = os.path.join(split_root, data_name, f"{data_name}_{seed}")
     with open(split_path, "rb") as f:
         train_idx, valid_idx, test_idx = pickle.load(f)
-    split_sha256 = file_sha256(split_path)
-    dataset_npz_sha256 = file_sha256(dataset_npz) if dataset_npz is not None else None
     timestamp_delta_scale, timestamp_summary = resolve_timestamp_delta_metadata(
         timestamps,
         train_idx=train_idx,
@@ -797,8 +781,6 @@ def _collect_task_metadata(
         "target_spec": target_spec,
         "target_source": str(target_source if task != "classification" else "label"),
         "timestamp_summary": timestamp_summary,
-        "split_sha256": split_sha256,
-        "dataset_npz_sha256": dataset_npz_sha256,
     }
 
 
@@ -823,8 +805,6 @@ def _normalize_param_config_for_save(
         saved["artifact_identity"] = dict(artifact_identity)
     if search_provenance is not None:
         saved.update(search_provenance)
-    if artifact_identity is not None or search_provenance is not None:
-        saved["param_hash"] = compute_param_config_hash(saved)
     return saved
 
 
@@ -2089,7 +2069,6 @@ def optimize(
         saved_model_config["timestamp_summary"] = metadata["timestamp_summary"]
         if runtime_baseline_id is not None:
             saved_model_config["runtime_baseline_id"] = runtime_baseline_id
-        saved_model_config["param_hash"] = compute_param_config_hash(saved_model_config)
         os.makedirs(os.path.join(param_root, data_name), exist_ok=True)
         out_name = _build_param_artifact_name(
             data_name,
@@ -2099,18 +2078,14 @@ def optimize(
             task=task,
         )
         param_path = os.path.join(param_root, data_name, out_name)
-        param_file_sha256 = atomic_pickle_dump(saved_model_config, param_path)
+        atomic_pickle_dump(saved_model_config, param_path)
 
         return {
             "best_trial": None,
             "best_loss": float(best_loss),
             "param_config": saved_model_config,
-            "param_hash": saved_model_config["param_hash"],
             "param_path": portable_artifact_reference(param_path),
             "split_path": portable_artifact_reference(split_path),
-            "param_file_sha256": param_file_sha256,
-            "split_sha256": metadata["split_sha256"],
-            "dataset_npz_sha256": metadata["dataset_npz_sha256"],
             "batch_policy": metadata["batch_policy"],
             "lr_policy": resolve_learning_rate_policy(saved_model_config.get("lr")),
             "search_profile": search_profile,
@@ -2345,8 +2320,7 @@ def optimize(
     saved_param_config["timestamp_summary"] = metadata["timestamp_summary"]
     if runtime_baseline_id is not None:
         saved_param_config["runtime_baseline_id"] = runtime_baseline_id
-    saved_param_config["param_hash"] = compute_param_config_hash(saved_param_config)
-    param_file_sha256 = atomic_pickle_dump(saved_param_config, param_path)
+    atomic_pickle_dump(saved_param_config, param_path)
 
     LOGGER.info("Params saved to %s (repeat=%s)", param_path, search_repeat)
 
@@ -2354,12 +2328,8 @@ def optimize(
         "best_trial": best_trial,
         "best_loss": float(best_trial.last_result["loss"]),
         "param_config": saved_param_config,
-        "param_hash": saved_param_config["param_hash"],
         "param_path": portable_artifact_reference(param_path),
         "split_path": portable_artifact_reference(split_path),
-        "param_file_sha256": param_file_sha256,
-        "split_sha256": metadata["split_sha256"],
-        "dataset_npz_sha256": metadata["dataset_npz_sha256"],
         "batch_policy": metadata["batch_policy"],
         "lr_policy": resolve_learning_rate_policy(saved_param_config.get("lr")),
         "search_profile": search_profile,
@@ -2496,7 +2466,6 @@ def main():
                     try:
                         with open(existing_param_path, "rb") as f:
                             existing_cfg = pickle.load(f)
-                        param_hash = existing_cfg.get("param_hash")
                     except Exception as exc:
                         reason = f"failed to load existing params for reuse check: {exc}"
                         LOGGER.error("[FAIL] %s/%s: %s", data_name, model_name, reason)
@@ -2523,11 +2492,9 @@ def main():
                             model_name=model_name,
                             task=args.task,
                             target_source=expected_artifact_identity["target_source"],
-                            target_sha256=expected_artifact_identity["target_sha256"],
                             forecast_horizon=expected_artifact_identity["forecast_horizon"],
                             dataset_source=expected_artifact_identity["dataset_source"],
-                            dataset_npz_sha256=expected_artifact_identity["dataset_npz_sha256"],
-                            split_sha256s=expected_artifact_identity["split_sha256s"],
+                            split_seeds=expected_artifact_identity["split_seeds"],
                             allow_legacy_search_profile=args.allow_legacy_search_profile,
                         )
                     except (FileNotFoundError, ValueError) as exc:
@@ -2569,15 +2536,11 @@ def main():
                         policy_violations.append(f"{data_name}/{model_name}: {reason}")
                         continue
                     LOGGER.info("Params file already exists: %s/%s (reusing)", data_name, out_name)
-                    existing_param_file_sha256 = file_sha256(existing_param_path)
-                    existing_split_sha256 = file_sha256(split_path)
-                    dataset_npz_sha256 = file_sha256(args.dataset_npz) if args.dataset_npz is not None else None
                     reused_records.append(
                         {
                             "dataset": data_name,
                             "dataset_source": str(args.dataset_source),
                             "dataset_npz": portable_artifact_reference(args.dataset_npz, root=True),
-                            "dataset_npz_sha256": dataset_npz_sha256,
                             "model": model_name,
                             "seed": SEED,
                             "search_seed_set": split_seeds,
@@ -2625,9 +2588,6 @@ def main():
                             "capacity_metadata": _capacity_metadata_from_config(existing_cfg),
                             "split_path": portable_artifact_reference(split_path),
                             "param_path": portable_artifact_reference(existing_param_path),
-                            "param_hash": str(param_hash),
-                            "split_sha256": existing_split_sha256,
-                            "param_file_sha256": existing_param_file_sha256,
                             "runtime_baseline_id": existing_cfg.get("runtime_baseline_id", runtime_baseline_id),
                             "reason": "param artifact already exists",
                         }
@@ -2684,7 +2644,6 @@ def main():
                         "dataset": data_name,
                         "dataset_source": str(search_result["dataset_source"]),
                         "dataset_npz": search_result["dataset_npz"],
-                        "dataset_npz_sha256": search_result["dataset_npz_sha256"],
                         "model": model_name,
                         "seed": SEED,
                         "search_seed_set": _fixed_search_seed_set(args.search_repeat, SEED),
@@ -2696,9 +2655,6 @@ def main():
                         "timestamp_summary": search_result["timestamp_summary"],
                         "split_path": portable_artifact_reference(search_result["split_path"]),
                         "param_path": portable_artifact_reference(search_result["param_path"]),
-                        "param_hash": str(search_result["param_hash"]),
-                        "split_sha256": search_result["split_sha256"],
-                        "param_file_sha256": search_result["param_file_sha256"],
                         "batch_policy": search_result["batch_policy"],
                         "lr_policy": search_result["lr_policy"],
                         "search_profile": search_result["search_profile"],

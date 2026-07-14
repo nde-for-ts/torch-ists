@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import importlib.util
-import hashlib
 import json
 import math
 import os
@@ -389,37 +388,32 @@ def _metadata_value_missing(value) -> bool:
     return value is None or (isinstance(value, str) and value == "")
 
 
-def compute_param_config_hash(model_config: dict) -> str:
-    """Hash a saved parameter config, excluding the stored hash field itself."""
-    if not isinstance(model_config, dict):
-        raise ValueError("param config must be a metadata dictionary.")
-    payload = {key: value for key, value in model_config.items() if key != "param_hash"}
-    encoded = json.dumps(
-        payload,
-        sort_keys=True,
-        separators=(",", ":"),
-        default=str,
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
-
-
-def _normalize_split_sha256s(value) -> list[dict]:
+def _normalize_split_seeds(value) -> list[int]:
     if value is None or value == "":
         return []
     if not isinstance(value, (list, tuple)):
-        raise ValueError("split_sha256s must be an ordered list")
+        raise ValueError("split_seeds must be an ordered list")
     normalized = []
     seen_seeds = set()
     for item in value:
-        if not isinstance(item, dict) or "seed" not in item or "sha256" not in item:
-            raise ValueError("split_sha256s entries require seed and sha256")
-        seed = int(item["seed"])
-        sha256 = str(item["sha256"]).strip().lower()
-        if seed in seen_seeds or not sha256:
-            raise ValueError("split_sha256s contains a duplicate seed or empty hash")
+        seed = int(item)
+        if seed in seen_seeds:
+            raise ValueError("split_seeds contains a duplicate seed")
         seen_seeds.add(seed)
-        normalized.append({"seed": seed, "sha256": sha256})
+        normalized.append(seed)
     return normalized
+
+
+def _legacy_split_seeds(identity: dict) -> list[int]:
+    legacy = identity.get("split_sha256s")
+    if not isinstance(legacy, (list, tuple)):
+        return []
+    seeds = []
+    for item in legacy:
+        if not isinstance(item, dict) or "seed" not in item:
+            return []
+        seeds.append(int(item["seed"]))
+    return _normalize_split_seeds(seeds)
 
 
 def build_param_artifact_identity(
@@ -428,22 +422,16 @@ def build_param_artifact_identity(
     model_name: str,
     task: str,
     target_source: str | None = None,
-    target_sha256: str | None = None,
     forecast_horizon: int | None = None,
     dataset_source: str | None = None,
-    dataset_npz_sha256: str | None = None,
-    split_sha256s=None,
+    split_seeds=None,
 ) -> dict:
     task_name = str(task).strip().lower()
     if task_name == "classification":
         normalized_target_source = "label"
-        normalized_target_sha256 = None
         normalized_forecast_horizon = None
     else:
         normalized_target_source = str(target_source or "").strip().lower()
-        normalized_target_sha256 = (
-            None if target_sha256 in {None, ""} else str(target_sha256).strip().lower()
-        )
         normalized_forecast_horizon = (
             int(forecast_horizon)
             if task_name == "forecasting" and forecast_horizon is not None
@@ -454,15 +442,9 @@ def build_param_artifact_identity(
         "model_name": _canonical_model_name(model_name),
         "task": task_name,
         "target_source": normalized_target_source,
-        "target_sha256": normalized_target_sha256,
         "forecast_horizon": normalized_forecast_horizon,
         "dataset_source": str(dataset_source or "").strip().lower(),
-        "dataset_npz_sha256": (
-            None
-            if dataset_npz_sha256 in {None, ""}
-            else str(dataset_npz_sha256).strip().lower()
-        ),
-        "split_sha256s": _normalize_split_sha256s(split_sha256s),
+        "split_seeds": _normalize_split_seeds(split_seeds),
     }
 
 
@@ -473,11 +455,9 @@ def validate_param_artifact_identity(
     model_name: str,
     task: str,
     target_source: str | None = None,
-    target_sha256: str | None = None,
     forecast_horizon: int | None = None,
     dataset_source: str | None = None,
-    dataset_npz_sha256: str | None = None,
-    split_sha256s=None,
+    split_seeds=None,
     context: str = "param artifact",
 ) -> None:
     identity = model_config.get("artifact_identity") if isinstance(model_config, dict) else None
@@ -489,21 +469,14 @@ def validate_param_artifact_identity(
         model_name=model_name,
         task=task,
         target_source=target_source,
-        target_sha256=target_sha256,
         forecast_horizon=forecast_horizon,
         dataset_source=dataset_source,
-        dataset_npz_sha256=dataset_npz_sha256,
-        split_sha256s=split_sha256s,
+        split_seeds=split_seeds,
     )
     actual_task = str(identity.get("task", "")).strip().lower()
     actual_target_source = identity.get("target_source")
     if actual_task == "classification" and actual_target_source in {None, ""}:
         actual_target_source = "label"
-    actual_target_sha256 = identity.get("target_sha256")
-    if actual_target_sha256 in {None, ""}:
-        actual_target_sha256 = None
-    else:
-        actual_target_sha256 = str(actual_target_sha256).strip().lower()
     actual_forecast_horizon = identity.get("forecast_horizon")
     if actual_task != "forecasting" or actual_forecast_horizon in {None, ""}:
         actual_forecast_horizon = None
@@ -512,25 +485,36 @@ def validate_param_artifact_identity(
             actual_forecast_horizon = int(actual_forecast_horizon)
         except (TypeError, ValueError):
             actual_forecast_horizon = str(actual_forecast_horizon)
+    explicit_split_seeds = not _metadata_value_missing(identity.get("split_seeds"))
+    if actual_task != "classification" and not explicit_split_seeds:
+        raise ValueError(
+            f"{context} predates the current non-classification task semantics. "
+            "Regenerate this task-specific parameter artifact with the current scripts."
+        )
+    actual_split_seeds = (
+        _normalize_split_seeds(identity.get("split_seeds"))
+        if explicit_split_seeds
+        else _legacy_split_seeds(identity)
+    )
     actual = {
         "data_name": str(identity.get("data_name", "")),
         "model_name": _canonical_model_name(str(identity.get("model_name", ""))),
         "task": actual_task,
         "target_source": str(actual_target_source or "").strip().lower(),
-        "target_sha256": actual_target_sha256,
         "forecast_horizon": actual_forecast_horizon,
         "dataset_source": str(identity.get("dataset_source") or "").strip().lower(),
-        "dataset_npz_sha256": (
-            None
-            if identity.get("dataset_npz_sha256") in {None, ""}
-            else str(identity.get("dataset_npz_sha256")).strip().lower()
-        ),
-        "split_sha256s": _normalize_split_sha256s(identity.get("split_sha256s")),
+        "split_seeds": actual_split_seeds,
     }
+    compared_fields = ["data_name", "model_name", "task", "target_source"]
+    if actual_task == "classification":
+        if actual["dataset_source"]:
+            compared_fields.append("dataset_source")
+        if actual["split_seeds"]:
+            compared_fields.append("split_seeds")
+    else:
+        compared_fields.extend(("forecast_horizon", "dataset_source", "split_seeds"))
     mismatches = [
-        key
-        for key, expected_value in expected.items()
-        if str(actual.get(key)) != str(expected_value)
+        key for key in compared_fields if actual.get(key) != expected.get(key)
     ]
     if mismatches:
         details = ", ".join(
@@ -542,7 +526,6 @@ def validate_param_artifact_identity(
 
 _PARAM_ARTIFACT_INTEGRITY_SENTINELS = (
     "artifact_identity",
-    "param_hash",
     "search_contract",
 )
 
@@ -583,7 +566,6 @@ def validate_param_artifact_metadata(
 
     required_fields = [
         "artifact_identity",
-        "param_hash",
         "search_contract",
         "search_family",
         "public_search_name",
@@ -619,13 +601,6 @@ def validate_param_artifact_metadata(
             "Refusing silent learning-rate fallback for saved params; regenerate "
             "the artifact with scripts/param_search.py."
         )
-    if not (allow_legacy_search_profile and legacy_integrity_shape):
-        expected_hash = compute_param_config_hash(model_config)
-        if str(model_config.get("param_hash")) != expected_hash:
-            raise ValueError(
-                f"{context} param_hash mismatch. "
-                "The saved parameter artifact may be stale or corrupted; regenerate it with scripts/param_search.py."
-            )
     return profile
 
 

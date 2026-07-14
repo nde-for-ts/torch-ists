@@ -280,14 +280,14 @@ Requires:
 ### Artifact Reuse Boundaries
 
 - Split artifacts keep the stable `train/valid/test` pickle format and are safe to reuse when the dataset and split path are intentional.
-- Param artifacts with complete integrity metadata are validated by identity, hash, search policy, repeat policy, target identity, and requested search configuration. Older artifacts without those fields are accepted only with the explicit compatibility audit flag and still require a saved `lr` plus matching requested search axes. Partial integrity metadata and bad hashes are rejected.
-- Output artifacts are reused only when `model_run.py --check` finds the same output-contract hash and validates the stored payload contents. For a 100-condition result this includes exact ordered axes, uniqueness, full prediction identity, and complete channel-outage provenance. Incomplete or older payload shapes are recomputed with `--no-check`; there is no silent cross-contract output reuse.
+- Param artifacts are matched by dataset, model, task, search policy, repeat policy, search seed, target source, forecasting horizon, and split seed set. Stored checksums from older artifacts are optional metadata and are not reuse requirements. Compatible classification artifacts remain reusable; experimental-task artifacts that predate the explicit target contract must be regenerated.
+- Output artifacts are reused when `model_run.py --check` matches the stored semantic details and validates prediction contents, shapes, sample indices, and targets directly. Stored contract checksums are not required. For a 100-condition result, validation also covers the exact ordered axes, uniqueness, full predictions, and complete channel-outage provenance. Structurally incomplete payloads are recomputed with `--no-check`.
 
 ---
 
 ## 5. `aggregate_results.py`
 
-**Purpose**: Build compact CSV tables from script run logs and output payloads. Public multi-condition robustness exports require the exact 100-condition structure and full predictions. Identical output references are counted once using canonical path and file hash; conflicting artifacts for the same dataset/model/seed/task fail instead of being mixed.
+**Purpose**: Build compact CSV tables from script run logs and output payloads. Public multi-condition robustness exports require the exact 100-condition structure and full predictions. Repeated references to the same canonical output path are counted once; a different artifact path for the same dataset/model/seed/task fails instead of being mixed.
 
 **Usage**:
 

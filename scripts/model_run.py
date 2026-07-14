@@ -63,7 +63,7 @@ from dataset_source_contracts import (
     normalize_dataset_source,
     resolve_timestamp_delta_metadata,
 )
-from script_chain_contracts import atomic_pickle_dump, file_sha256, generate_run_id, portable_artifact_reference, write_manifest
+from script_chain_contracts import atomic_pickle_dump, generate_run_id, portable_artifact_reference, write_manifest
 
 sys.dont_write_bytecode = True
 
@@ -236,44 +236,32 @@ def _expected_param_target_identity(
 ) -> dict:
     task_name = str(task).strip().lower()
     source = "label" if task_name == "classification" else str(target_source).strip().lower()
-    target_sha256 = None
     if task_name != "classification" and source == "dataset":
         target_path = Path(targets_root) / f"{data_name}.npz"
         if not target_path.exists():
             raise FileNotFoundError(f"Target bundle not found for dataset={data_name}: {target_path}")
-        target_sha256 = file_sha256(target_path)
     normalized_dataset_source = str(dataset_source).strip().lower()
-    dataset_npz_sha256 = None
     if normalized_dataset_source == "npz":
         if dataset_npz is None or not Path(dataset_npz).exists():
             raise FileNotFoundError(f"Dataset NPZ not found: {dataset_npz}")
-        dataset_npz_sha256 = file_sha256(dataset_npz)
-    identity = model_config.get("artifact_identity", {})
-    stored_splits = identity.get("split_sha256s") if isinstance(identity, dict) else None
-    if not isinstance(stored_splits, list):
-        raise ValueError("Param artifact is missing split_sha256s identity")
-    split_seeds = [int(item["seed"]) for item in stored_splits if isinstance(item, dict) and "seed" in item]
-    if param_repeat == AGGREGATED_SEARCH_REPEAT and split_seeds != [0, 1, 2, 3, 4]:
-        raise ValueError("Aggregated param artifact split seeds must be [0, 1, 2, 3, 4]")
-    if param_repeat == SINGLE_SEARCH_REPEAT and len(split_seeds) != 1:
-        raise ValueError("Single-repeat param artifact must bind exactly one split seed")
-    split_sha256s = []
+    split_seeds = (
+        [0, 1, 2, 3, 4]
+        if param_repeat == AGGREGATED_SEARCH_REPEAT
+        else [int(model_config.get("search_algorithm_seed", 42))]
+    )
     for split_seed in split_seeds:
         split_path = Path(split_root) / data_name / f"{data_name}_{split_seed}"
         if not split_path.exists():
             raise FileNotFoundError(f"Split artifact not found: {split_path}")
-        split_sha256s.append({"seed": split_seed, "sha256": file_sha256(split_path)})
     return {
         "target_source": source,
-        "target_sha256": target_sha256,
         "forecast_horizon": (
             int(forecast_horizon)
             if task_name == "forecasting" and forecast_horizon is not None
             else None
         ),
         "dataset_source": normalized_dataset_source,
-        "dataset_npz_sha256": dataset_npz_sha256,
-        "split_sha256s": split_sha256s,
+        "split_seeds": split_seeds,
     }
 
 
@@ -325,11 +313,9 @@ def _validate_param_search_profile(
     expected_model_name: str,
     expected_task: str,
     expected_target_source: str,
-    expected_target_sha256: str | None,
     expected_forecast_horizon,
     expected_dataset_source: str,
-    expected_dataset_npz_sha256: str | None,
-    expected_split_sha256s,
+    expected_split_seeds,
     param_path: str,
     allow_legacy_search_profile: bool = False,
 ) -> str:
@@ -371,11 +357,9 @@ def _validate_param_search_profile(
             model_name=expected_model_name,
             task=expected_task,
             target_source=expected_target_source,
-            target_sha256=expected_target_sha256,
             forecast_horizon=expected_forecast_horizon,
             dataset_source=expected_dataset_source,
-            dataset_npz_sha256=expected_dataset_npz_sha256,
-            split_sha256s=expected_split_sha256s,
+            split_seeds=expected_split_seeds,
             context=f"Param artifact {param_path}",
         )
     return actual
@@ -415,7 +399,6 @@ def _param_search_contract_metadata(model_config: dict, search_profile: str) -> 
         "params_at_max_carrier",
         "candidate_count",
         "capacity_config",
-        "param_hash",
         "search_algorithm",
         "search_algorithm_seed",
         "search_num_samples",
@@ -1111,20 +1094,6 @@ class OutputArtifactContractError(RuntimeError):
     """Raised when --check finds an output artifact from a different run contract."""
 
 
-def _stable_contract_hash(payload):
-    encoded = json.dumps(
-        payload,
-        sort_keys=True,
-        separators=(",", ":"),
-        default=str,
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
-
-
-def _output_contract_hash(output_contract):
-    return _stable_contract_hash(output_contract)
-
-
 def _build_robustness_axes_metadata(
     *,
     robustness_test_rates,
@@ -1166,56 +1135,55 @@ def _build_output_contract(
     *,
     data_name,
     model_name,
-    model_config,
+    model_parameters,
     seed,
     task,
     target_source,
     forecast_horizon,
     dataset_source,
-    dataset_npz,
-    dataset_npz_sha256,
     data_shape,
     num_class,
     missing_rate,
     evaluation_regime,
     train_missing_type,
     train_channel_sync,
-    split_path,
-    split_sha256,
-    target_path,
-    target_sha256,
     epochs,
     save_predictions,
     interpolate,
     use_intensity,
     batch_policy,
     lr_policy,
-    param_search_contract,
     timestamp_summary=None,
     robustness_axes=None,
     training_loop_policy=None,
 ):
+    task_name = str(task)
+    task_target = None
+    if task_name != "classification":
+        task_target = {
+            "source": str(target_source),
+            "forecast_horizon": (
+                int(forecast_horizon) if task_name == "forecasting" else None
+            ),
+            "dataset_target_required": True,
+            "supervision_mask_required": task_name in {"imputation", "change_detection"},
+        }
     return {
         "dataset": str(data_name),
         "dataset_source": str(dataset_source),
-        "dataset_npz": portable_artifact_reference(dataset_npz, root=True),
-        "dataset_npz_sha256": dataset_npz_sha256,
         "data_shape": [int(value) for value in data_shape],
         "num_class": int(num_class),
         "model": str(model_name),
-        "model_config_hash": _stable_contract_hash(model_config),
+        "model_parameters": copy.deepcopy(model_parameters),
         "seed": int(seed),
-        "task": str(task),
-        "target_source": str(target_source if task != "classification" else "label"),
+        "task": task_name,
+        "target_source": str(target_source if task_name != "classification" else "label"),
         "forecast_horizon": None if forecast_horizon is None else int(forecast_horizon),
+        "task_target": task_target,
         "train_missing_rate": float(missing_rate),
         "train_missing_type": str(train_missing_type).upper(),
         "train_channel_sync": None if train_channel_sync is None else bool(train_channel_sync),
         "evaluation_regime": str(evaluation_regime),
-        "split_path": portable_artifact_reference(split_path),
-        "split_sha256": split_sha256,
-        "target_path": portable_artifact_reference(target_path),
-        "target_sha256": target_sha256,
         "epochs": int(epochs),
         "save_predictions": str(save_predictions),
         "prediction_identity_schema": PREDICTION_IDENTITY_SCHEMA,
@@ -1237,15 +1205,6 @@ def _read_output_payload(output_path):
             f"Output artifact {output_path} must contain a dict payload, got {type(payload).__name__}."
         )
     return payload
-
-
-def _read_output_contract_hash(output_path):
-    payload = _read_output_payload(output_path)
-    meta = payload.get("meta", {})
-    if not isinstance(meta, dict):
-        return None
-    value = meta.get("output_contract_hash")
-    return None if value is None else str(value)
 
 
 def _expected_robustness_axis_keys(axes):
@@ -1336,33 +1295,33 @@ def _validate_prediction_payload(
         )
     count = int(count)
     expected_indices = None
-    expected_index_hash = None
     if expected_sample_indices is not None:
         expected_indices = np.ascontiguousarray(
             np.asarray(expected_sample_indices, dtype=np.int64).reshape(-1)
         )
-        expected_index_hash = hashlib.sha256(expected_indices.tobytes()).hexdigest()
     sample_indices = predictions.get("sample_indices")
-    if storage == "full":
-        if sample_indices is None:
-            raise OutputArtifactContractError(
-                f"Output artifact {output_path} cannot be reused: full predictions require sample indices."
-            )
+    indices = None
+    if sample_indices is not None:
         indices = np.ascontiguousarray(np.asarray(sample_indices, dtype=np.int64).reshape(-1))
         if len(indices) != count:
             raise OutputArtifactContractError(
                 f"Output artifact {output_path} cannot be reused: sample_index_count does not match "
                 "the stored sample indices."
             )
-        expected_hash = hashlib.sha256(indices.tobytes()).hexdigest()
-        if predictions.get("sample_index_hash") != expected_hash:
-            raise OutputArtifactContractError(
-                f"Output artifact {output_path} cannot be reused: sample index hash is invalid."
-            )
         if expected_indices is not None and not np.array_equal(indices, expected_indices):
             raise OutputArtifactContractError(
                 f"Output artifact {output_path} cannot be reused: sample indices do not match current split."
             )
+    elif storage == "full" or task != "classification":
+        raise OutputArtifactContractError(
+            f"Output artifact {output_path} cannot be reused: stored sample indices are required."
+        )
+    elif expected_indices is not None and len(expected_indices) != count:
+        raise OutputArtifactContractError(
+            f"Output artifact {output_path} cannot be reused: summary sample indices do not match current split."
+        )
+
+    if storage == "full":
         if task == "classification":
             num_class = int((expected_contract or {}).get("num_class", 0))
             y_true_array = np.asarray(predictions.get("y_true"))
@@ -1442,9 +1401,7 @@ def _validate_prediction_payload(
                         "finite binary supervision."
                     )
     else:
-        if sample_indices is not None or any(
-            predictions.get(key) is not None for key in ("y_true", "y_pred", "logit_list")
-        ):
+        if any(predictions.get(key) is not None for key in ("y_true", "y_pred", "logit_list")):
             raise OutputArtifactContractError(
                 f"Output artifact {output_path} cannot be reused: summary predictions contain full arrays."
             )
@@ -1452,14 +1409,6 @@ def _validate_prediction_payload(
             raise OutputArtifactContractError(
                 f"Output artifact {output_path} cannot be reused: sample_index_count does not match "
                 "the summary sample count."
-            )
-        if expected_indices is not None and len(expected_indices) != count:
-            raise OutputArtifactContractError(
-                f"Output artifact {output_path} cannot be reused: summary sample indices do not match current split."
-            )
-        if expected_index_hash is not None and predictions.get("sample_index_hash") != expected_index_hash:
-            raise OutputArtifactContractError(
-                f"Output artifact {output_path} cannot be reused: summary sample indices do not match current split."
             )
         if task == "classification" and int(predictions.get("n_classes", -1)) != int(
             (expected_contract or {}).get("num_class", -1)
@@ -1522,7 +1471,7 @@ def _validate_output_payload(
     regime = str(expected_contract.get("evaluation_regime"))
     axes = expected_contract.get("robustness_axes")
     if regime == "robustness":
-        if task != "classification" or not isinstance(axes, dict):
+        if not isinstance(axes, dict):
             raise OutputArtifactContractError(
                 f"Output artifact {output_path} cannot be reused: robustness output details are invalid."
             )
@@ -1547,6 +1496,11 @@ def _validate_output_payload(
             raise OutputArtifactContractError(
                 f"Output artifact {output_path} cannot be reused: 100-cell evaluation requires full predictions."
             )
+        if expected_count == 100 and task != "classification":
+            raise OutputArtifactContractError(
+                f"Output artifact {output_path} cannot be reused: the 100-condition profile "
+                "supports classification only."
+            )
     elif len(evaluations) != 1:
         raise OutputArtifactContractError(
             f"Output artifact {output_path} cannot be reused: non-robustness output must have one evaluation."
@@ -1567,10 +1521,6 @@ def _validate_output_payload(
             expected_y_true=expected_y_true,
             output_path=output_path,
         )
-        if regime == "robustness" and not evaluation.get("mask_hash"):
-            raise OutputArtifactContractError(
-                f"Output artifact {output_path} cannot be reused: evaluated mask hash is missing."
-            )
         if regime == "robustness" and evaluation.get("test_missing_type") == "CHANNEL_DROP":
             expected_plan = build_channel_drop_plan(
                 channel_count=channel_count,
@@ -1609,7 +1559,6 @@ def _validate_existing_output_contract(
     expected_sample_indices=None,
     expected_y_true=None,
 ):
-    expected_hash = _output_contract_hash(expected_contract)
     try:
         payload = _read_output_payload(output_path)
     except OutputArtifactContractError:
@@ -1627,23 +1576,78 @@ def _validate_existing_output_contract(
             "Remove the artifact or rerun with --no-check to overwrite."
         )
     actual_contract = meta.get("output_contract")
-    actual_hash = meta.get("output_contract_hash")
-    if not isinstance(actual_contract, dict) or not actual_hash:
+    if not isinstance(actual_contract, dict):
         raise OutputArtifactContractError(
             f"Output artifact {output_path} cannot be reused: missing stored output details. "
             "Remove the artifact or rerun with --no-check to overwrite."
         )
-    recomputed_hash = _output_contract_hash(actual_contract)
-    if str(actual_hash) != recomputed_hash:
+
+    task = str(expected_contract.get("task", "classification"))
+    required_fields = (
+        "dataset",
+        "model",
+        "seed",
+        "task",
+        "train_missing_rate",
+        "evaluation_regime",
+        "epochs",
+        "save_predictions",
+    )
+    missing = [field for field in required_fields if field not in actual_contract]
+    if missing:
         raise OutputArtifactContractError(
-            f"Output artifact {output_path} cannot be reused: stored output contract hash is invalid "
-            f"(stored={actual_hash}, recomputed={recomputed_hash}). "
+            f"Output artifact {output_path} cannot be reused: stored output details are incomplete "
+            f"({', '.join(missing)}). "
             "Remove the artifact or rerun with --no-check to overwrite."
         )
-    if str(actual_hash) != expected_hash:
+    if task != "classification" and not isinstance(actual_contract.get("task_target"), dict):
+        raise OutputArtifactContractError(
+            f"Output artifact {output_path} cannot be reused: it predates the current "
+            "non-classification task semantics. Remove it or rerun with --no-check to overwrite."
+        )
+
+    semantic_fields = (
+        "dataset",
+        "dataset_source",
+        "data_shape",
+        "num_class",
+        "model",
+        "model_parameters",
+        "seed",
+        "task",
+        "target_source",
+        "forecast_horizon",
+        "task_target",
+        "train_missing_rate",
+        "train_missing_type",
+        "train_channel_sync",
+        "evaluation_regime",
+        "epochs",
+        "save_predictions",
+        "prediction_identity_schema",
+        "interpolate",
+        "use_intensity",
+        "batch_policy",
+        "lr_policy",
+        "timestamp_summary",
+        "robustness_axes",
+        "training_loop_policy",
+    )
+    mismatches = []
+    for field in semantic_fields:
+        if field not in actual_contract:
+            if task == "classification":
+                continue
+            if expected_contract.get(field) is None:
+                continue
+            mismatches.append(field)
+            continue
+        if actual_contract.get(field) != expected_contract.get(field):
+            mismatches.append(field)
+    if mismatches:
         raise OutputArtifactContractError(
             f"Output artifact {output_path} cannot be reused: stored output details mismatch "
-            f"(stored={actual_hash}, expected={expected_hash}). "
+            f"({', '.join(mismatches)}). "
             "Remove the artifact or rerun with --no-check to overwrite."
         )
     _validate_output_payload(
@@ -1653,7 +1657,7 @@ def _validate_existing_output_contract(
         expected_sample_indices=expected_sample_indices,
         expected_y_true=expected_y_true,
     )
-    return str(actual_hash)
+    return actual_contract
 
 
 def _build_output_path(
@@ -1870,7 +1874,6 @@ def _prediction_identity_fields(sample_indices, *, include_indices: bool, expect
         return {
             "prediction_identity_schema": PREDICTION_IDENTITY_SCHEMA,
             "sample_indices": None,
-            "sample_index_hash": None,
             "sample_index_count": None,
             "sample_index_dtype": None,
         }
@@ -1882,8 +1885,7 @@ def _prediction_identity_fields(sample_indices, *, include_indices: bool, expect
         )
     return {
         "prediction_identity_schema": PREDICTION_IDENTITY_SCHEMA,
-        "sample_indices": indices.copy() if include_indices else None,
-        "sample_index_hash": hashlib.sha256(indices.tobytes()).hexdigest(),
+        "sample_indices": indices.copy(),
         "sample_index_count": int(indices.shape[0]),
         "sample_index_dtype": str(indices.dtype),
     }
@@ -2022,9 +2024,6 @@ def _build_missingness_provenance(
         "observed_value_count": observed_value_count,
         "fully_masked_before_floor": int(scoped_floor_count),
         "floor_n_sequences": int(x_np.shape[0]),
-        "mask_hash": hashlib.sha256(
-            np.ascontiguousarray(mask_np > 0, dtype=np.uint8).tobytes()
-        ).hexdigest(),
     }
     for key in (
         "channel_count",
@@ -2032,7 +2031,6 @@ def _build_missingness_provenance(
         "dropped_channel_count",
         "dropped_channel_indices",
         "channel_permutation",
-        "channel_mask_hash",
         "minimum_one_channel_forced",
         "maximum_one_channel_retained",
         "channel_count_quantized",
@@ -2204,7 +2202,6 @@ def _build_result_payload(
     }
     if output_contract is not None:
         meta["output_contract"] = output_contract
-        meta["output_contract_hash"] = _output_contract_hash(output_contract)
     return omit_none_runtime_baseline_id({
         "mode": resolved_mode,
         "evaluation_regime": resolved_regime,
@@ -2337,18 +2334,11 @@ def run_model(
     split_path = os.path.join(split_root, data_name, out_name)
     with open(split_path, 'rb') as f:
         train_idx, valid_idx, test_idx = pickle.load(f)
-    split_sha256 = file_sha256(split_path)
-    dataset_npz_sha256 = file_sha256(dataset_npz) if dataset_npz is not None else None
-    target_path_for_contract = None
-    target_sha256 = None
     task_targets = None
     target_masks = None
     target_spec = None
     preprocess_X = X
     if task != "classification" and target_source == "dataset":
-        target_path_for_contract = str(Path(targets_root) / f"{data_name}.npz")
-        if os.path.exists(target_path_for_contract):
-            target_sha256 = file_sha256(target_path_for_contract)
         task_targets, target_masks, target_spec = load_task_targets_npz(
             dataset=data_name,
             targets_root=targets_root,
@@ -2388,6 +2378,7 @@ def run_model(
 
     # set learning params
     lr_policy = resolve_learning_rate_policy(model_config.get("lr"), require_config=True)
+    model_kwargs = build_model_kwargs_from_config(model_name, model_config)
     param_search_contract = _param_search_contract_metadata(
         model_config,
         infer_param_search_profile(model_config),
@@ -2413,36 +2404,28 @@ def run_model(
     output_contract = _build_output_contract(
         data_name=data_name,
         model_name=model_name,
-        model_config=model_config,
+        model_parameters=model_kwargs,
         seed=SEED,
         task=task,
         target_source=target_source,
         forecast_horizon=forecast_horizon,
         dataset_source=dataset_source,
-        dataset_npz=dataset_npz,
-        dataset_npz_sha256=dataset_npz_sha256,
         data_shape=X.shape,
         num_class=num_class,
         missing_rate=0.0 if robustness_mode else missing_rate,
         evaluation_regime=evaluation_regime,
         train_missing_type=train_missing_type,
         train_channel_sync=train_channel_sync,
-        split_path=split_path,
-        split_sha256=split_sha256,
-        target_path=target_path_for_contract,
-        target_sha256=target_sha256,
         epochs=EPOCHS,
         save_predictions=save_predictions,
         interpolate=interpolate,
         use_intensity=use_intensity,
         batch_policy=batch_policy,
         lr_policy=lr_policy,
-        param_search_contract=param_search_contract,
         timestamp_summary=timestamp_summary,
         robustness_axes=robustness_axes,
         training_loop_policy=training_loop_policy,
     )
-    output_contract_hash = _output_contract_hash(output_contract)
     if CHECK and os.path.exists(out_path):
         _validate_existing_output_contract(
             out_path,
@@ -2575,9 +2558,6 @@ def run_model(
     )
     valid_batch = DataLoader(valid_dataset, batch_size=batch_size, shuffle=False, drop_last=False)
     test_batch = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, drop_last=False)
-    
-    # set params
-    model_kwargs = build_model_kwargs_from_config(model_name, model_config)
     
     # set tmp_path
     os.makedirs(os.path.join(os.getcwd(), 'tmp'), exist_ok=True)
@@ -2738,7 +2718,7 @@ def run_model(
             robustness_test_mechanisms=robustness_test_mechanisms,
             robustness_channel_sync_options=robustness_channel_sync_options,
         )
-        output_file_sha256 = atomic_pickle_dump(payload, output_path)
+        atomic_pickle_dump(payload, output_path)
 
         eval0 = next((x for x in evaluations if abs(x["test_missing_rate"]) < 1e-12), evaluations[0])
         metrics = eval0["metrics"]
@@ -2773,7 +2753,6 @@ def run_model(
             "dataset": data_name,
             "dataset_source": str(dataset_source),
             "dataset_npz": portable_artifact_reference(dataset_npz, root=True),
-            "dataset_npz_sha256": dataset_npz_sha256,
             "timestamp_summary": timestamp_summary,
             "task": task,
             "model": model_name,
@@ -2786,8 +2765,6 @@ def run_model(
             "robustness_evaluations": int(len(evaluations)),
             "split_path": portable_artifact_reference(split_path),
             "output_path": portable_artifact_reference(output_path),
-            "split_sha256": split_sha256,
-            "output_file_sha256": output_file_sha256,
             "batch_policy": batch_policy,
             "lr_policy": lr_policy,
             "metrics": metrics,
@@ -2795,7 +2772,6 @@ def run_model(
             "target_spec": None if task == "classification" else target_spec,
             "mode": "robustness",
             "evaluation_regime": "robustness",
-            "output_contract_hash": output_contract_hash,
             "runtime_baseline_id": runtime_baseline_id,
             "training_loop": training_loop_metadata,
             "coeff_cache": coeff_cache_summary,
@@ -2964,12 +2940,11 @@ def run_model(
         coeff_cache=coeff_cache_summary,
     )
     payload.update(param_search_contract)
-    output_file_sha256 = atomic_pickle_dump(payload, output_path)
+    atomic_pickle_dump(payload, output_path)
     return {
         "dataset": data_name,
         "dataset_source": str(dataset_source),
         "dataset_npz": portable_artifact_reference(dataset_npz, root=True),
-        "dataset_npz_sha256": dataset_npz_sha256,
         "timestamp_summary": timestamp_summary,
         "task": task,
         "target_source": target_source if task != "classification" else "label",
@@ -2979,8 +2954,6 @@ def run_model(
         "missing_rate": float(missing_rate),
         "split_path": portable_artifact_reference(split_path),
         "output_path": portable_artifact_reference(output_path),
-        "split_sha256": split_sha256,
-        "output_file_sha256": output_file_sha256,
         "batch_policy": batch_policy,
         "lr_policy": lr_policy,
         "metrics": metrics,
@@ -2991,7 +2964,6 @@ def run_model(
         "evaluation_regime": evaluation_regime,
         "train_missing_type": train_missing_type,
         "train_channel_sync": train_channel_sync,
-        "output_contract_hash": output_contract_hash,
         "runtime_baseline_id": runtime_baseline_id,
         "training_loop": training_loop_metadata,
         "coeff_cache": coeff_cache_summary,
@@ -3367,11 +3339,9 @@ def main():
                         expected_model_name=model_name,
                         expected_task=args.task,
                         expected_target_source=expected_target_identity["target_source"],
-                        expected_target_sha256=expected_target_identity["target_sha256"],
                         expected_forecast_horizon=expected_target_identity["forecast_horizon"],
                         expected_dataset_source=expected_target_identity["dataset_source"],
-                        expected_dataset_npz_sha256=expected_target_identity["dataset_npz_sha256"],
-                        expected_split_sha256s=expected_target_identity["split_sha256s"],
+                        expected_split_seeds=expected_target_identity["split_seeds"],
                         param_path=str(param_path),
                         allow_legacy_search_profile=args.allow_legacy_search_profile,
                     )
@@ -3450,7 +3420,6 @@ def main():
                                     "dataset": data_name,
                                     "dataset_source": str(args.dataset_source),
                                     "dataset_npz": portable_artifact_reference(args.dataset_npz, root=True),
-                                    "dataset_npz_sha256": file_sha256(args.dataset_npz) if args.dataset_npz is not None else None,
                                     "model": model_name,
                                     "seed": seed,
                                     "missing_rate": 0.0,
@@ -3466,10 +3435,6 @@ def main():
                                     "split_path": portable_artifact_reference(split_path),
                                     "param_path": portable_artifact_reference(param_path),
                                     "output_path": portable_artifact_reference(output_path),
-                                    "split_sha256": file_sha256(split_path),
-                                    "param_file_sha256": file_sha256(param_path),
-                                    "output_file_sha256": file_sha256(output_path),
-                                    "output_contract_hash": _read_output_contract_hash(output_path),
                                     "reason": "output artifact already exists (--check)",
                                     "runtime_baseline_id": runtime_baseline_id,
                                     "runtime_status": "reused",
@@ -3487,7 +3452,6 @@ def main():
                             f"performance limit {float(args.performance_limit_seconds):.3f}s"
                         )
                     run_result["param_path"] = portable_artifact_reference(param_path)
-                    run_result["param_file_sha256"] = file_sha256(param_path)
                     run_result["search_profile"] = param_search_profile
                     run_result["search_policy"] = args.param_policy
                     run_result["search_repeat"] = args.param_repeat
@@ -3573,11 +3537,9 @@ def main():
                             expected_model_name=model_name,
                             expected_task=args.task,
                             expected_target_source=expected_target_identity["target_source"],
-                            expected_target_sha256=expected_target_identity["target_sha256"],
                             expected_forecast_horizon=expected_target_identity["forecast_horizon"],
                             expected_dataset_source=expected_target_identity["dataset_source"],
-                            expected_dataset_npz_sha256=expected_target_identity["dataset_npz_sha256"],
-                            expected_split_sha256s=expected_target_identity["split_sha256s"],
+                            expected_split_seeds=expected_target_identity["split_seeds"],
                             param_path=str(param_path),
                             allow_legacy_search_profile=args.allow_legacy_search_profile,
                         )
@@ -3642,7 +3604,6 @@ def main():
                                         "dataset": data_name,
                                         "dataset_source": str(args.dataset_source),
                                         "dataset_npz": portable_artifact_reference(args.dataset_npz, root=True),
-                                        "dataset_npz_sha256": file_sha256(args.dataset_npz) if args.dataset_npz is not None else None,
                                         "model": model_name,
                                         "seed": seed,
                                         "missing_rate": float(missing_rate),
@@ -3657,10 +3618,6 @@ def main():
                                         "split_path": portable_artifact_reference(split_path),
                                         "param_path": portable_artifact_reference(param_path),
                                         "output_path": portable_artifact_reference(output_path),
-                                        "split_sha256": file_sha256(split_path),
-                                        "param_file_sha256": file_sha256(param_path),
-                                        "output_file_sha256": file_sha256(output_path),
-                                        "output_contract_hash": _read_output_contract_hash(output_path),
                                         "reason": "output artifact already exists (--check)",
                                         "runtime_baseline_id": runtime_baseline_id,
                                         "runtime_status": "reused",
@@ -3678,7 +3635,6 @@ def main():
                                 f"performance limit {float(args.performance_limit_seconds):.3f}s"
                             )
                         run_result["param_path"] = portable_artifact_reference(param_path)
-                        run_result["param_file_sha256"] = file_sha256(param_path)
                         run_result["search_profile"] = param_search_profile
                         run_result["search_policy"] = args.param_policy
                         run_result["search_repeat"] = args.param_repeat

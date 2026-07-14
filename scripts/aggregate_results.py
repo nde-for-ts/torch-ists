@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import csv
-import hashlib
 import json
 import pickle
 import re
@@ -43,29 +42,6 @@ def _read_json(path: Path) -> dict[str, Any]:
 def _read_pickle(path: Path) -> Any:
     with path.open("rb") as f:
         return pickle.load(f)
-
-
-def _file_sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def _stable_hash(payload: Any) -> str:
-    encoded = json.dumps(
-        payload,
-        sort_keys=True,
-        separators=(",", ":"),
-        default=str,
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
-
-
-def _is_sha256(value: Any) -> bool:
-    text = str(value or "")
-    return len(text) == 64 and all(character in "0123456789abcdef" for character in text)
 
 
 def _values_match(left: Any, right: Any) -> bool:
@@ -223,10 +199,6 @@ def _validate_full_predictions(predictions: Any, output_path: Path, *, num_class
     index_array = np.ascontiguousarray(raw_indices)
     if index_array.shape != (int(count),):
         raise ValueError(f"{output_path}: sample_index_count does not match stored indices")
-    index_hash = hashlib.sha256(index_array.tobytes()).hexdigest()
-    if predictions.get("sample_index_hash") != index_hash:
-        raise ValueError(f"{output_path}: sample index hash is invalid")
-
     y_true = np.asarray(predictions.get("y_true"))
     y_pred = np.asarray(predictions.get("y_pred"))
     logits = np.asarray(predictions.get("logit_list"))
@@ -248,10 +220,8 @@ def _validate_full_predictions(predictions: Any, output_path: Path, *, num_class
             raise ValueError(f"{output_path}: {name} contains invalid class indices")
     return {
         "sample_index_count": int(count),
-        "sample_index_hash": index_hash,
-        "y_true_hash": hashlib.sha256(
-            np.ascontiguousarray(y_true, dtype=np.int64).tobytes()
-        ).hexdigest(),
+        "sample_indices": tuple(int(value) for value in index_array),
+        "y_true": tuple(int(value) for value in y_true),
         "num_class": resolved_num_class,
     }
 
@@ -265,7 +235,6 @@ def _expected_channel_drop_plan(channel_count: int, rate: float, seed: int) -> d
             "dropped_channel_count": 0,
             "dropped_channel_indices": [],
             "channel_permutation": [0],
-            "channel_mask_hash": "univariate-not-applicable",
             "minimum_one_channel_forced": False,
             "maximum_one_channel_retained": bool(requested_count >= 1),
             "channel_count_quantized": True,
@@ -276,7 +245,6 @@ def _expected_channel_drop_plan(channel_count: int, rate: float, seed: int) -> d
     dropped_count = min(channel_count - 1, max(1, requested_count))
     channel_order = np.random.default_rng(seed).permutation(channel_count).astype(np.int64)
     dropped = np.sort(channel_order[:dropped_count])
-    channel_mask = np.isin(np.arange(channel_count), dropped).astype(np.uint8)
     realized_rate = float(dropped_count / channel_count)
     return {
         "channel_count": channel_count,
@@ -284,7 +252,6 @@ def _expected_channel_drop_plan(channel_count: int, rate: float, seed: int) -> d
         "dropped_channel_count": dropped_count,
         "dropped_channel_indices": dropped.tolist(),
         "channel_permutation": channel_order.tolist(),
-        "channel_mask_hash": hashlib.sha256(channel_mask.tobytes()).hexdigest(),
         "minimum_one_channel_forced": bool(requested_count < 1),
         "maximum_one_channel_retained": bool(requested_count >= channel_count),
         "channel_count_quantized": bool(not np.isclose(realized_rate, rate)),
@@ -301,7 +268,6 @@ def _validate_channel_drop_rows(evaluations: list[dict[str, Any]], output_path: 
         "dropped_channel_count",
         "dropped_channel_indices",
         "channel_permutation",
-        "channel_mask_hash",
         "minimum_one_channel_forced",
         "maximum_one_channel_retained",
         "channel_count_quantized",
@@ -398,9 +364,6 @@ def _validate_robustness_output(
         num_class = contract.get("num_class")
         reference_prediction_identity = None
         for evaluation in evaluations:
-            mask_hash = evaluation.get("mask_hash") if isinstance(evaluation, dict) else None
-            if not _is_sha256(mask_hash):
-                raise ValueError(f"{output_path}: evaluated mask hash is missing or invalid")
             identity = _validate_full_predictions(
                 evaluation.get("predictions"),
                 output_path,
@@ -411,10 +374,10 @@ def _validate_robustness_output(
                 continue
             if (
                 identity["sample_index_count"] != reference_prediction_identity["sample_index_count"]
-                or identity["sample_index_hash"] != reference_prediction_identity["sample_index_hash"]
+                or identity["sample_indices"] != reference_prediction_identity["sample_indices"]
             ):
                 raise ValueError(f"{output_path}: sample indices differ across evaluations")
-            if identity["y_true_hash"] != reference_prediction_identity["y_true_hash"]:
+            if identity["y_true"] != reference_prediction_identity["y_true"]:
                 raise ValueError(f"{output_path}: y_true differs across evaluations")
             if identity["num_class"] != reference_prediction_identity["num_class"]:
                 raise ValueError(f"{output_path}: logit_list class dimension differs across evaluations")
@@ -439,22 +402,7 @@ def _validate_record_payload_integrity(
     record: dict[str, Any],
     payload: dict[str, Any],
     output_path: Path,
-    artifact_sha256: str,
 ) -> None:
-    recorded_file_hash = record.get("output_file_sha256")
-    if recorded_file_hash not in {None, ""} and recorded_file_hash != artifact_sha256:
-        raise ValueError(f"{output_path}: output file hash does not match the run record")
-
-    meta = payload.get("meta") if isinstance(payload.get("meta"), dict) else {}
-    contract = meta.get("output_contract") if isinstance(meta.get("output_contract"), dict) else None
-    stored_contract_hash = meta.get("output_contract_hash")
-    if contract is not None and stored_contract_hash is not None:
-        if stored_contract_hash != _stable_hash(contract):
-            raise ValueError(f"{output_path}: stored output contract hash is invalid")
-    recorded_contract_hash = record.get("output_contract_hash")
-    if recorded_contract_hash not in {None, ""} and recorded_contract_hash != stored_contract_hash:
-        raise ValueError(f"{output_path}: output contract hash does not match the run record")
-
     identity_fields = (
         "dataset",
         "model",
@@ -496,15 +444,22 @@ def _logical_output_key(payload: dict[str, Any], record: dict[str, Any]) -> tupl
     regime = _payload_value(payload, record, "evaluation_regime")
     if regime is None:
         regime = payload.get("mode", record.get("mode"))
+    axes_identity = None
+    if isinstance(axes, dict):
+        axes_identity = (
+            tuple(float(value) for value in axes.get("test_missing_rates", [])),
+            tuple(str(value).upper() for value in axes.get("test_missing_types", [])),
+            tuple(bool(value) for value in axes.get("test_channel_sync_options", [])),
+            int(axes.get("missing_seed", 0)),
+            int(axes.get("expected_evaluations", 0)),
+        )
     return (
         _payload_value(payload, record, "dataset"),
         _payload_value(payload, record, "model"),
         _payload_value(payload, record, "seed"),
         _payload_value(payload, record, "task"),
         _payload_value(payload, record, "dataset_source"),
-        _payload_value(payload, record, "dataset_npz_sha256"),
         _payload_value(payload, record, "target_source"),
-        _payload_value(payload, record, "target_sha256"),
         _payload_value(payload, record, "forecast_horizon"),
         regime,
         _payload_value(payload, record, "train_missing_rate")
@@ -512,7 +467,7 @@ def _logical_output_key(payload: dict[str, Any], record: dict[str, Any]) -> tupl
         else record.get("missing_rate"),
         _payload_value(payload, record, "train_missing_type"),
         _payload_value(payload, record, "train_channel_sync"),
-        _stable_hash(axes) if isinstance(axes, dict) else None,
+        axes_identity,
     )
 
 
@@ -696,8 +651,8 @@ def aggregate(
     search_cells: list[dict[str, Any]] = []
     exclusions: list[dict[str, Any]] = []
     fallbacks: list[dict[str, Any]] = []
-    seen_output_artifacts: set[tuple[str, str]] = set()
-    logical_output_artifacts: dict[tuple[Any, ...], tuple[str, str]] = {}
+    seen_output_artifacts: set[str] = set()
+    logical_output_artifacts: dict[tuple[Any, ...], str] = {}
     robustness_signature: tuple[int, str] | None = None
     duplicate_output_references = 0
 
@@ -725,20 +680,18 @@ def aggregate(
                             raise ValueError(f"Output artifact {resolved_path} cannot be read: {exc}") from exc
                         if not isinstance(payload, dict):
                             raise ValueError(f"Output artifact {resolved_path} must contain an object")
-                        artifact_sha256 = _file_sha256(resolved_path)
                         _validate_record_payload_integrity(
                             record,
                             payload,
                             resolved_path,
-                            artifact_sha256,
                         )
-                        artifact_id = (str(resolved_path.resolve()), artifact_sha256)
+                        artifact_id = str(resolved_path.resolve())
                         logical_key = _logical_output_key(payload, record)
                         previous = logical_output_artifacts.get(logical_key)
                         if previous is not None and previous != artifact_id:
                             raise ValueError(
                                 f"Logical run {logical_key} has conflicting output artifacts: "
-                                f"{previous[0]} and {artifact_id[0]}"
+                                f"{previous} and {artifact_id}"
                             )
                         logical_output_artifacts[logical_key] = artifact_id
                         if artifact_id in seen_output_artifacts:

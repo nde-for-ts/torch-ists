@@ -97,7 +97,7 @@ def parse_cli_args():
 
 def main() -> int:
     _ensure_repo_on_path()
-    from script_chain_contracts import file_sha256, generate_run_id, portable_artifact_reference, write_manifest
+    from script_chain_contracts import generate_run_id, portable_artifact_reference, write_manifest
 
     args = parse_cli_args()
     run_id = args.run_id or generate_run_id("run")
@@ -124,9 +124,6 @@ def main() -> int:
             train_idx, valid_idx, test_idx = make_stratified_splits(y=payload.y, seed=args.seed)
             if not args.dry_run:
                 save_splits(split_path, train_idx, valid_idx, test_idx)
-        split_sha256 = None if args.dry_run else file_sha256(split_path)
-        dataset_npz_sha256 = file_sha256(args.dataset_npz) if args.dataset_npz is not None else None
-
         manifest_path, _manifest = write_manifest(
             stage="split",
             contract_dir=args.contract_dir,
@@ -138,10 +135,8 @@ def main() -> int:
                 "seed": int(args.seed),
                 "dataset_source": args.dataset_source,
                 "dataset_npz": portable_artifact_reference(args.dataset_npz, root=True),
-                "dataset_npz_sha256": dataset_npz_sha256,
                 "timestamp_summary": timestamp_summary,
                 "split_path": portable_artifact_reference(split_path),
-                "split_sha256": split_sha256,
                 "reuse_existing": bool(reuse_existing),
                 "dry_run": bool(args.dry_run),
                 "counts": {
@@ -157,10 +152,8 @@ def main() -> int:
             "run_id": run_id,
             "dataset_source": args.dataset_source,
             "dataset_npz": portable_artifact_reference(args.dataset_npz, root=True),
-            "dataset_npz_sha256": dataset_npz_sha256,
             "timestamp_summary": timestamp_summary,
             "split_path": portable_artifact_reference(split_path),
-            "split_sha256": split_sha256,
             "split_manifest_path": portable_artifact_reference(manifest_path),
             "reuse_existing": bool(reuse_existing),
             "dry_run": bool(args.dry_run),

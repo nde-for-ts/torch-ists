@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 from typing import Any
 
 import numpy as np
@@ -32,7 +31,6 @@ def build_channel_drop_plan(
             "dropped_channel_count": 0,
             "dropped_channel_indices": [],
             "channel_permutation": [0],
-            "channel_mask_hash": "univariate-not-applicable",
             "minimum_one_channel_forced": False,
             "maximum_one_channel_retained": bool(requested_count >= 1),
             "channel_count_quantized": True,
@@ -45,7 +43,6 @@ def build_channel_drop_plan(
     )
     channel_order = np.random.default_rng(int(seed)).permutation(channel_count).astype(np.int64)
     dropped = np.sort(channel_order[:dropped_count])
-    channel_mask = np.isin(np.arange(channel_count), dropped).astype(np.uint8)
     realized_rate = float(dropped_count / channel_count)
     return {
         "channel_count": channel_count,
@@ -53,7 +50,6 @@ def build_channel_drop_plan(
         "dropped_channel_count": dropped_count,
         "dropped_channel_indices": dropped.tolist(),
         "channel_permutation": channel_order.tolist(),
-        "channel_mask_hash": hashlib.sha256(channel_mask.tobytes()).hexdigest(),
         "minimum_one_channel_forced": bool(rate_value > 0.0 and requested_count < 1),
         "maximum_one_channel_retained": bool(rate_value > 0.0 and requested_count >= channel_count),
         "channel_count_quantized": bool(
