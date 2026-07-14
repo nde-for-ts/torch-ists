@@ -26,10 +26,10 @@
 
 | Your input | Use | coeffs | See |
 |------------|-----|--------|-----|
-| Own raw arrays / dataframe / file | `DataLoader` + `preprocess(...)` | coeffs for continuous-time models | [Custom Data Guide](custom_data_guide.md) |
+| Own raw arrays / dataframe / file | `DataLoader` + `preprocess(...)` | model-specific; required by coefficient-driven rows | [Custom Data Guide](custom_data_guide.md) |
 | Built-in benchmark archive | `benchmark_loader` | — | [Custom Data Guide](custom_data_guide.md) |
 | Direct sequence / attention baseline | build `seq`, `coeffs=None` | none | [Model Reference](model_reference.md) |
-| Continuous-time method (Neural CDE/ODE/SDE) | `preprocess(...)` then pass `coeffs` | from `preprocess` | [Model Reference](model_reference.md) |
+| Continuous-time method (Neural CDE/ODE/SDE) | `preprocess(...)`, then follow the model-specific input contract | coefficient-driven rows use `coeffs`; event-driven rows may use `None` | [Model Reference](model_reference.md) |
 | Benchmark scripts | `scripts/` | — | [Scripts Reference](scripts_reference.md) |
 | Custom model outside `torch_ists` | wrapper pattern | model-defined | [Custom Model Guide](custom_model_guide.md) |
 
@@ -94,7 +94,7 @@ seq = torch.stack([X_missing, X_mask, X_delta], dim=1)  # [N, 3, L, D]
 logits = model(seq, coeffs=coeffs)
 ```
 
-Direct sequence and attention baselines pass `coeffs=None`, while continuous-time methods consume the `coeffs` returned by `preprocess`.
+Coefficient-driven rows consume the `coeffs` returned by `preprocess`. Direct sequence, attention, and event-driven rows such as ODE-LSTM, NJODE, and LatentSDE accept `coeffs=None` and use the sequence stack directly.
 
 Import package as `torch_ists`.
 
@@ -697,7 +697,7 @@ The model API has two Python entry points and an included benchmark workflow:
 Canonical model construction lives in `torch_ists.model`.
 
 Task support tiers:
-- `classification`: primary supported path
+- `classification`: stable path
 - `regression`, `forecasting`, `imputation`, `outlier_detection`, `change_detection`: experimental
 
 Use `ists_classifier` for the stable classification path. Non-classification tasks are available through `ists_model`.
@@ -795,7 +795,9 @@ Unsupported task names are fail-fast with `NotImplementedError`.
 
 Broader task surface:
 - `regression/forecasting/imputation/outlier_detection/change_detection` are available through `ists_model`.
-- `classification` remains the primary packaged path.
+- `classification` is the stable packaged path.
+
+The five non-classification outputs are shared package task-head adapters. A model's original paper may define a narrower prediction problem; for example, the NJODE forecasting adapter does not reproduce paper-native future-time filtering because the current target contract does not carry a future timestamp grid.
 
 Behavior notes:
 - If `use_intensity` is omitted (`None`), runtime resolves it from `get_data_config(model_name)` inside `ists_layer`.
@@ -814,8 +816,20 @@ Source ODE model parameters:
 |---|---|---|
 | `gru-ode-bayes` | `step_size=0.05`, `p_hidden=hidden_dim`, `prep_hidden=4`, `observation_noise_std=0.01`, `mixing=1.0`, `auxiliary_weight=1e-3` | Uses Euler integration only. `step_size` bounds every observation-interval sub-step; the auxiliary term combines pre-jump likelihood and post-jump KL per observed element. |
 | `latentode` | `observation_std=0.01`, `kl_weight=1.0`, `auxiliary_weight=1e-4` | Uses the selected ODE solver for reverse recognition and generative decoding; the auxiliary term combines masked reconstruction likelihood and initial-state KL. |
+| `njode` | `step_size=0.05`, `loss_weight=0.5`, `auxiliary_weight=1.0`, `loss_eps=1e-10`, `max_substeps=10000` | Uses bounded Euler sub-steps only. Missing coordinates are filled from the pre-jump readout, observed events update the hidden state, and the auxiliary term is normalized by sample and observation date. |
 
 The defaults above keep method-specific losses on a practical scale when they are added to a task objective. Applications may tune the weights with the rest of the training configuration.
+
+LatentSDE model parameters:
+
+| `model_params` | Default | Runtime behavior |
+|---|---|---|
+| `kl` | `True` | Enables initial-state and path KL. `False` uses the physical latent state only and returns a zero auxiliary term. |
+| `kl_weight` | `1e-5` | Scales the combined initial-state and path KL. |
+| `theta`, `mu`, `sigma` | `1.0`, `0.0`, `0.5` | Define the OU prior drift and diffusion. `theta` and `sigma` must be positive. |
+| `recognition_hidden` | `hidden_dim` | Width of the reverse mask-aware posterior encoder. |
+| `method`, `adjoint` | `"euler"`, `False` | Euler/direct is the default. `milstein` and direct `srk` are opt-in; `srk` with adjoint differentiation is rejected. |
+| `dt` or `step_size` | inferred from the shared grid | Positive fixed solver step. The default is bounded by the smallest positive grid gap and `0.01`. |
 
 ### 6.3 `ists_layer`
 
@@ -852,7 +866,7 @@ Forward call:
 def forward(seq, coeffs=None, **kwargs)
 ```
 
-Returns `(out, hn)` for ordinary backbones and `(out, hn, loss)` for auxiliary-loss backbones. `seq` must be `[N, 3, L, D]`; `coeffs` should come from `preprocess(...)` for coefficient-driven models and may be `None` for direct sequence baselines.
+Returns `(out, hn)` for ordinary backbones and `(out, hn, loss)` for auxiliary-loss backbones. `seq` must be `[N, 3, L, D]`; `coeffs` should come from `preprocess(...)` for coefficient-driven models and may be `None` for direct sequence, attention, or event-driven backbones.
 
 ### 6.4 Using Custom Models
 
@@ -930,9 +944,10 @@ def get_data_config(model_name: str) -> Dict[str, Any]:
 | `gru-d`, `gru-dt`, `ode-rnn-spline` | `'natural'` | `True` | consumes `coeffs` with intensity channels |
 | `gru-ode` | `'natural'` | `False` | consumes `coeffs` |
 | `ode-lstm` | `'cubic'` | `False` | runtime ignores `coeffs`; uses imputed values, elapsed time deltas, and the any-channel observation mask directly |
-| `ode-rnn`, `latentode`, `gru-ode-bayes` | `'natural'` | `False` | runtime ignores `coeffs`; uses the sequence stack and reconstructed times directly |
+| `ode-rnn`, `latentode`, `gru-ode-bayes`, `njode` | `'natural'` | `False` | runtime ignores `coeffs`; uses the sequence stack and reconstructed times directly |
 | `neuralflow` and explicit NeuralFlow variants | `'hermite'` | `False` | `coeffs` ignored; runtime uses the direct value/time path with raw missing-value handling |
 | `naive_cde`, `neural_ode`, `neural_ode_t`, `neural_sde`, `neural_sde_t`, `neural_lsde`, `neural_lnsde`, `neural_gsde` | `'hermite'` | `False` | consumes `coeffs` |
+| `latentsde` | `'hermite'` | `False` | runtime ignores `coeffs`; the posterior encoder consumes values, per-channel masks, deltas, and normalized times directly |
 
 #### Example
 
@@ -974,7 +989,7 @@ def has_auxiliary_loss(model_name: str) -> bool:
 
 #### Models with Auxiliary Loss
 
-Returns `True` for `gru-ode-bayes`, `latentode`, `exit`, and `leap`; `False` for the other packaged models. Use `forward(..., return_aux_loss=True)` to receive the auxiliary term alongside the prediction.
+Returns `True` for `gru-ode-bayes`, `latentode`, `njode`, `latentsde`, `exit`, and `leap`; `False` for the other packaged models. Use `forward(..., return_aux_loss=True)` to receive the auxiliary term alongside the prediction.
 
 #### Example
 
@@ -984,6 +999,8 @@ from torch_ists.config import has_auxiliary_loss
 print(has_auxiliary_loss('cnn'))         # False
 print(has_auxiliary_loss('neuralcde'))   # False
 print(has_auxiliary_loss('neural_gsde')) # False
+print(has_auxiliary_loss('latentsde'))   # True
+print(has_auxiliary_loss('njode'))       # True
 print(has_auxiliary_loss('exit'))        # True
 print(has_auxiliary_loss('leap'))        # True
 print(has_auxiliary_loss('ancde'))       # False

@@ -43,6 +43,11 @@ try:
 except Exception:  # pragma: no cover - subset payload
     _ALL_FLOW_MODELS = {}
 
+try:
+    from .variational_sde import VARIATIONAL_SDE_MODELS as _ALL_VARIATIONAL_SDE_MODELS
+except Exception:  # pragma: no cover - subset payload
+    _ALL_VARIATIONAL_SDE_MODELS = {}
+
 
 def _select_active_models(model_group: Dict[str, Dict], active_set: Set[str]) -> Dict[str, Dict]:
     return {name: cfg for name, cfg in model_group.items() if name in active_set}
@@ -58,8 +63,7 @@ ODE_MODELS = _select_active_models(_ALL_ODE_MODELS, active_set)
 ODE_SOURCE_MODELS = _select_active_models(_ALL_ODE_SOURCE_MODELS, active_set)
 STABLE_SDE_CONFIGS = _select_active_models(_ALL_STABLE_SDE_CONFIGS, active_set)
 FLOW_MODELS = _select_active_models(_ALL_FLOW_MODELS, active_set)
-
-VARIATIONAL_SDE_MODELS: Dict[str, Dict] = {}
+VARIATIONAL_SDE_MODELS = _select_active_models(_ALL_VARIATIONAL_SDE_MODELS, active_set)
 TSDE_METHOD_CONFIGS: Dict[str, Dict] = {}
 # Numeric SDE encodings are implementation details in the public package.
 STABLE_SDE_LEGACY_ALIASES: Dict[str, str] = {}
@@ -76,6 +80,7 @@ MODEL_REGISTRY: Dict[str, Dict] = {
     **ATTENTION_MODELS,
     **SDE_BASELINE_MODELS,
     **STABLE_SDE_CONFIGS,
+    **VARIATIONAL_SDE_MODELS,
     **FLOW_MODELS,
 }
 

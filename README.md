@@ -1,6 +1,6 @@
 # torch-ists
 
-[![Version](https://img.shields.io/badge/version-0.4.8-blue)](pyproject.toml) [![Python](https://img.shields.io/badge/python-%3E%3D3.10-blue)](pyproject.toml) [![PyTorch](https://img.shields.io/badge/PyTorch-%3E%3D2.0-ee4c2c)](pyproject.toml) [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![Package status](https://img.shields.io/badge/status-preview-orange)](#project-status)
+[![Version](https://img.shields.io/badge/version-0.4.9-blue)](pyproject.toml) [![Python](https://img.shields.io/badge/python-%3E%3D3.10-blue)](pyproject.toml) [![PyTorch](https://img.shields.io/badge/PyTorch-%3E%3D2.0-ee4c2c)](pyproject.toml) [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![Package status](https://img.shields.io/badge/status-preview-orange)](#project-status)
 
 **PyTorch toolkit for irregularly sampled multivariate time series with continuous-time methods (Neural ODE/CDE/SDE) and discrete-time baselines.**
 
@@ -10,7 +10,7 @@ It provides runtime APIs, benchmark scripts, and a built-in benchmark archive lo
 
 ## Overview
 
-The package exposes `ists_classifier` for classification and the lower-level `ists_model` constructor for additional task heads. It includes 50 models spanning sequence baselines, attention-based methods, Neural ODE/CDE/SDE methods, NeuralFlow, DualDynamics and FlowPath, and Stable Neural SDEs.
+The package exposes `ists_classifier` for classification and the lower-level `ists_model` constructor for additional task heads. It includes 52 models spanning sequence baselines, attention-based methods, Neural ODE/CDE/SDE methods, NeuralFlow, DualDynamics and FlowPath, and Stable Neural SDEs.
 
 ## Installation
 
@@ -114,7 +114,7 @@ seq = torch.stack([X_missing, X_mask, X_delta], dim=1)  # [N, 3, L, D]
 logits = model(seq, coeffs=coeffs)
 ```
 
-Direct sequence and attention baselines take `coeffs=None`, while continuous-time methods (Neural CDE/ODE/SDE) consume the `coeffs` returned by `preprocess(...)`.
+Coefficient-driven CDE and SDE rows consume the `coeffs` returned by `preprocess(...)`. Direct sequence, attention, and event-driven rows, including ODE-LSTM, the direct ODE-RNN family, NJODE, and LatentSDE, use the sequence stack and accept `coeffs=None`.
 
 See [Model Reference](docs/model_reference.md) for which models need `preprocess(X, model_name=...)` versus the direct sequence stack.
 
@@ -129,22 +129,22 @@ Missing-value handling:
 
 ## Models Included
 
-The package includes the 50 canonical model names below. See [Model Reference](docs/model_reference.md) for per-model details.
+The package includes the 52 canonical model names below. See [Model Reference](docs/model_reference.md) for per-model details.
 
 **Canonical model names:**
 
 - **Sequence baselines** — `cnn`, `rnn`, `lstm`, `gru`, `bilstm`, `gru-simple`, `plstm`, `tlstm`, `tglstm` (§1)
 - **Attention-based methods** — `transformer`, `transformer-mask`, `sand`, `mtan`, `miam` (§2)
 - **Neural ODE methods** — `gru-dt`, `gru-d`, `gru-ode`, `ode-rnn-spline`, `ode-lstm` (§3)
-- **ODE-RNN, Latent ODE, and GRU-ODE-Bayes** — `ode-rnn`, `latentode`, `gru-ode-bayes` (§4)
+- **ODE-RNN, Latent ODE, GRU-ODE-Bayes, and NJODE** — `ode-rnn`, `latentode`, `gru-ode-bayes`, `njode` (§4)
 - **Neural CDE and Neural RDE** — `neuralcde`, `neuralcde-l`, `neuralcde-r`, `neuralcde-c`, `neuralcde-h`, `neuralrde-1`, `neuralrde-2`, `neuralrde-3` (§5)
 - **ANCDE, EXIT, and LEAP** — `ancde`, `exit`, `leap` (§6)
 - **NeuralFlow** — `neuralflow-r`, `neuralflow-g`, `neuralflow-c` (§7)
 - **DualDynamics and FlowPath** — `dualdynamics-r`, `dualdynamics-g`, `dualdynamics-c`, `flowpath-r`, `flowpath-g`, `flowpath-c` (§8)
-- **SDE baselines** — `naive_cde`, `neural_ode`, `neural_ode_t`, `neural_sde`, `neural_sde_t` (§9)
+- **SDE baselines** — `naive_cde`, `neural_ode`, `neural_ode_t`, `neural_sde`, `neural_sde_t`, `latentsde` (§9)
 - **Stable Neural SDEs** — `neural_lsde`, `neural_lnsde`, `neural_gsde` (§10)
 
-Compatibility aliases do not add models to the 50-model roster: `neuralflow`, `dualdynamics`, and `flowpath` resolve to their corresponding `-r` variants.
+Compatibility aliases do not add models to the 52-model roster: `neuralflow`, `dualdynamics`, and `flowpath` resolve to their corresponding `-r` variants.
 
 ## Custom Model Guide
 
@@ -166,9 +166,9 @@ Tutorial: <https://nde-for-ts.github.io/> (CIKM 2025).
 
 This is a **preview** release:
 
-- Classification is the primary supported workflow.
-- Synthetic missingness (`MCAR`/`MAR`/`MNAR`/`BLOCK`/`BURST`/`CHANNEL_DROP`) and the optional 100-condition robustness workflow are experimental.
-- Stable and parity-verified claims remain future work (`1.0.0` is the stable target).
+- Classification is the stable workflow. Regression, forecasting, imputation, outlier detection, and change detection are available through `ists_model` as experimental task heads.
+- Synthetic missingness (`MCAR`/`MAR`/`MNAR`/`BLOCK`/`BURST`/`CHANNEL_DROP`) is experimental. The optional 100-condition robustness workflow applies to classification only.
+- Broad benchmark parity and performance claims remain future work; this package is still a preview release.
 
 ## How to Cite
 

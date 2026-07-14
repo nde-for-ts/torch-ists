@@ -2,7 +2,7 @@
 
 Architecture:
 - Handler pattern: HandlerRegistry routes model creation to handlers.
-- Supported handlers: BasicHandler + SourceODEHandler + ODEHandler + ODELSTMHandler + CDEHandler + FlowHandler + SDEHandler + AttentionHandler.
+- Supported handlers: BasicHandler + SourceODEHandler + ODEHandler + ODELSTMHandler + CDEHandler + FlowHandler + VariationalSDEHandler + SDEHandler + AttentionHandler.
 - Standalone: self-contained handlers and module implementations.
 
 Behavior notes:
@@ -84,9 +84,8 @@ def _normalize_model_name_or_raise(model_name: str) -> str:
     # - SDE numeric codes are implementation selectors and not public aliases
     if model_name == "latentsde-kl":
         raise ValueError(
-            "Model 'latentsde-kl' is not available in this package. "
-            "This preview package does not include LatentSDE. "
-            "Use get_active_model_list() to see the list of available models."
+            "Model latentsde-kl is not supported. "
+            "Use model_name='latentsde' with model_params={'kl': False}."
         )
     normalized_flow_name = normalize_flow_alias(model_name)
     if normalized_flow_name != model_name:

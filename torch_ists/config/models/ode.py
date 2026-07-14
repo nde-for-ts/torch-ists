@@ -18,6 +18,10 @@ ODE_SOURCE_MODELS: Dict[str, Dict] = {
         "description": "GRU-ODE-Bayes with Bayesian observation jumps",
         "handler": "SourceODEHandler",
     },
+    "njode": {
+        "description": "Neural Jump ODE with self-imputation and observation loss",
+        "handler": "SourceODEHandler",
+    },
 }
 
 # Historical import name retained for older callers.

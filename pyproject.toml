@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "torch-ists"
-version = "0.4.8"
+version = "0.4.9"
 description = "PyTorch package for irregular time series modeling"
 readme = "README.md"
 license = { text = "MIT" }
@@ -98,7 +98,7 @@ Repository = "https://github.com/nde-for-ts/torch-ists"
 Issues = "https://github.com/nde-for-ts/torch-ists/issues"
 
 [tool.setuptools]
-license-files = ["LICENSE", "docs/third_party_notices.md"]
+license-files = ["LICENSE", "docs/third_party_notices.md", "docs/LICENSE-APACHE-2.0"]
 
 [tool.setuptools.packages.find]
 where = ["."]

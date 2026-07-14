@@ -12,6 +12,7 @@ from ..config import default_method_for_model as resolve_default_method_for_mode
 from ..module.ode import (
     SourceGRUODEBayesBackbone,
     SourceLatentODEBackbone,
+    SourceNJODEBackbone,
     SourceODERNNBackbone,
     _reconstruct_sample_times,
 )
@@ -26,6 +27,7 @@ class SourceODEHandler(BaseHandler):
         "ode-rnn": "odernn",
         "latentode": "latentode",
         "gru-ode-bayes": "gru_ode_bayes",
+        "njode": "njode",
     }
     ODE_ALLOWED_METHODS = {"euler", "midpoint", "rk4", "dopri5"}
     ODE_METHOD_ALIASES = {
@@ -38,7 +40,7 @@ class SourceODEHandler(BaseHandler):
 
     @classmethod
     def _allowed_methods_for_model(cls, model_name: str) -> set[str]:
-        if model_name == "gru-ode-bayes":
+        if model_name in {"gru-ode-bayes", "njode"}:
             return {"euler"}
         return set(cls.ODE_ALLOWED_METHODS)
 
@@ -111,6 +113,23 @@ class SourceODEHandler(BaseHandler):
                 observation_noise_std=float(config.get("observation_noise_std", 0.01)),
                 mixing=float(config.get("mixing", 1.0)),
                 auxiliary_weight=float(config.get("auxiliary_weight", 1e-3)),
+            )
+        elif family == "njode":
+            configured_step_size = config.get("step_size")
+            if configured_step_size is None:
+                configured_step_size = config.get("dt")
+            if configured_step_size is None:
+                configured_step_size = 0.05
+            model = SourceNJODEBackbone(
+                input_dim,
+                hidden_dim,
+                hidden_dim,
+                num_layers=num_layers,
+                step_size=float(configured_step_size),
+                loss_weight=float(config.get("loss_weight", 0.5)),
+                auxiliary_weight=float(config.get("auxiliary_weight", 1.0)),
+                loss_eps=float(config.get("loss_eps", 1e-10)),
+                max_substeps=int(config.get("max_substeps", 10_000)),
             )
         else:  # pragma: no cover
             raise ValueError(f"Unsupported source ODE family: {family}")

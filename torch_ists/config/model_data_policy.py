@@ -25,6 +25,7 @@ _NATURAL_INTERPOLATION_MODELS = frozenset(
         "ode-rnn",
         "latentode",
         "gru-ode-bayes",
+        "njode",
         "neuralcde",
         "neuralrde-1",
         "neuralrde-2",
@@ -54,6 +55,7 @@ _HERMITE_INTERPOLATION_MODELS = frozenset(
         "dualdynamics-r",
         "dualdynamics-g",
         "dualdynamics-c",
+        "latentsde",
     ]
 )
 
@@ -123,6 +125,10 @@ _ATTENTION_NUM_LAYERS_MODELS = frozenset(
 
 _AUXILIARY_LOSS_MODELS = frozenset(
     [
+        "gru-ode-bayes",
+        "latentode",
+        "latentsde",
+        "njode",
         "leap",
         "exit",
     ]

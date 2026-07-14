@@ -2,6 +2,7 @@
 
 from .gru_variants import GRU_D, GRU_dt
 from .ode_variants import GRU_ODE, NeuralCDE, ODERNN
+from .njode import SourceNJODEBackbone, njode_observation_loss
 from .source_variants import (
     SourceGRUODEBayesBackbone,
     SourceLatentODEBackbone,
@@ -15,6 +16,8 @@ __all__ = [
     "GRU_ODE",
     "NeuralCDE",
     "ODERNN",
+    "SourceNJODEBackbone",
+    "njode_observation_loss",
     "SourceODERNNBackbone",
     "SourceLatentODEBackbone",
     "SourceGRUODEBayesBackbone",

@@ -14,6 +14,7 @@ from ..config.models import (
     ODE_SOURCE_MODELS,
     SDE_BASELINE_MODELS,
     STABLE_SDE_MODELS,
+    VARIATIONAL_SDE_MODELS,
 )
 from .base import BaseHandler
 from .registry import HandlerRegistry
@@ -165,6 +166,15 @@ def bootstrap_handler_registry() -> None:
             supported_models=FLOW_MODELS.keys(),
         )
     )
+    if VARIATIONAL_SDE_MODELS:
+        HandlerRegistry.register(
+            _LazyHandlerProxy(
+                name="variational_sde",
+                module_name=".variational_sde_handler",
+                class_name="VariationalSDEHandler",
+                supported_models=VARIATIONAL_SDE_MODELS.keys(),
+            )
+        )
     HandlerRegistry.register(
         _LazyHandlerProxy(
             name="sde",

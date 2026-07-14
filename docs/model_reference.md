@@ -14,7 +14,7 @@ Use the API reference for class signatures and call patterns; use this document 
 1. [Sequence baselines](#1-sequence-baselines)
 2. [Attention-based methods](#2-attention-based-methods)
 3. [Neural ODE methods](#3-neural-ode-methods)
-4. [ODE-RNN, Latent ODE, and GRU-ODE-Bayes](#4-ode-rnn-latent-ode-and-gru-ode-bayes)
+4. [ODE-RNN, Latent ODE, GRU-ODE-Bayes, and NJODE](#4-ode-rnn-latent-ode-gru-ode-bayes-and-njode)
 5. [Neural CDE and Neural RDE](#5-neural-cde-and-neural-rde)
 6. [ANCDE, EXIT, and LEAP](#6-ancde-exit-and-leap)
 7. [NeuralFlow](#7-neuralflow)
@@ -62,21 +62,21 @@ These models use the sequence stack directly with `coeffs=None`; `NaN` is replac
 
 ## 3. Neural ODE methods
 
-ODE-style recurrent methods. The GRU-D, GRU-ODE, and ODE-RNN-spline rows are built on the NeuralCDE infrastructure; `ode-lstm` is adapted from the ODE-LSTM implementation. The package adaptations of ODE-RNN, Latent ODE, and GRU-ODE-Bayes are listed in [§4](#4-ode-rnn-latent-ode-and-gru-ode-bayes).
+ODE-style recurrent methods. The GRU-D, GRU-ODE, and ODE-RNN-spline rows are built on the NeuralCDE infrastructure; `ode-lstm` is adapted from the ODE-LSTM implementation. The package adaptations of ODE-RNN, Latent ODE, GRU-ODE-Bayes, and NJODE are listed in [§4](#4-ode-rnn-latent-ode-gru-ode-bayes-and-njode).
 
 | Model | Package row | Origin paper | Canonical reference repo | Implementation note |
 |---|---|---|---|---|
 | `gru-d` | re-implemented | [Che et al., *Recurrent Neural Networks for Multivariate Time Series with Missing Values* (Scientific Reports 2018)](https://arxiv.org/abs/1606.01865) | [Han-JD/GRU-D](https://github.com/Han-JD/GRU-D) | NeuralCDE-baseline GRU-D variant (missing-data-aware). Discrete-step; no ODE solver runs at inference time. |
 | `gru-dt` | packaged | — (delta-time variant of GRU-D, maintained alongside `gru-d` in the NeuralCDE baseline code) | — | Discrete-step GRU-D with explicit time-gap features. |
-| `gru-ode` | packaged | [Kidger et al., *Neural Controlled Differential Equations* (NeurIPS 2020)](https://arxiv.org/abs/2005.08926) (NeuralCDE-style ODE wrapper) | [patrick-kidger/NeuralCDE](https://github.com/patrick-kidger/NeuralCDE) | GRU-driven ODE field on the NeuralCDE infrastructure. `gru-ode-bayes` in [§4](#4-ode-rnn-latent-ode-and-gru-ode-bayes) is a separate package adaptation. |
-| `ode-rnn-spline` | packaged | [Kidger et al., *Neural Controlled Differential Equations* (NeurIPS 2020)](https://arxiv.org/abs/2005.08926) (NeuralCDE-style ODE-RNN with spline control path) | [patrick-kidger/NeuralCDE](https://github.com/patrick-kidger/NeuralCDE) | ODE-RNN with a natural-cubic-spline control path on the NeuralCDE infrastructure. `ode-rnn` in [§4](#4-ode-rnn-latent-ode-and-gru-ode-bayes) uses a direct value/time path. |
+| `gru-ode` | packaged | [Kidger et al., *Neural Controlled Differential Equations* (NeurIPS 2020)](https://arxiv.org/abs/2005.08926) (NeuralCDE-style ODE wrapper) | [patrick-kidger/NeuralCDE](https://github.com/patrick-kidger/NeuralCDE) | GRU-driven ODE field on the NeuralCDE infrastructure. `gru-ode-bayes` in [§4](#4-ode-rnn-latent-ode-gru-ode-bayes-and-njode) is a separate package adaptation. |
+| `ode-rnn-spline` | packaged | [Kidger et al., *Neural Controlled Differential Equations* (NeurIPS 2020)](https://arxiv.org/abs/2005.08926) (NeuralCDE-style ODE-RNN with spline control path) | [patrick-kidger/NeuralCDE](https://github.com/patrick-kidger/NeuralCDE) | ODE-RNN with a natural-cubic-spline control path on the NeuralCDE infrastructure. `ode-rnn` in [§4](#4-ode-rnn-latent-ode-gru-ode-bayes-and-njode) uses a direct value/time path. |
 | `ode-lstm` | adapted | [Lechner and Hasani, *Learning Long-Term Dependencies in Irregularly-Sampled Time Series* (NeurIPS 2020)](https://arxiv.org/abs/2006.04418) | [mlech26l/ode-lstms](https://github.com/mlech26l/ode-lstms) | LSTM cell with continuous-time hidden state evolved by an ODE between observed events. |
 
 **Runtime note.** `ode-lstm` updates only samples with an observed event and holds the other hidden and cell states unchanged. It handles singleton batches with a zero-based adaptive grid and passes elapsed durations between observations; fixed/adaptive solver selection remains model-specific.
 
 ---
 
-## 4. ODE-RNN, Latent ODE, and GRU-ODE-Bayes
+## 4. ODE-RNN, Latent ODE, GRU-ODE-Bayes, and NJODE
 
 Package implementations informed by the original papers and repositories. They adapt event-based reference code to the package's batched sequence interface while retaining the method-specific training terms described below.
 
@@ -85,8 +85,11 @@ Package implementations informed by the original papers and repositories. They a
 | `gru-ode-bayes` | [De Brouwer et al., *GRU-ODE-Bayes: Continuous Modeling of Sporadically-Observed Time Series* (NeurIPS 2019)](https://arxiv.org/abs/1905.12374) | [edebrouwer/gru_ode_bayes](https://github.com/edebrouwer/gru_ode_bayes) | Learned Gaussian prediction distribution, GRU-ODE drift, mask-aware Bayesian observation preparation, pre-jump negative log-likelihood, and post-jump Gaussian KL. Observation intervals use bounded Euler sub-steps. |
 | `ode-rnn` | [Rubanova et al., *Latent ODEs for Irregularly-Sampled Time Series* (NeurIPS 2019)](https://arxiv.org/abs/1907.03907) | [YuliaRubanova/latent_ode](https://github.com/YuliaRubanova/latent_ode) | ODE-RNN adaptation for direct sequence representations. |
 | `latentode` | [Rubanova et al., *Latent ODEs for Irregularly-Sampled Time Series* (NeurIPS 2019)](https://arxiv.org/abs/1907.03907) | [YuliaRubanova/latent_ode](https://github.com/YuliaRubanova/latent_ode) | Reverse ODE-RNN recognition, learned posterior mean and scale, reparameterized initial latent state, batched generative solve, masked Gaussian reconstruction term, and initial-state KL. |
+| `njode` | [Herrera et al., *Neural Jump Ordinary Differential Equations: Consistent Continuous-Time Prediction and Filtering* (ICLR 2021)](https://arxiv.org/abs/2006.04727) | [HerreraKrachTeichmann/NJODE](https://github.com/HerreraKrachTeichmann/NJODE) | Dense-grid adaptation with the paper's hidden-state ODE field, mask-aware self-imputation, observation-time jump, event-normalized native loss, and bounded Euler sub-steps. |
 
-`ode-rnn` and `latentode` come from the same NeurIPS 2019 paper but expose different package architectures: `ode-rnn` evolves a recurrent state directly between observations, while `latentode` learns a variational initial state and decodes a generative latent trajectory. Sample-level task heads use the inferred initial latent representation; sequence-level heads use the decoded trajectory. Both variational rows expose their method-specific objective through `return_aux_loss=True`.
+`ode-rnn` and `latentode` come from the same NeurIPS 2019 paper but expose different package architectures: `ode-rnn` evolves a recurrent state directly between observations, while `latentode` learns a variational initial state and decodes a generative latent trajectory. Sample-level task heads use the inferred initial latent representation; sequence-level heads use the decoded trajectory. GRU-ODE-Bayes, Latent ODE, and NJODE expose their method-specific objectives through `return_aux_loss=True`.
+
+The package's six task heads are shared adapters around these backbones. In particular, NJODE's forecasting head projects the context representation to a fixed output horizon; it is not the paper's native future-time filtering path because the current forecasting target does not include a future timestamp grid.
 
 ---
 
@@ -174,10 +177,11 @@ For missing-data handling, use `preprocess(X, model_name=...)` to build matching
 | `neural_ode_t` | Baseline (this package) | Time-conditioned variant of `neural_ode`. No external paper. |
 | `neural_sde` | Baseline (this package) | Generic Neural SDE baseline; uses [`torchsde`](https://github.com/google-research/torchsde). No external paper. |
 | `neural_sde_t` | Baseline (this package) | Time-conditioned variant of `neural_sde`. No external paper. |
+| `latentsde` | [Li et al., *Scalable Gradients for Stochastic Differential Equations* (AISTATS 2020)](https://arxiv.org/abs/2001.01328) | Full-path mask-aware posterior for the initial latent state, OU prior, initial and path KL, and a physical latent trajectory separated from the augmented KL accumulator. The SDE path follows the [`torchsde` Latent SDE example](https://github.com/google-research/torchsde/blob/master/examples/latent_sde.py). |
 
-All five use cubic-spline interpolation via `torchcde`.
+The first five rows use cubic-spline interpolation via `torchcde`. `latentsde` consumes values, per-channel masks, deltas, and normalized time directly; its default solver is Euler with direct differentiation, and `kl=False` disables both initial and path KL.
 
-Continuous-time models in this section need `preprocess(X, model_name=...)`. See [API Reference §7.1](api_reference.md#71-get_data_config) for the full per-model settings.
+Use `preprocess(X, model_name=...)` to build the sequence stack and model-specific preprocessing outputs. LatentSDE does not consume the interpolation coefficients. See [API Reference §7.1](api_reference.md#71-get_data_config) for the full per-model settings.
 
 ---
 
