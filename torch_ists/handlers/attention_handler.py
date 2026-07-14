@@ -19,7 +19,7 @@ class AttentionHandler(BaseHandler):
     - transformer-mask: transformer backbone with padding-mask-aware attention
     - sand: Simply Attend and Diagnose
     - mtan: Multi-Time Attention Network
-    - miam: Missing Information Attention Model
+    - miam: Multi-view Integration Attention Model
     """
 
     name: str = "attention"

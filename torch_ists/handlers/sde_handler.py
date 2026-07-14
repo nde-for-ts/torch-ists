@@ -40,10 +40,9 @@ class SDEHandler(BaseHandler):
         "neural_sde",
         "neural_sde_t",
     }
-    SDE_ALLOWED_METHODS = {"euler", "heun", "milstein", "srk"}
+    SDE_ALLOWED_METHODS = {"euler", "milstein", "srk"}
     SDE_METHOD_ALIASES = {
         "fixed_euler": "euler",
-        "fixed_heun": "heun",
     }
     STOCHASTIC_KWARG_KEYS = {"bm", "names", "extra", "logqp"}
 

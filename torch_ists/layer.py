@@ -26,7 +26,9 @@ from .handlers.bootstrap import configure_handler_registry_bootstrap
 from .config.active_models import load_active_models
 from .config.alias_policy import (
     is_flow_family_name,
+    is_flow_strict_raw_name,
     normalize_flow_alias,
+    normalize_tsde_method_alias,
 )
 from .config.model_data_policy import (
     _resolve_runtime_depth_config,
@@ -45,6 +47,20 @@ configure_handler_registry_bootstrap()
 
 
 SDE_CODE_PATTERN = re.compile(r"^neuralsde_\d+_\d+$")
+_SOLVER_ARGUMENT_KEYS = frozenset(
+    {
+        "method",
+        "solver",
+        "solver_options",
+        "options",
+        "step_size",
+        "dt",
+        "rtol",
+        "atol",
+        "adjoint",
+        "adjoint_params",
+    }
+)
 
 
 def _resolve_device(device: str) -> str:
@@ -111,8 +127,42 @@ def _resolve_use_intensity_flag(
     return bool(get_data_config(model_name)["use_intensity"])
 
 
-def _default_method_for_model(model_name: str) -> str:
+def _default_method_for_model(model_name: str) -> Optional[str]:
     return resolve_default_method_for_model(model_name)
+
+
+def _explicit_solver_arguments(
+    method: Optional[str],
+    values: Dict[str, Any],
+) -> list[str]:
+    explicit = []
+    if method is not None:
+        explicit.append("method")
+    for key in sorted(_SOLVER_ARGUMENT_KEYS - {"method"}):
+        value = values.get(key)
+        # Shared callers commonly pass ``adjoint=False`` to every sequence
+        # model. It is the neutral setting for NeuralFlow, not a solver
+        # configuration request.
+        if key == "adjoint" and value is False:
+            continue
+        if key in values and value is not None:
+            explicit.append(key)
+    return explicit
+
+
+def _reject_neuralflow_solver_arguments(
+    model_name: str,
+    method: Optional[str],
+    values: Dict[str, Any],
+) -> None:
+    if not model_name.startswith("neuralflow-"):
+        return
+    explicit = _explicit_solver_arguments(method, values)
+    if explicit:
+        raise ValueError(
+            "NeuralFlow does not use a numerical solver; remove solver arguments: "
+            + ", ".join(explicit)
+        )
 
 
 class ists_layer(nn.Module):
@@ -150,6 +200,19 @@ class ists_layer(nn.Module):
         normalized_model_name = _normalize_model_name_or_raise(model_name)
         _enforce_active_scope_or_raise(normalized_model_name, allow_flow_extension=True)
 
+        if is_flow_strict_raw_name(normalized_model_name) and imputation_strategy != "zero":
+            raise ValueError(
+                f"{normalized_model_name} supports only imputation_strategy='zero'; "
+                "its raw-missing path performs method-defined mask-aware zero filling."
+            )
+
+        resolved_model_params = dict(model_params or {})
+        _reject_neuralflow_solver_arguments(
+            normalized_model_name,
+            method,
+            resolved_model_params,
+        )
+
         self.model_name = normalized_model_name
         self.imputation_strategy = imputation_strategy
         self.input_dim = int(input_dim)
@@ -164,7 +227,7 @@ class ists_layer(nn.Module):
         )
         self.method = method
         self.file = file
-        self.model_params = dict(model_params or {})
+        self.model_params = resolved_model_params
         depth_config = _resolve_runtime_depth_config(
             self.model_name,
             num_layers=self.model_params.get("num_layers", num_layers),
@@ -230,6 +293,11 @@ class ists_layer(nn.Module):
         # Drop dispatch-only keys before forwarding to the selected handler.
         forward_kwargs.pop("model_name", None)
         forward_kwargs.pop("model_params", None)
+        _reject_neuralflow_solver_arguments(
+            self.model_name,
+            direct_method,
+            forward_kwargs,
+        )
         if "solver_options" not in forward_kwargs and "options" not in forward_kwargs:
             if "solver_options" in self.model_params:
                 forward_kwargs["solver_options"] = self.model_params["solver_options"]

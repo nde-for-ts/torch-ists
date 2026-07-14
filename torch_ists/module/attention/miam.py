@@ -1,4 +1,7 @@
-"""MIAM attention backbone."""
+"""MIAM attention backbone adapted from YurimALee/MIAM.
+
+See the packaged third-party notices for source and redistribution status.
+"""
 
 from __future__ import annotations
 
@@ -161,7 +164,7 @@ class MIAMPositionalEncoder(nn.Module):
 
 
 class AttentionMIAMModel(nn.Module):
-    """MIAM (Missing Information Attention Model)."""
+    """Multi-view Integration Attention Model (MIAM)."""
 
     def __init__(
         self,
@@ -175,6 +178,8 @@ class AttentionMIAMModel(nn.Module):
         model_name: str = "miam",
     ):
         super().__init__()
+        if hidden_dim < 2:
+            raise ValueError("MIAM requires hidden_dim >= 2 for feature normalization.")
         self.model_name = model_name
         self.n_iter = n_iter
 

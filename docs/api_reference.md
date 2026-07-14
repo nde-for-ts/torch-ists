@@ -94,7 +94,7 @@ seq = torch.stack([X_missing, X_mask, X_delta], dim=1)  # [N, 3, L, D]
 logits = model(seq, coeffs=coeffs)
 ```
 
-Coefficient-driven rows consume the `coeffs` returned by `preprocess`. Direct sequence, attention, and event-driven rows such as ODE-LSTM, NJODE, and LatentSDE accept `coeffs=None` and use the sequence stack directly.
+Coefficient-driven rows consume the `coeffs` returned by `preprocess`. Direct sequence, attention, and event-driven rows such as ODE-LSTM, Neural Jump ODE (NJ-ODE), and LatentSDE accept `coeffs=None` and use the sequence stack directly.
 
 Import package as `torch_ists`.
 
@@ -473,7 +473,7 @@ def preprocess(
 | `channel_sync` | `bool` | `False` | If `True`, synchronize injected missing positions across channels. |
 | `mechanism` | `str` | `"MCAR"` | Missingness mechanism (`MCAR`, `MAR`, `MNAR`, `BLOCK`, `BURST`). `MAR`, `MNAR`, `BLOCK`, and `BURST` are experimental. |
 | `model_name` | `Optional[str]` | `None` | Optional model key. When set, `interpolate` and `use_intensity` default to `get_data_config(model_name)`. Explicit kwargs still override. |
-| `timestamps` | `Optional[Any]` | `None` | Optional timestamp grid `[N, L]` or `[L]` used for delta-channel construction. Continuous-time solver grids remain normalized-index unless a model documents otherwise. |
+| `timestamps` | `Optional[Any]` | `None` | Optional timestamp grid `[N, L]` used for delta-channel construction. Continuous-time solver grids remain normalized-index unless a model documents otherwise. |
 | `timestamp_delta_scale` | `Optional[float]` | `None` | Positive scale for timestamp-based deltas. The scripts use the train split median positive timestamp step. |
 | `missingness_reference` | `Optional[Any]` | `None` | Optional reference array used by non-MCAR missingness mechanisms such as MAR/MNAR; script workflows pass train-split reference statistics. |
 
@@ -745,11 +745,12 @@ The classifier returns logits only.
 Behavior notes:
 - If `use_intensity` is omitted (`None`), runtime resolves it from `get_data_config(model_name)`.
 - `method` is a solver argument for continuous-time methods. Effective solver behavior remains model-specific; the package does not promise one package-wide default across ODE/CDE/SDE methods.
+- NeuralFlow (`neuralflow-*`) is flow-only and does not use a numerical solver; active solver settings raise `ValueError` instead of being ignored. The neutral shared-call setting `adjoint=False` is accepted for compatibility.
 - For sequence baselines, `transformer`, and `sand`, the packaged runtime applies `torch.nan_to_num(..., nan=0.0)` before the backbone call and does not pass a padding mask into the attention backbone.
 - `transformer-mask` uses the same zero-filled values, but it also applies `src_key_padding_mask` derived from the packaged observation mask. If a sequence is fully masked, the runtime treats that zero-filled row as an unmasked finite fallback so the Transformer encoder returns finite outputs.
-- `mtan` and `miam` consume zero-filled values together with the original sequence stack and normalized timestamps; they do not use interpolation coefficients.
+- `mtan` and `miam` consume zero-filled values together with the original sequence stack and normalized timestamps; they do not use interpolation coefficients. mTAN samples its variational latent representation in both training and evaluation mode, so set the random seed for repeatable single-sample inference or aggregate multiple samples. MIAM requires `hidden_dim >= 2`.
 - Under the scripts' train-only z-score normalization, the zero-fill path becomes per-channel mean imputation in raw value space.
-- `imputation_strategy` selects how missing entries are filled for direct value-channel backbones: `"zero"` (default), `"last_observed"`, and `"channel_mean"`. Strict raw-missing rows (`neuralflow-*`, `flowpath-*`) keep raw `NaN` until mask-aware filling; coefficient-driven rows consume the `coeffs` built by `preprocess(...)`.
+- `imputation_strategy` selects how missing entries are filled for compatible direct value-channel backbones: `"zero"` (default), `"last_observed"`, and `"channel_mean"`. Strict raw-missing rows (`neuralflow-*`, `flowpath-*`) keep raw `NaN` until method-defined mask-aware zero filling and reject nonzero strategies; coefficient-driven rows consume the `coeffs` built by `preprocess(...)`.
 - Non-finite backbone outputs, hidden states, or logits raise `RuntimeError`; the package does not silently zero-fill them.
 
 ### 6.2 `ists_model`
@@ -797,7 +798,7 @@ Broader task surface:
 - `regression/forecasting/imputation/outlier_detection/change_detection` are available through `ists_model`.
 - `classification` is the stable packaged path.
 
-The five non-classification outputs are shared package task-head adapters. A model's original paper may define a narrower prediction problem; for example, the NJODE forecasting adapter does not reproduce paper-native future-time filtering because the current target contract does not carry a future timestamp grid.
+The five non-classification outputs are shared package task-head adapters. A model's original paper may define a narrower prediction problem; for example, the NJ-ODE forecasting adapter does not reproduce paper-native future-time filtering because the current target contract does not carry a future timestamp grid.
 
 Behavior notes:
 - If `use_intensity` is omitted (`None`), runtime resolves it from `get_data_config(model_name)` inside `ists_layer`.
@@ -947,7 +948,7 @@ def get_data_config(model_name: str) -> Dict[str, Any]:
 | `gru-ode` | `'natural'` | `False` | consumes `coeffs` |
 | `ode-lstm` | `'cubic'` | `False` | runtime ignores `coeffs`; uses imputed values, elapsed time deltas, and the any-channel observation mask directly |
 | `ode-rnn`, `latentode`, `gru-ode-bayes`, `njode` | `'natural'` | `False` | runtime ignores `coeffs`; uses the sequence stack and reconstructed times directly |
-| `neuralflow` and explicit NeuralFlow variants | `'hermite'` | `False` | `coeffs` ignored; runtime uses the direct value/time path with raw missing-value handling |
+| `neuralflow` and explicit NeuralFlow variants | `'hermite'` | `False` | `coeffs` ignored; runtime uses the direct value/time path with raw missing-value handling and no numerical solver |
 | `naive_cde`, `neural_ode`, `neural_ode_t`, `neural_sde`, `neural_sde_t`, `neural_lsde`, `neural_lnsde`, `neural_gsde` | `'hermite'` | `False` | consumes `coeffs` |
 | `latentsde` | `'hermite'` | `False` | runtime ignores `coeffs`; the posterior encoder consumes values, per-channel masks, deltas, and normalized times directly |
 

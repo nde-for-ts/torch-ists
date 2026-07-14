@@ -153,8 +153,9 @@ class NeuralCDE_IDEA4(torch.nn.Module):
         ode_result = new_cde[0]
         z_t = new_cde[1]
 
-        # Linear map and return (last time step only, matching legacy)
-        pred_y = self.linear(z_t[-1, :, :])
+        # Preserve the full latent path for sequence task heads. Sample-level
+        # heads still gather the final observed state from this same stream.
+        pred_y = self.linear(z_t)
         return pred_y, z_t[-1, :, :], reg
 
 

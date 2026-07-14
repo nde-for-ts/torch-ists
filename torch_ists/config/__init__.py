@@ -1,5 +1,7 @@
 """Public configuration interface for the packaged runtime."""
 
+from typing import Optional
+
 from .models import (
     MODEL_REGISTRY,
     MODEL_LIST,
@@ -88,9 +90,11 @@ _SOURCE_BASED_DEFAULT_METHODS = {
 }
 
 
-def default_method_for_model(model_name: str) -> str:
+def default_method_for_model(model_name: str) -> Optional[str]:
     """Return the packaged-runtime default method for supported families."""
     normalized = str(model_name).strip().lower()
+    if normalized == "neuralflow" or normalized.startswith("neuralflow-"):
+        return None
     return _SOURCE_BASED_DEFAULT_METHODS.get(normalized, "euler")
 
 

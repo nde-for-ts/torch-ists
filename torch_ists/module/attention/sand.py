@@ -1,4 +1,4 @@
-"""SAnD attention backbone."""
+"""SAnD attention backbone adapted from khirotaka/SAnD (MIT)."""
 
 from __future__ import annotations
 

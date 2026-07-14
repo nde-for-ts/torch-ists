@@ -258,8 +258,14 @@ class _RawODERNNEncoder(nn.Module):
                     atol=atol,
                     adjoint=adjoint,
                 )
-            obs_input = torch.cat([x[:, step, :] * mask[:, step, :], mask[:, step, :]], dim=-1)
-            obs_present = _masked_observation_flag(mask[:, step, :]).unsqueeze(-1)
+            step_mask = mask[:, step, :]
+            step_values = torch.where(
+                step_mask > 0.5,
+                torch.nan_to_num(x[:, step, :], nan=0.0, posinf=0.0, neginf=0.0),
+                torch.zeros_like(x[:, step, :]),
+            )
+            obs_input = torch.cat([step_values, step_mask], dim=-1)
+            obs_present = _masked_observation_flag(step_mask).unsqueeze(-1)
             updated = self.update(obs_input, h)
             h = torch.where(obs_present, updated, h)
             hs.append(h)

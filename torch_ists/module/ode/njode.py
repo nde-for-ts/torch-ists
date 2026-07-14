@@ -1,4 +1,4 @@
-"""NJODE backbone adapted to the package dense sequence contract."""
+"""Neural Jump ODE (NJ-ODE) backbone for the package sequence contract."""
 
 from __future__ import annotations
 
@@ -37,15 +37,15 @@ def njode_observation_loss(
     weight: float = 0.5,
     eps: float = 1e-10,
 ) -> torch.Tensor:
-    """Return the standard NJODE observation-date loss for one grid position."""
+    """Return the standard NJ-ODE observation-date loss for one grid position."""
     if not 0.0 <= float(weight) <= 1.0:
-        raise ValueError("NJODE loss weight must be between zero and one.")
+        raise ValueError("NJ-ODE loss weight must be between zero and one.")
     if not math.isfinite(float(eps)) or float(eps) <= 0:
-        raise ValueError("NJODE loss eps must be finite and positive.")
+        raise ValueError("NJ-ODE loss eps must be finite and positive.")
     if tuple(x.shape) != tuple(post_jump.shape) or tuple(x.shape) != tuple(pre_jump.shape):
-        raise ValueError("NJODE loss inputs must have matching [N, D] shapes.")
+        raise ValueError("NJ-ODE loss inputs must have matching [N, D] shapes.")
     if tuple(mask.shape) != tuple(x.shape):
-        raise ValueError("NJODE loss mask must match the observation shape.")
+        raise ValueError("NJ-ODE loss mask must match the observation shape.")
 
     observed_mask = (mask > 0.5).to(dtype=x.dtype, device=x.device)
     values = torch.where(
@@ -66,7 +66,7 @@ def njode_observation_loss(
     has_event = observed_mask.any(dim=-1).to(dtype=x.dtype)
     counts = event_counts.to(device=x.device, dtype=x.dtype).reshape(-1).clamp_min(1.0)
     if counts.numel() != x.size(0):
-        raise ValueError("NJODE event_counts must contain one value per sample.")
+        raise ValueError("NJ-ODE event_counts must contain one value per sample.")
     return ((event_loss * has_event) / counts).sum() / max(1, x.size(0))
 
 
@@ -118,17 +118,17 @@ class SourceNJODEBackbone(nn.Module):
     ):
         super().__init__()
         if int(input_dim) <= 0 or int(hidden_dim) <= 0 or int(output_dim) <= 0:
-            raise ValueError("NJODE dimensions must be positive.")
+            raise ValueError("NJ-ODE dimensions must be positive.")
         if not math.isfinite(float(step_size)) or float(step_size) <= 0:
-            raise ValueError("NJODE step_size must be finite and positive.")
+            raise ValueError("NJ-ODE step_size must be finite and positive.")
         if not 0.0 <= float(loss_weight) <= 1.0:
-            raise ValueError("NJODE loss_weight must be between zero and one.")
+            raise ValueError("NJ-ODE loss_weight must be between zero and one.")
         if not math.isfinite(float(auxiliary_weight)) or float(auxiliary_weight) < 0:
-            raise ValueError("NJODE auxiliary_weight must be finite and non-negative.")
+            raise ValueError("NJ-ODE auxiliary_weight must be finite and non-negative.")
         if not math.isfinite(float(loss_eps)) or float(loss_eps) <= 0:
-            raise ValueError("NJODE loss_eps must be finite and positive.")
+            raise ValueError("NJ-ODE loss_eps must be finite and positive.")
         if int(max_substeps) <= 0:
-            raise ValueError("NJODE max_substeps must be positive.")
+            raise ValueError("NJ-ODE max_substeps must be positive.")
 
         self.input_dim = int(input_dim)
         self.hidden_dim = int(hidden_dim)
@@ -156,17 +156,17 @@ class SourceNJODEBackbone(nn.Module):
         sample_times = sample_times.to(device=device, dtype=dtype)
         if sample_times.dim() == 1:
             if sample_times.numel() != seq_len:
-                raise ValueError(f"NJODE sample_times must have length {seq_len}.")
+                raise ValueError(f"NJ-ODE sample_times must have length {seq_len}.")
             sample_times = sample_times.unsqueeze(0).expand(batch_size, -1)
         if sample_times.dim() != 2 or tuple(sample_times.shape) != (batch_size, seq_len):
             raise ValueError(
-                "NJODE sample_times must be [L] or [N, L], "
+                "NJ-ODE sample_times must be [L] or [N, L], "
                 f"got {tuple(sample_times.shape)}."
             )
         if not bool(torch.isfinite(sample_times).all()):
-            raise ValueError("NJODE sample_times must be finite.")
+            raise ValueError("NJ-ODE sample_times must be finite.")
         if seq_len > 1 and bool(((sample_times[:, 1:] - sample_times[:, :-1]) < 0).any()):
-            raise ValueError("NJODE sample_times must be non-decreasing.")
+            raise ValueError("NJ-ODE sample_times must be non-decreasing.")
         return sample_times
 
     def _evolve(
@@ -186,7 +186,7 @@ class SourceNJODEBackbone(nn.Module):
         required_steps = int(math.ceil(step_ratio - 1e-6)) if max_duration > 0 else 0
         if required_steps > max_substeps:
             raise RuntimeError(
-                "NJODE integration exceeded max_substeps; increase step_size or max_substeps."
+                "NJ-ODE integration exceeded max_substeps; increase step_size or max_substeps."
             )
 
         remaining = duration
@@ -215,15 +215,15 @@ class SourceNJODEBackbone(nn.Module):
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         del rtol, atol
         if str(method).strip().lower() != "euler":
-            raise ValueError("NJODE currently supports only Euler integration.")
+            raise ValueError("NJ-ODE currently supports only Euler integration.")
         if bool(adjoint):
-            raise ValueError("NJODE uses explicit Euler substeps and does not use adjoint integration.")
+            raise ValueError("NJ-ODE uses explicit Euler substeps and does not use adjoint integration.")
         if x.dim() != 3 or x.size(-1) != self.input_dim:
             raise ValueError(
-                f"NJODE values must be [N, L, {self.input_dim}], got {tuple(x.shape)}."
+                f"NJ-ODE values must be [N, L, {self.input_dim}], got {tuple(x.shape)}."
             )
         if tuple(mask.shape) != tuple(x.shape):
-            raise ValueError("NJODE mask must match values shape.")
+            raise ValueError("NJ-ODE mask must match values shape.")
 
         solver_options = dict(options or {})
         step_size = float(solver_options.pop("step_size", self.step_size))
@@ -232,15 +232,15 @@ class SourceNJODEBackbone(nn.Module):
         )
         if solver_options:
             unexpected = ", ".join(sorted(solver_options))
-            raise ValueError(f"Unsupported NJODE solver options: {unexpected}")
+            raise ValueError(f"Unsupported NJ-ODE solver options: {unexpected}")
         if not math.isfinite(step_size) or step_size <= 0:
-            raise ValueError("NJODE step_size must be finite and positive.")
+            raise ValueError("NJ-ODE step_size must be finite and positive.")
         if max_substeps <= 0:
-            raise ValueError("NJODE max_substeps must be positive.")
+            raise ValueError("NJ-ODE max_substeps must be positive.")
 
         batch_size, seq_len, _ = x.shape
         if seq_len <= 0:
-            raise ValueError("NJODE requires a non-empty sequence.")
+            raise ValueError("NJ-ODE requires a non-empty sequence.")
         times = self._expand_times(
             sample_times,
             batch_size=batch_size,
@@ -256,7 +256,7 @@ class SourceNJODEBackbone(nn.Module):
         )
         final_index = final_index.to(device=x.device, dtype=torch.long).reshape(-1)
         if final_index.numel() != batch_size:
-            raise ValueError("NJODE final_index must contain one index per sample.")
+            raise ValueError("NJ-ODE final_index must contain one index per sample.")
         final_index = final_index.clamp(min=0, max=seq_len - 1)
 
         event_grid = observed_mask.any(dim=-1)

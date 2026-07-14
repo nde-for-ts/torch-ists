@@ -57,8 +57,9 @@ class NeuralRDE(torch.nn.Module):
             x = torch.cat([seq_ts.unsqueeze(-1), x], dim=-1)
             xx = torchcde.logsig_windows(x, depth=depth, window_length=window_length)
 
-        tt = torch.linspace(0, 1, xx.shape[1]).to(xx.device)
-        coeffs = controldiffeq.natural_cubic_spline_coeffs(tt, xx)
+        control_times = torch.linspace(0, 1, xx.shape[1]).to(xx.device)
+        solution_times = times.to(device=xx.device, dtype=xx.dtype)
+        coeffs = controldiffeq.natural_cubic_spline_coeffs(control_times, xx)
 
         # Extract the sizes of the batch dimensions from the coefficients
         coeff, _, _, _ = coeffs
@@ -68,14 +69,14 @@ class NeuralRDE(torch.nn.Module):
                                                     "coeff.shape[:-2]={}, final_index.shape={}" \
                                                     "".format(batch_dims, final_index.shape)
 
-        cubic_spline = controldiffeq.NaturalCubicSpline(tt, coeffs)
+        cubic_spline = controldiffeq.NaturalCubicSpline(control_times, coeffs)
 
         if z0 is None:
             assert self.initial, "Was not expecting to be given no value of z0."
             if isinstance(self.func, ContinuousRNNConverter):  # still an ugly hack
                 z0 = torch.zeros(*batch_dims, self.hidden_channels, dtype=coeff.dtype, device=coeff.device)
             else:
-                z0 = self.initial_network(cubic_spline.evaluate(times[0]))
+                z0 = self.initial_network(cubic_spline.evaluate(control_times[0]))
         else:
             assert not self.initial, "Was expecting to be given a value of z0."
             if isinstance(self.func, ContinuousRNNConverter):  # continuing adventures in ugly hacks
@@ -90,7 +91,7 @@ class NeuralRDE(torch.nn.Module):
                 kwargs['options'] = {}
             options = kwargs['options']
             if 'step_size' not in options and 'grid_constructor' not in options:
-                time_diffs = times[1:] - times[:-1]
+                time_diffs = solution_times[1:] - solution_times[:-1]
                 options['step_size'] = time_diffs.min().item()
 
         # approximation
@@ -99,14 +100,14 @@ class NeuralRDE(torch.nn.Module):
                 kwargs['options'] = {}
             options = kwargs['options']
             if 'step_size' not in options and 'grid_constructor' not in options:
-                time_diffs = times[1:] - times[:-1]
+                time_diffs = solution_times[1:] - solution_times[:-1]
                 options['step_size'] = max(time_diffs.min().item(), 1e-3)
 
         # Actually solve the CDE
         z_t = controldiffeq.cdeint(dX_dt=cubic_spline.derivative,
                                    func=self.func,
                                    z0=z0,
-                                   t=tt,
+                                   t=solution_times,
                                    **kwargs)
 
         if isinstance(self.func, ContinuousRNNConverter):

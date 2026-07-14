@@ -27,9 +27,6 @@ REDACTED_FIELD_FRAGMENTS = (
     "grid_version",
 )
 REDACTED_VALUE_FRAGMENTS = (
-    "/home/",
-    "/media/",
-    ".claude",
     "session_",
     "profile",
 )
@@ -78,6 +75,7 @@ def _public_path(value: Any) -> Any:
 
 _WINDOWS_ABSOLUTE_PATH_RE = re.compile(r"(?<![A-Za-z0-9_])[A-Za-z]:[\\\\/][^\"'\s,;]+")
 _POSIX_ABSOLUTE_PATH_RE = re.compile(r"(?<![A-Za-z0-9_])/(?:[^/\"'\s,;]+/)*[^/\"'\s,;]+")
+_HIDDEN_PATH_COMPONENT_RE = re.compile(r"(?:^|[\\/])\.[^\\/]+(?:[\\/]|$)")
 
 
 def _contains_absolute_path(value: Any) -> bool:
@@ -623,6 +621,8 @@ def _is_public_safe_row(row: dict[str, Any]) -> bool:
         if any(fragment in key_text for fragment in REDACTED_FIELD_FRAGMENTS):
             return False
         if any(fragment in value_text for fragment in REDACTED_VALUE_FRAGMENTS):
+            return False
+        if _HIDDEN_PATH_COMPONENT_RE.search(value_text):
             return False
         if _contains_absolute_path(value):
             return False

@@ -114,7 +114,7 @@ seq = torch.stack([X_missing, X_mask, X_delta], dim=1)  # [N, 3, L, D]
 logits = model(seq, coeffs=coeffs)
 ```
 
-Coefficient-driven CDE and SDE rows consume the `coeffs` returned by `preprocess(...)`. Direct sequence, attention, and event-driven rows, including ODE-LSTM, the direct ODE-RNN models, NJODE, and LatentSDE, use the sequence stack and accept `coeffs=None`.
+Coefficient-driven CDE and SDE rows consume the `coeffs` returned by `preprocess(...)`. Direct sequence, attention, and event-driven rows, including ODE-LSTM, the direct ODE-RNN models, Neural Jump ODE (NJ-ODE), and LatentSDE, use the sequence stack and accept `coeffs=None`.
 
 See [Model Reference](docs/model_reference.md) for which models need `preprocess(X, model_name=...)` versus the direct sequence stack.
 
@@ -124,8 +124,8 @@ Missing-value handling:
 
 - `preprocess(...)` preserves missing values as `NaN` in `X_missing` and derives `X_mask`, `X_delta`, and interpolation coefficients from that path.
 - Most direct backbones fill missing value-channel entries before the backbone call. `ists_classifier(..., imputation_strategy="zero")` is the default and matches the established zero-fill baseline.
-- `neuralflow-*` and `flowpath-*` are strict raw-missing rows: keep missing positions as `NaN` with `X_mask=0`.
-- `last_observed` (last-observation-carried-forward) and `channel_mean` (per-series observed mean) are experimental opt-in alternatives selected through the same argument.
+- `neuralflow-*` and `flowpath-*` are strict raw-missing rows: keep missing positions as `NaN` with `X_mask=0`. They use method-defined mask-aware zero filling and reject other `imputation_strategy` values.
+- `last_observed` (last-observation-carried-forward) and `channel_mean` (per-series observed mean) are experimental opt-in alternatives for compatible direct value-channel backbones.
 
 ## Models Included
 
@@ -136,7 +136,7 @@ The package includes the 52 canonical model names below. See [Model Reference](d
 - **Sequence baselines** — `cnn`, `rnn`, `lstm`, `gru`, `bilstm`, `gru-simple`, `plstm`, `tlstm`, `tglstm` (§1)
 - **Attention-based methods** — `transformer`, `transformer-mask`, `sand`, `mtan`, `miam` (§2)
 - **Neural ODE methods** — `gru-dt`, `gru-d`, `gru-ode`, `ode-rnn-spline`, `ode-lstm` (§3)
-- **ODE-RNN, Latent ODE, GRU-ODE-Bayes, and NJODE** — `ode-rnn`, `latentode`, `gru-ode-bayes`, `njode` (§4)
+- **ODE-RNN, Latent ODE, GRU-ODE-Bayes, and NJ-ODE** — `ode-rnn`, `latentode`, `gru-ode-bayes`, `njode` (§4)
 - **Neural CDE and Neural RDE** — `neuralcde`, `neuralcde-l`, `neuralcde-r`, `neuralcde-c`, `neuralcde-h`, `neuralrde-1`, `neuralrde-2`, `neuralrde-3` (§5)
 - **ANCDE, EXIT, and LEAP** — `ancde`, `exit`, `leap` (§6)
 - **NeuralFlow** — `neuralflow-r`, `neuralflow-g`, `neuralflow-c` (§7)

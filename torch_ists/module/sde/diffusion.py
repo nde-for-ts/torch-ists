@@ -91,8 +91,8 @@ class Diffusion_model(torch.nn.Module):
         return self.f(t, y)
 
     def f(self, t: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-        Xt = self.X.evaluate(t)
-        Xt = self.initial_network(Xt)
+        if self.input_option in [0, 2, 4, 6]:
+            Xt = self.initial_network(self.X.evaluate(t))
 
         if self.input_option in [3, 4, 5, 6]:
             if t.dim() == 0:

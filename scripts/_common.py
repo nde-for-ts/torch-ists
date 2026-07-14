@@ -687,7 +687,8 @@ def _default_method_for_axis(model_name: str) -> str | None:
     try:
         from torch_ists.config import default_method_for_model
 
-        return str(default_method_for_model(model_name))
+        method = default_method_for_model(model_name)
+        return None if method is None else str(method)
     except Exception:
         return None
 
@@ -1130,13 +1131,15 @@ def resolve_learning_rate_policy(
     }
 
 
-def default_method_for_model(model_name: str) -> str:
+def default_method_for_model(model_name: str) -> str | None:
     try:
         from torch_ists.config import default_method_for_model as runtime_default_method_for_model
 
         return runtime_default_method_for_model(model_name)
     except Exception:
         normalized = str(model_name).strip().lower()
+        if normalized == "neuralflow" or normalized.startswith("neuralflow-"):
+            return None
         if normalized == "latentsde":
             return "srk"
         if normalized in {

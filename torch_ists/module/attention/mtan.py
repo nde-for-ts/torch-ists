@@ -1,4 +1,4 @@
-"""mTAN attention backbone."""
+"""mTAN attention backbone adapted from reml-lab/mTAN (MIT)."""
 
 from __future__ import annotations
 
