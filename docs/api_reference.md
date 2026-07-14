@@ -520,7 +520,7 @@ Timestamp kwargs affect the returned `X_delta` channel and metadata-aligned prep
 
 ### 4.2 `apply_missingness()`
 
-Apply synthetic missingness to data (MCAR/MAR/MNAR/BLOCK/BURST).
+Apply synthetic missingness to data (MCAR/MAR/MNAR/BLOCK/BURST/CHANNEL_DROP).
 
 #### Signature
 
@@ -531,7 +531,9 @@ def apply_missingness(
     mechanism: str = "MCAR",
     seed: int = 0,
     channel_sync: bool = False,
-) -> Tuple[np.ndarray, np.ndarray]:
+    reference_X: Optional[np.ndarray] = None,
+    return_stats: bool = False,
+) -> tuple:
 ```
 
 #### Parameters
@@ -540,15 +542,19 @@ def apply_missingness(
 |-----------|------|---------|-------------|
 | `X` | `np.ndarray` | (required) | Input data `[N, D, L]` |
 | `rate` | `float` | (required) | Missing rate (0-1) |
-| `mechanism` | `str` | `"MCAR"` | Mechanism: `"MCAR"`, `"MAR"`, `"MNAR"`, `"BLOCK"`, `"BURST"`. Default `"MCAR"`. |
+| `mechanism` | `str` | `"MCAR"` | Mechanism: `"MCAR"`, `"MAR"`, `"MNAR"`, `"BLOCK"`, `"BURST"`, `"CHANNEL_DROP"`. Default `"MCAR"`. |
 | `seed` | `int` | `0` | Random seed |
-| `channel_sync` | `bool` | `False` | Synchronize missingness across channels |
+| `channel_sync` | `bool` | `False` | Synchronize temporal missingness across channels. `CHANNEL_DROP` does not use this axis and requires `False`. |
+| `reference_X` | `Optional[np.ndarray]` | `None` | Optional reference data used to derive MAR/MNAR probabilities; use training data when evaluating held-out data. |
+| `return_stats` | `bool` | `False` | Return a third dictionary with observation-floor or channel-outage statistics. |
 
 #### Returns
 
-`Tuple[np.ndarray, np.ndarray]`:
+With `return_stats=False`, returns `Tuple[np.ndarray, np.ndarray]`:
 1. `X_missing`: `[N, D, L]` - Data with NaN for missing values
 2. `mask_observed`: `[N, D, L]` - Observation mask (1.0=observed, 0.0=missing)
+
+With `return_stats=True`, a third dictionary reports mechanism-specific statistics. `CHANNEL_DROP` selects one seed-stable global channel subset and reports the requested/realized drop count, channel indices, applicability, and all-missing sequence count. A one-channel input is returned unchanged and marked non-applicable.
 
 #### Example
 
@@ -798,7 +804,7 @@ Behavior notes:
 - Some continuous-time rows honor `method` only at model creation.
 - Some compatibility models accept solver-shaped inputs only for backward compatibility and may emit a runtime warning.
 - Unsupported solver knobs raise `ValueError` instead of silently changing model behavior.
-- `output_dim` defaults to `1`; `forecast_horizon` defaults to `seq_len` when omitted.
+- `output_dim` defaults to `1`. Forecasting requires a positive `forecast_horizon`; omitting it or passing a non-positive value raises `ValueError`.
 - `forward(..., return_aux_loss=True)` returns `(prediction, aux_loss)` for auxiliary-loss backbones.
 - Non-finite predictions raise `RuntimeError`.
 

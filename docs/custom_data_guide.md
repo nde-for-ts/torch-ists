@@ -62,7 +62,7 @@ Missing values should be represented as `NaN`. For variable-length series, pad s
 
 The source-checkout script chain resolves local file and artifact roots to absolute paths before multi-worker parameter search starts. See [Scripts Reference](scripts_reference.md) for the full split/search/run command surface.
 
-`get_data` pools UCR/UEA TRAIN+TEST before the project split is created. See [API Reference §3](api_reference.md#3-data-loading-api) for the legacy-mode caveats and full schema.
+`get_data` pools UCR/UEA TRAIN+TEST before the package split is created. See [API Reference §3](api_reference.md#3-data-loading-api) for partition behavior and field details.
 
 ## 4. Build a User-Provided NPZ Dataset
 

@@ -72,7 +72,7 @@ ODE-style recurrent methods. The GRU-D, GRU-ODE, and ODE-RNN-spline rows are bui
 | `ode-rnn-spline` | packaged | [Kidger et al., *Neural Controlled Differential Equations* (NeurIPS 2020)](https://arxiv.org/abs/2005.08926) (NeuralCDE-style ODE-RNN with spline control path) | [patrick-kidger/NeuralCDE](https://github.com/patrick-kidger/NeuralCDE) | ODE-RNN with a natural-cubic-spline control path on the NeuralCDE infrastructure. `ode-rnn` in [§4](#4-ode-rnn-latent-ode-and-gru-ode-bayes) is a separate canonical implementation. (NeuralCDE-based ODE-RNN with a spline control path - distinct from the canonical 'ode-rnn' in §4, which comes from the Rubanova 2019 repo) |
 | `ode-lstm` | canonical | [Lechner and Hasani, *Learning Long-Term Dependencies in Irregularly-Sampled Time Series* (NeurIPS 2020)](https://arxiv.org/abs/2006.04418) | [mlech26l/ode-lstms](https://github.com/mlech26l/ode-lstms) | LSTM cell with continuous-time hidden state evolved by an ODE between observations. |
 
-**Known limitation.** `ode-lstm` preserves the upstream default `dopri5` implementation. In this package line, single-sample batches (`batch_size=1`) can hit the upstream scalar-squeeze path and raise `IndexError`; use batch size `>=2` for `ode-lstm` inference/evaluation unless an operator-approved safety patch is applied.
+**Runtime note.** `ode-lstm` keeps the upstream union-of-times adaptive behavior. This package handles singleton batches with a two-point adaptive grid and passes elapsed durations between observations; fixed/adaptive solver selection remains model-specific.
 
 ---
 

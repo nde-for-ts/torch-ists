@@ -143,7 +143,9 @@ This is a bounded smoke run; the full defaults (`--num-samples 50 --max-num-epoc
 | `--contract-dir` | `str` | `evidence` | Directory for JSON run logs (stage = `search`). |
 | `--run-id` | `str` | (auto) | Run identifier. |
 | `--runtime-baseline-id` | `str` | `None` | Optional caller-supplied flat run label. Leave unset for shared benchmark artifacts. |
-| `--task` | `{classification}` | `classification` | Task head. Only `classification` is stable. |
+| `--task` | `{classification, regression, forecasting, imputation, outlier_detection, change_detection}` | `classification` | Task head. `classification` is stable; other task heads are experimental. |
+| `--forecast-horizon` | `int` | `None` | Required positive horizon for `forecasting`. |
+| `--target-source` | `{dataset, surrogate}` | `dataset` | Target source. Experimental non-classification tasks require dataset targets; surrogate targets are rejected. |
 | `--targets-root` | `str` | `targets` | Root directory for dataset target bundles when a task uses external targets. |
 
 ### Search Policy And Repeat
@@ -210,8 +212,8 @@ PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/model_run.py \
 | `--check` / `--no-check` | flag | `True` | Validate and reuse an existing output file when present; `--existing-policy` controls reuse vs fail behavior. |
 | `--param-policy` | `{default, constrained}` | `default` | Parameter search setting to consume. Must match `param_search.py --search-policy`. |
 | `--param-repeat` | `{single, aggregated}` | `single` | Parameter repeat setting to consume. Must match `param_search.py --search-repeat`. |
-| `--robustness-mode` | flag | `False` | Robustness evaluation: train on `missing=0.0`, evaluate on configured test rates. |
-| `--robustness-profile` | `{custom, 100-cell}` | `custom` | `100-cell` selects the fixed classification grid described below and requires full predictions. |
+| `--robustness-mode` | flag | `False` | Robustness evaluation. When specified, it selects the 100-condition grid by default unless `--robustness-profile custom` is explicit. |
+| `--robustness-profile` | `{custom, 100-cell}` | conditional | Without robustness mode the default is `custom`; explicit robustness mode defaults to `100-cell`. The fixed grid is classification-only and requires full predictions. |
 | `--robustness-test-rates` | `str` | `0.0` | Positive test missing rates for robustness mode; the clean `0.0` `STANDARD` anchor is always included. |
 | `--robustness-test-mechanisms` | `str` | `MCAR` | Test missingness mechanisms for robustness mode: `MCAR`, `MAR`, `MNAR`, `BLOCK`, `BURST`, `CHANNEL_DROP`. |
 | `--robustness-channel-sync-options` | `str` | `false` | Test channel synchronization options. `false` masks channels independently; `true` shares missing time indices across channels. |
@@ -222,7 +224,9 @@ PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/model_run.py \
 | `--contract-dir` | `str` | `evidence` | Directory for JSON run logs (stage = `run`). |
 | `--run-id` | `str` | (auto) | Run identifier. |
 | `--runtime-baseline-id` | `str` | `None` | Optional caller-supplied flat run label. Leave unset for shared benchmark artifacts. |
-| `--task` | `{classification}` | `classification` | Task head. Only `classification` is stable. |
+| `--task` | `{classification, regression, forecasting, imputation, outlier_detection, change_detection}` | `classification` | Task head. `classification` is stable; other task heads are experimental. |
+| `--forecast-horizon` | `int` | `None` | Required positive horizon for `forecasting`. |
+| `--target-source` | `{dataset, surrogate}` | `dataset` | Target source. Experimental non-classification tasks require dataset targets; surrogate targets are rejected. |
 | `--targets-root` | `str` | `targets` | Root directory for dataset target bundles. |
 
 ### Evaluation Regimes
@@ -235,7 +239,7 @@ PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/model_run.py \
    "evaluations": [...], "meta": {...}}
   ```
 - **Missingness** — selected by a positive `--missing-rates` value. The default missingness mechanism is `MCAR`, `missing_seed` is the run seed, and `channel_sync=False`.
-- **Robustness** (`--robustness-mode`) — runs `(dataset × model)`. The default `custom` setting emits one clean anchor unless additional axes are supplied. `--robustness-profile 100-cell` materializes one clean `STANDARD` anchor, 90 temporal-missingness evaluations (`9` positive rates × `5` mechanisms × `2` channel-sync settings), and 9 `CHANNEL_DROP` evaluations. It is classification-only and stores full prediction arrays. Training occurs once at `missing=0.0`; every evaluation reuses the **train-time normalization statistics**. Output schema:
+- **Robustness** (`--robustness-mode`) — runs `(dataset × model)` and selects the canonical 100 conditions by default. This materializes one clean `STANDARD` anchor, 90 temporal-missingness evaluations (`9` positive rates × `5` mechanisms × `2` channel-sync settings), and 9 `CHANNEL_DROP` evaluations. It is classification-only and stores full prediction arrays. Callers may explicitly select `--robustness-profile custom` for configured axes. Training occurs once at `missing=0.0`; every evaluation reuses the **train-time normalization statistics**. Output schema:
   ```json
   {"mode": "robustness", "task": "classification",
    "train_missing_rate": 0.0, "train_missing_type": "STANDARD",
@@ -250,20 +254,21 @@ PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/model_run.py \
 - **Stable**: `classification` (default).
 - **Experimental**: `regression`, `forecasting`, `imputation`, `outlier_detection`, `change_detection` (available through `ists_model`).
 
-The task and metric tables in this document describe `ists_model` API outputs. The included scripts (`scripts/param_search.py`, `scripts/model_run.py`) accept `--task classification` only; experimental tasks are reached through the `ists_model` API.
+The task and metric tables describe both `ists_model` outputs and the corresponding script workflow. Experimental tasks require dataset-owned targets and may change in a later release; the 100-condition robustness profile remains classification-only.
 
 ### Metrics
 
 | Task | Metrics |
 |---|---|
 | `classification` | accuracy, balanced accuracy, precision/recall/F1, cross-entropy, Brier score, confidence summaries, confusion matrix |
-| `outlier_detection` | BCE, `outlier_acc` |
-| `change_detection` | BCE, `change_acc` |
-| `regression`, `forecasting`, `imputation` | MSE, MAE |
+| `outlier_detection` | BCE, `outlier_acc`, balanced accuracy, F1, AUROC, AUPRC |
+| `change_detection` | BCE, `change_acc`, balanced accuracy, F1, AUROC, AUPRC on supervised positions |
+| `regression`, `forecasting` | MSE, MAE |
+| `imputation` | MSE, MAE on the supplied supervision mask |
 
 ### Output
 
-- **Prediction file** (pickle): standard/missingness `<out-root>/<dataset>/<missing_rate>/<dataset>_<missing_rate>_<model>_<seed>`; robustness `<out-root>/<dataset>/robustness/<dataset>_robustness_<model>_<seed>__rates_<...>__types_<...>__sync_<...>`. The robustness path has **no** `<missing_rate>` segment — the test axes are encoded in the filename suffix. Output metadata includes the output contract, prediction identity, and classification metrics; `runtime_baseline_id` appears only when explicitly supplied.
+- **Prediction file** (pickle): standard/missingness `<out-root>/<dataset>/<missing_rate>/<dataset>_<missing_rate>_<model>_<seed>`; robustness `<out-root>/<dataset>/robustness/<dataset>_robustness_<model>_<seed>__rates_<...>__types_<...>__sync_<...>`. The robustness path has **no** `<missing_rate>` segment — the test axes are encoded in the filename suffix. Output metadata includes the output contract, prediction identity, and task metrics; `runtime_baseline_id` appears only when explicitly supplied.
 - **Run log**: `<contract-dir>/<run-id>/run.manifest.json`. Executed records include resolved batch size, output-contract checks, and `runtime_baseline_id` only when explicitly supplied.
 
 ### Workflow Dependencies
@@ -275,7 +280,7 @@ Requires:
 ### Artifact Reuse Boundaries
 
 - Split artifacts keep the stable `train/valid/test` pickle format and are safe to reuse when the dataset and split path are intentional.
-- Param artifacts written with `0.3.2+` integrity metadata are validated by identity, hash, search policy, repeat policy, and search profile. Pre-`0.3.2` param artifacts lack those integrity fields; reuse is accepted only with the explicit legacy audit flag and still requires a saved `lr` plus matching requested search axes. Partial integrity metadata and bad hashes are rejected.
+- Param artifacts with complete integrity metadata are validated by identity, hash, search policy, repeat policy, target identity, and requested search configuration. Older artifacts without those fields are accepted only with the explicit compatibility audit flag and still require a saved `lr` plus matching requested search axes. Partial integrity metadata and bad hashes are rejected.
 - Output artifacts are reused only when `model_run.py --check` finds the same output-contract hash and validates the stored payload contents. For a 100-condition result this includes exact ordered axes, uniqueness, full prediction identity, and complete channel-outage provenance. Incomplete or older payload shapes are recomputed with `--no-check`; there is no silent cross-contract output reuse.
 
 ---
@@ -298,7 +303,6 @@ PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/aggregate_results.py \
 | `--evidence-root` | `str` | `evidence` | Root containing `*.manifest.json` files from split/search/run scripts. |
 | `--out-root` | `str` | `out` | Root containing `model_run.py` output payloads. |
 | `--output-dir` | `str` | `aggregate` | Directory for aggregate CSV/JSON files. |
-| `--export-scope` | `{public, internal}` | `public` | `public` writes public-safe table fields and redacts local absolute path prefixes; `internal` keeps broader emitted metadata. |
 
 ### Output
 
