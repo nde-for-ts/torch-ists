@@ -1,4 +1,4 @@
-"""Flow operator construction for the runtime package."""
+"""Flow operator backend selector for runtime package."""
 
 from __future__ import annotations
 
@@ -20,6 +20,9 @@ _FLOW_OPTION_TO_NATIVE_CLASS = {
 _FLOW_BACKEND_ALIASES = {
     "native": "native",
     "default": "native",
+    "nfe": "nfe",
+    "stribor": "nfe",
+    "nfe-stibor": "nfe",
 }
 
 
@@ -36,6 +39,18 @@ def resolve_flow_backend(value: object | None) -> str:
     return normalized
 
 
+def _nfe_class_for_flow_option(flow_option: str):
+    from .operators_nfe import CouplingFlow as NFECouplingFlow
+    from .operators_nfe import GRUFlow as NFEGRUFlow
+    from .operators_nfe import ResNetFlow as NFEResNetFlow
+
+    return {
+        "r": NFEResNetFlow,
+        "g": NFEGRUFlow,
+        "c": NFECouplingFlow,
+    }[flow_option]
+
+
 def build_flow_operator(
     *,
     flow_option: str,
@@ -50,8 +65,11 @@ def build_flow_operator(
             f"Unsupported flow_option: {flow_option!r}. Allowed: {sorted(_FLOW_OPTION_TO_NATIVE_CLASS)}"
         )
 
-    resolve_flow_backend(backend)
-    flow_cls = _FLOW_OPTION_TO_NATIVE_CLASS[option]
+    normalized_backend = resolve_flow_backend(backend)
+    if normalized_backend == "native":
+        flow_cls = _FLOW_OPTION_TO_NATIVE_CLASS[option]
+    else:
+        flow_cls = _nfe_class_for_flow_option(option)
 
     return flow_cls(
         dim=int(dim),

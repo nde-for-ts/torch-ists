@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "torch-ists"
-version = "0.5.4"
+version = "0.5.5"
 description = "PyTorch package for irregular time series modeling"
 readme = "README.md"
 license = { text = "MIT" }
@@ -105,4 +105,4 @@ where = ["."]
 include = ["torch_ists*"]
 
 [tool.setuptools.package-data]
-torch_ists = ["py.typed", "config/*.yaml"]
+torch_ists = ["py.typed", "config/*.yaml", "module/flow/NFE_PROVENANCE.json"]

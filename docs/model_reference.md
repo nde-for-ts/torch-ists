@@ -3,7 +3,7 @@
 > **Type**: Reference
 > **Scope**: Origin papers, reference repositories, and implementation notes for packaged models.
 
-**Related docs**: [Package overview](../README.md) · [Docs index](README.md) · [API Reference](api_reference.md) · [Scripts Reference](scripts_reference.md) · [Custom Data Guide](custom_data_guide.md) · [Custom Model Guide](custom_model_guide.md) · [Third-Party Notices](third_party_notices.md) · [CIKM 2025 Tutorial site](https://nde-for-ts.github.io/)
+**Related docs**: [Package overview](../README.md) · [Docs index](README.md) · [API Reference](api_reference.md) · [Scripts Reference](scripts_reference.md) · [Custom Data Guide](custom_data_guide.md) · [Custom Model Guide](custom_model_guide.md) · [Attribution and Licenses](third_party_notices.md) · [CIKM 2025 Tutorial site](https://nde-for-ts.github.io/)
 
 Use the API reference for class signatures and call patterns; use this document for model origins and reference implementations.
 
@@ -89,7 +89,7 @@ Package implementations informed by the original papers and repositories. They a
 | `gru-ode-bayes` | [De Brouwer et al., *GRU-ODE-Bayes: Continuous Modeling of Sporadically-Observed Time Series* (NeurIPS 2019)](https://arxiv.org/abs/1905.12374) | [edebrouwer/gru_ode_bayes](https://github.com/edebrouwer/gru_ode_bayes) | Learned Gaussian prediction distribution, GRU-ODE drift, mask-aware Bayesian observation preparation, pre-jump negative log-likelihood, and post-jump Gaussian KL. Observation intervals use bounded Euler sub-steps. |
 | `ode-rnn` | [Rubanova et al., *Latent ODEs for Irregularly-Sampled Time Series* (NeurIPS 2019)](https://arxiv.org/abs/1907.03907) | [YuliaRubanova/latent_ode](https://github.com/YuliaRubanova/latent_ode) | ODE-RNN adaptation for direct sequence representations. |
 | `latentode` | [Rubanova et al., *Latent ODEs for Irregularly-Sampled Time Series* (NeurIPS 2019)](https://arxiv.org/abs/1907.03907) | [YuliaRubanova/latent_ode](https://github.com/YuliaRubanova/latent_ode) | Reverse ODE-RNN recognition, learned posterior mean and scale, reparameterized initial latent state, batched generative solve, masked Gaussian reconstruction term, and initial-state KL. Recognition, reconstruction, and decoded trajectories respect each sample's last valid step. |
-| `njode` | [Herrera et al., *Neural Jump Ordinary Differential Equations: Consistent Continuous-Time Prediction and Filtering* (ICLR 2021)](https://arxiv.org/abs/2006.04727) | [HerreraKrachTeichmann/NJODE](https://github.com/HerreraKrachTeichmann/NJODE) | Dense-grid adaptation with the paper's hidden-state ODE field, mask-aware self-imputation, observation-time jump, event-normalized native loss, and bounded Euler sub-steps. |
+| `njode` | Herrera, Krach, and Teichmann, *Neural Jump Ordinary Differential Equations: Consistent Continuous-Time Prediction and Filtering* (ICLR 2021) — [OpenReview](https://openreview.net/forum?id=JFKR3WqwyXR), [arXiv:2006.04727](https://arxiv.org/abs/2006.04727) | [HerreraKrachTeichmann/NJODE](https://github.com/HerreraKrachTeichmann/NJODE) | Dense-grid adaptation with the paper's hidden-state ODE field, mask-aware self-imputation, observation-time jump, event-normalized native loss, and bounded Euler sub-steps. |
 
 `ode-rnn` and `latentode` come from the same NeurIPS 2019 paper but expose different package architectures: `ode-rnn` evolves a recurrent state directly between observations, while `latentode` learns a variational initial state and decodes a generative latent trajectory. Sample-level task heads use the inferred initial latent representation; sequence-level heads use the decoded trajectory. GRU-ODE-Bayes, Latent ODE, and NJ-ODE expose their method-specific objectives through `return_aux_loss=True`.
 
@@ -156,6 +156,8 @@ Origin paper: [*Neural Flows: Efficient Alternative to Neural ODEs* (NeurIPS 202
 Use `neuralflow` for the residual-flow default. The suffix selects an explicit flow variant: `-r` = residual flow, `-g` = GRU-style flow, and `-c` = coupling-style flow.
 
 The default `native` operators are package-authored adaptations of the paper's residual, GRU-style, and coupling constructions. They enforce identity at zero elapsed time, expose forward/inverse transforms, and reject ambiguous time-axis broadcasting. They are not represented as byte-for-byte or numerically exact reproductions of the reference repository. Results and checkpoints produced with native NeuralFlow operators before `0.5.4` should be regenerated because the corrected transforms are numerically incompatible.
+
+An exact reference-code path is available by installing `mbilos/neural-flows-experiments` at commit `bd19f7c92461e83521e268c1a235ef845a3dd963` with `stribor==0.1.0`, then passing `model_params={"flow_backend": "nfe"}` to the Python API. The adapter verifies the installed repository URL, commit, and source files before import. Upstream source is not bundled, and the benchmark scripts continue to use the `native` backend so backend choice cannot be mixed within their stored results.
 
 Active NeuralFlow solver settings are rejected because there is no integration step to configure; the neutral shared-call setting `adjoint=False` remains accepted. Its strict raw-missing path uses mask-aware zero filling and supports only `imputation_strategy="zero"`.
 

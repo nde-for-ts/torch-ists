@@ -3,7 +3,7 @@
 > **Type**: Guide
 > **Scope**: Guide for using benchmark datasets and bringing user-provided datasets (arrays, data frames, files, NPZ) into the Python API.
 
-**Related docs**: [Package overview](../README.md) · [Docs index](README.md) · [API Reference](api_reference.md) · [Model Reference](model_reference.md) · [Custom Model Guide](custom_model_guide.md) · [Third-Party Notices](third_party_notices.md) · [CIKM 2025 Tutorial site](https://nde-for-ts.github.io/)
+**Related docs**: [Package overview](../README.md) · [Docs index](README.md) · [API Reference](api_reference.md) · [Model Reference](model_reference.md) · [Custom Model Guide](custom_model_guide.md) · [Attribution and Licenses](third_party_notices.md) · [CIKM 2025 Tutorial site](https://nde-for-ts.github.io/)
 
 Data entry paths for torch-ists: built-in benchmark loader and user-provided arrays/data frames/files.
 

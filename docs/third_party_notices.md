@@ -32,13 +32,13 @@ DualDynamics and FlowPath reuse the native flow operators as a component but rem
 | ODE-LSTM | `ode-lstm` | `ode/odelstm.py` | [mlech26l/ode-lstms](https://github.com/mlech26l/ode-lstms) | MIT |
 | GRU-ODE-Bayes | `gru-ode-bayes` | `ode/source_variants.py` | [edebrouwer/gru_ode_bayes](https://github.com/edebrouwer/gru_ode_bayes) | MIT |
 | Latent ODE / ODE-RNN | `latentode`, `ode-rnn` | `ode/source_variants.py` | [YuliaRubanova/latent_ode](https://github.com/YuliaRubanova/latent_ode) | MIT |
-| Neural Jump ODE (NJ-ODE) | `njode` | `ode/njode.py` | [HerreraKrachTeichmann/NJODE](https://github.com/HerreraKrachTeichmann/NJODE) | MIT |
+| Neural Jump ODE (NJ-ODE) | `njode` | `ode/njode.py` | Method paper: Herrera, Krach, and Teichmann, *Neural Jump Ordinary Differential Equations: Consistent Continuous-Time Prediction and Filtering* (ICLR 2021) — [OpenReview](https://openreview.net/forum?id=JFKR3WqwyXR), [arXiv:2006.04727](https://arxiv.org/abs/2006.04727); source: [HerreraKrachTeichmann/NJODE](https://github.com/HerreraKrachTeichmann/NJODE) | MIT |
 | Latent SDE example | `latentsde` | `sde/latentsde.py` | [google-research/torchsde](https://github.com/google-research/torchsde/blob/master/examples/latent_sde.py) | Apache-2.0 |
 | Neural CDE | `neuralcde`, `neuralcde-l/r/c/h`, `gru-d`, `gru-dt`, `gru-ode`, `ode-rnn-spline` | `cde/{_controldiffeq/,metamodel.py}` | [patrick-kidger/NeuralCDE](https://github.com/patrick-kidger/NeuralCDE) | Apache-2.0 |
 | Neural RDE | `neuralrde-1/2/3` | `cde/nrde_model.py` | Adapted from the NeuralCDE metamodel lineage; method paper: [Morrill et al. 2021](https://arxiv.org/abs/2009.08295) | Apache-2.0 lineage for copied structure |
 | ANCDE | `ancde` | `cde/ancde/` | [sheoyon-jhin/ANCDE](https://github.com/sheoyon-jhin/ANCDE) | Apache-2.0 |
 | EXIT | `exit` | `cde/exit/` | [sheoyon-jhin/EXIT](https://github.com/sheoyon-jhin/EXIT) | Apache-2.0 |
-| LEAP | `leap` | `cde/leap/` | [jeongwhanchoi/LEAP](https://github.com/jeongwhanchoi/LEAP); method paper: [Jhin et al. 2023](https://arxiv.org/abs/2301.04333) | None |
+| LEAP | `leap` | `cde/leap/` | [jeongwhanchoi/LEAP](https://github.com/jeongwhanchoi/LEAP); method paper: Jhin et al., *Learnable Path in Neural Controlled Differential Equations* (AAAI 2023) — [arXiv:2301.04333](https://arxiv.org/abs/2301.04333) | None |
 | TorchDiffEqPack | `exit`, `leap` | `cde/{exit,leap}/_controldiffeq/TorchDiffEqPack/` | [juntang-zhuang/TorchDiffEqPack](https://github.com/juntang-zhuang/TorchDiffEqPack) | MIT |
 
 ## MIT notices for included adaptations
@@ -79,6 +79,8 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 ### Neural Jump ODE (NJ-ODE)
 
+Method citation: Herrera, Krach, and Teichmann, *Neural Jump Ordinary Differential Equations: Consistent Continuous-Time Prediction and Filtering* (ICLR 2021) — [OpenReview](https://openreview.net/forum?id=JFKR3WqwyXR), [arXiv:2006.04727](https://arxiv.org/abs/2006.04727). The following is the upstream MIT copyright and permission notice; its 2020 copyright year is preserved verbatim and is distinct from the paper's 2021 publication year.
+
 Copyright (c) 2020 HerreraKrachTeichmann
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
@@ -87,11 +89,11 @@ The above copyright notice and this permission notice shall be included in all c
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-**None** means the upstream publishes no LICENSE file. Such code is all-rights-reserved by default; confirm redistribution rights with the original authors. Attribution is provided here and, where present, in source headers.
+**None** records that no LICENSE file was found in the cited upstream repository at the reviewed revision; the attribution above identifies that provenance without assigning an upstream license.
 
 ### NeuralFlow reference implementation
 
-The `neuralflow` family is informed by the residual, GRU-style, and coupling architectures introduced in *Neural Flows: Efficient Alternative to Neural ODEs* (Biloš, Sommer, Rangapuram, Januschowski, Günnemann; NeurIPS 2021). The reference implementation is [`mbilos/neural-flows-experiments`](https://github.com/mbilos/neural-flows-experiments). That repository does not publish a LICENSE file, so this distribution does not bundle its source. The default operators in `flow/operators_native.py` are package-authored adaptations and are not claimed to be source-identical or numerically equivalent to the reference implementation.
+The `neuralflow` family is informed by the residual, GRU-style, and coupling architectures introduced in *Neural Flows: Efficient Alternative to Neural ODEs* (Biloš, Sommer, Rangapuram, Januschowski, Günnemann; NeurIPS 2021). The reference implementation is [`mbilos/neural-flows-experiments`](https://github.com/mbilos/neural-flows-experiments). That repository does not publish a LICENSE file, so this distribution does not bundle its source. The default operators in `flow/operators_native.py` are package-authored adaptations and are not claimed to be source-identical or numerically equivalent to the reference implementation. The optional `flow_backend="nfe"` adapter loads a user-installed checkout pinned to commit `bd19f7c92461e83521e268c1a235ef845a3dd963`; `flow/NFE_PROVENANCE.json` records the validated source files. The adapter and manifest are MIT-licensed package code, not copies of upstream source.
 
 ## Benchmark datasets
 
@@ -118,4 +120,4 @@ Installed separately, each under its own license (not bundled):
 
 ---
 
-**End of Third-Party Notices**
+**End of Attribution and Licenses**

@@ -83,7 +83,12 @@ def test_source_distribution_manifest_is_complete():
         "recursive-include scripts *.py",
     )
     assert all(entry in manifest for entry in required)
-    assert not (package_root / "torch_ists" / "module" / "flow" / "_neural_flows").exists()
+    flow_root = package_root / "torch_ists" / "module" / "flow"
+    assert (flow_root / "operators_nfe.py").is_file()
+    assert (flow_root / "nfe_reference.py").is_file()
+    assert (flow_root / "NFE_PROVENANCE.json").is_file()
+    assert not (flow_root / "_neural_flows").exists()
+    assert not (flow_root / "_nfe_guard.py").exists()
 
 
 def test_basic_classifier_forward_cpu():
@@ -280,18 +285,46 @@ def test_latent_sde_uses_each_sample_terminal_kl_and_holds_tail(monkeypatch):
     assert torch.allclose(path[1, :, 0], torch.tensor([0.0, 1.0, 2.0, 3.0]))
 
 
-def test_distributed_flow_backend_is_native_only():
+def test_distributed_flow_backend_defaults_native_and_supports_pinned_nfe():
     from torch_ists.module.flow import resolve_flow_backend
+    from torch_ists.module.flow.nfe_reference import (
+        NFEInstallationError,
+        PINNED_NFE_COMMIT,
+        validate_nfe_installation,
+    )
+    from torch_ists.module.flow.operators import build_flow_operator
     from torch_ists.module.flow.operators_native import CouplingFlow, GRUFlow, ResNetFlow
 
     flow_root = Path(torch_ists.__file__).resolve().parent / "module" / "flow"
     assert resolve_flow_backend(None) == "native"
     assert resolve_flow_backend("default") == "native"
-    with pytest.raises(ValueError, match="Unsupported flow backend"):
-        resolve_flow_backend("nfe")
+    assert resolve_flow_backend("nfe") == "nfe"
     assert not (flow_root / "_nfe_guard.py").exists()
     assert not (flow_root / "_neural_flows").exists()
-    assert not (flow_root / "operators_nfe.py").exists()
+    assert (flow_root / "operators_nfe.py").is_file()
+    provenance = json.loads((flow_root / "NFE_PROVENANCE.json").read_text(encoding="utf-8"))
+    assert provenance["source_commit"] == PINNED_NFE_COMMIT
+    assert provenance["source_code_bundled"] is False
+
+    validation = validate_nfe_installation()
+    if validation["valid"]:
+        reference_flow = build_flow_operator(
+            flow_option="r",
+            backend="nfe",
+            dim=3,
+            n_layers=2,
+            hidden_dims=[5],
+        )
+        assert reference_flow.backend == "nfe"
+    else:
+        with pytest.raises(NFEInstallationError, match="pinned external checkout"):
+            build_flow_operator(
+                flow_option="r",
+                backend="nfe",
+                dim=3,
+                n_layers=2,
+                hidden_dims=[5],
+            )
 
     x = torch.randn(2, 4, 3)
     zero_time = torch.zeros(2, 4, 1)

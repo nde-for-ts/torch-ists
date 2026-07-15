@@ -1,12 +1,12 @@
 # torch-ists
 
-[![Version](https://img.shields.io/badge/version-0.5.4-blue)](pyproject.toml) [![Python](https://img.shields.io/badge/python-%3E%3D3.10-blue)](pyproject.toml) [![PyTorch](https://img.shields.io/badge/PyTorch-%3E%3D2.0-ee4c2c)](pyproject.toml) [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![Package status](https://img.shields.io/badge/status-preview-orange)](#project-status)
+[![Version](https://img.shields.io/badge/version-0.5.5-blue)](pyproject.toml) [![Python](https://img.shields.io/badge/python-%3E%3D3.10-blue)](pyproject.toml) [![PyTorch](https://img.shields.io/badge/PyTorch-%3E%3D2.0-ee4c2c)](pyproject.toml) [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![Package status](https://img.shields.io/badge/status-preview-orange)](#project-status)
 
 **PyTorch toolkit for irregularly sampled multivariate time series with continuous-time methods (Neural ODE/CDE/SDE) and discrete-time baselines.**
 
 It provides runtime APIs, benchmark scripts, and a built-in benchmark archive loader.
 
-**Related source docs**: [Docs index](docs/README.md) · [API Reference](docs/api_reference.md) · [Model Reference](docs/model_reference.md) · [Scripts Reference](docs/scripts_reference.md) · [Custom Data Guide](docs/custom_data_guide.md) · [Custom Model Guide](docs/custom_model_guide.md) · [Third-Party Notices](docs/third_party_notices.md) · [CIKM 2025 Tutorial site](https://nde-for-ts.github.io/)
+**Related source docs**: [Docs index](docs/README.md) · [API Reference](docs/api_reference.md) · [Model Reference](docs/model_reference.md) · [Scripts Reference](docs/scripts_reference.md) · [Custom Data Guide](docs/custom_data_guide.md) · [Custom Model Guide](docs/custom_model_guide.md) · [Attribution and Licenses](docs/third_party_notices.md) · [CIKM 2025 Tutorial site](https://nde-for-ts.github.io/)
 
 ## Overview
 
@@ -51,6 +51,13 @@ PYTHONNOUSERSITE=1 python -m pip install -e .[sde]
 
 # Full optional stack, including data loading and continuous-time model backends
 PYTHONNOUSERSITE=1 python -m pip install -e .[all]
+```
+
+The package-authored NeuralFlow operators are the default. To use the exact external NFE reference backend, review the upstream repository's terms first; the pinned source does not publish a LICENSE file and is not bundled with this package. Install the required checkout explicitly:
+
+```bash
+PYTHONNOUSERSITE=1 python -m pip install "stribor==0.1.0" "torchdiffeq>=0.2.2"
+PYTHONNOUSERSITE=1 python -m pip install --no-deps "git+https://github.com/mbilos/neural-flows-experiments.git@bd19f7c92461e83521e268c1a235ef845a3dd963"
 ```
 
 Neural RDE (`neuralrde-1/2/3`) additionally requires `signatory`. It is kept out of `.[all]` because the PyPI wheel is torch-version-pinned; install the source-build extra only when those models are needed:

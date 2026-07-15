@@ -1,0 +1,23 @@
+{
+  "backend": "nfe",
+  "source_distribution": "nfe==0.1.0",
+  "source_repo": "https://github.com/mbilos/neural-flows-experiments",
+  "source_commit": "bd19f7c92461e83521e268c1a235ef845a3dd963",
+  "source_license": "No LICENSE file is present at the pinned source commit.",
+  "source_code_bundled": false,
+  "adapter_license": "MIT",
+  "dependencies": {
+    "stribor": "0.1.0",
+    "torchdiffeq": ">=0.2.2"
+  },
+  "files": {
+    "nfe/__init__.py": "e405925b9cf5447da85f3057974e33c2f3204d535a5c9525450d8b9369934097",
+    "nfe/experiments/__init__.py": "0d6c81ae05f00f41e843dfa9ab44b4b7be65a2e64802ec0f6ba2fa64bc479cb3",
+    "nfe/experiments/base_experiment.py": "84aadeb13fd043d9cdeb65feeb640681d4135ed08110189d01671d3829512a50",
+    "nfe/models/__init__.py": "a1d84b9086ce5115ea4103815ab2a4a52d1f26bce6c5d06c15d54b8dc978b90b",
+    "nfe/models/flow.py": "3ded8c892a506a31aeeaf3faa32f160d07b31e03f5de56e4863264743e87ee39",
+    "nfe/models/gru.py": "9a38bb1e60bf7ec277b5da5e3b42febe645e09b47dda8723d86e86a1f3d7dc19",
+    "nfe/models/ode.py": "284fa15d9cddf92bd01993a295eb1f55fb5d1ba75fcf2e57a27e2deabe20a2c6",
+    "nfe/models/lstm.py": "81459cfc45d8aa852d14e5ddcffa4f17a3b6065fd1c7880ef959e26c6f9c97d4"
+  }
+}
