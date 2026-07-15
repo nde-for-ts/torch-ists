@@ -104,6 +104,51 @@ def test_basic_classifier_forward_cpu():
     assert torch.isfinite(logits).all()
 
 
+def test_source_ode_registry_names_are_canonical_and_distinct():
+    from torch_ists.config.models.ode import ODE_MODELS, ODE_SOURCE_MODELS
+
+    active_models = get_active_model_list()
+    source_names = {"ode-rnn", "latentode", "gru-ode-bayes", "njode"}
+    related_runtime_names = {"gru-ode", "ode-rnn-spline"}
+    internal_class_names = {
+        "sourceodernnbackbone",
+        "sourcelatentodebackbone",
+        "sourcegruodebayesbackbone",
+    }
+
+    assert source_names == set(ODE_SOURCE_MODELS)
+    assert related_runtime_names.issubset(ODE_MODELS)
+    assert source_names | related_runtime_names <= set(active_models)
+    assert all(active_models.count(name) == 1 for name in source_names | related_runtime_names)
+    assert internal_class_names.isdisjoint(active_models)
+
+
+def test_inherited_runtime_configuration_guards():
+    from torch_ists.config import default_method_for_model
+    from torch_ists.module.attention.miam import AttentionMIAMModel
+
+    for model_name in ("neuralflow", "neuralflow-r", "neuralflow-g", "neuralflow-c"):
+        assert default_method_for_model(model_name) is None
+    with pytest.raises(ValueError, match="hidden_dim >= 2"):
+        AttentionMIAMModel(input_dim=3, hidden_dim=1, seq_len=8)
+
+
+def test_ito_sde_rejects_heun_configuration():
+    pytest.importorskip("torchcde")
+    pytest.importorskip("torchsde")
+    from torch_ists import ists_layer
+
+    with pytest.raises(ValueError, match="Unsupported solver method"):
+        ists_layer(
+            model_name="neural_sde",
+            input_dim=3,
+            hidden_dim=8,
+            seq_len=8,
+            method="heun",
+            device="cpu",
+        )
+
+
 def test_ode_rnn_uses_batched_fixed_grid_evolution(monkeypatch):
     pytest.importorskip("torchdiffeq")
     from torch_ists.module.ode import source_variants

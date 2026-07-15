@@ -93,6 +93,8 @@ Package implementations informed by the original papers and repositories. They a
 
 `ode-rnn` and `latentode` come from the same NeurIPS 2019 paper but expose different package architectures: `ode-rnn` evolves a recurrent state directly between observations, while `latentode` learns a variational initial state and decodes a generative latent trajectory. Sample-level task heads use the inferred initial latent representation; sequence-level heads use the decoded trajectory. GRU-ODE-Bayes, Latent ODE, and NJ-ODE expose their method-specific objectives through `return_aux_loss=True`.
 
+The API keys in this section are the registry entries. Names such as `SourceLatentODEBackbone` and `SourceGRUODEBayesBackbone` identify internal implementation classes, not additional models or aliases. The separate registry entries `gru-ode`/`gru-ode-bayes` and `ode-rnn-spline`/`ode-rnn` denote different packaged architectures and are counted independently.
+
 The packaged defaults are Euler for `ode-rnn`, GRU-ODE-Bayes, and NJ-ODE, and adaptive Dopri5 for Latent ODE.
 
 For variable-length batches, ODE-RNN evolves fixed-step intervals in batch, Latent ODE ignores padding-only timestamps during recognition and decoding, and both methods use each sample's final valid index for their returned representation. LatentSDE likewise evaluates path KL at each sample's own terminal step and holds the returned latent path constant across padding.
