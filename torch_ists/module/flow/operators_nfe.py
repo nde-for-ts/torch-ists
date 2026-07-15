@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from importlib import import_module
 from typing import Iterable
 
 import torch
 import torch.nn as nn
 
-from .nfe_reference import NFE_INSTALL_COMMAND, require_nfe_installation
+from .nfe_reference import NFE_INSTALL_COMMAND, load_nfe_reference_class
 
 
 def _make_hidden_dims(hidden_dims: Iterable[int] | None, fallback: int) -> list[int]:
@@ -17,15 +16,21 @@ def _make_hidden_dims(hidden_dims: Iterable[int] | None, fallback: int) -> list[
 
 
 def _load_reference_class(module_name: str, class_name: str):
-    require_nfe_installation()
     try:
-        module = import_module(module_name)
+        reference_class = load_nfe_reference_class(module_name, class_name)
     except ModuleNotFoundError as exc:
         raise RuntimeError(
             "The pinned NFE checkout could not be imported because an optional dependency "
             f"is missing: {exc.name}. Install the reference backend with:\n{NFE_INSTALL_COMMAND}"
         ) from exc
-    return getattr(module, class_name)
+    except ImportError as exc:
+        raise RuntimeError(
+            "The pinned NFE checkout or one of its optional dependencies could not be imported. "
+            f"Install the reference backend with:\n{NFE_INSTALL_COMMAND}"
+        ) from exc
+    if not issubclass(reference_class, nn.Module):
+        raise RuntimeError(f"The validated NFE class is not a torch module: {module_name}.{class_name}")
+    return reference_class
 
 
 class _BaseNFEAdapter(nn.Module):

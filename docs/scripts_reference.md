@@ -3,7 +3,7 @@
 > **Type**: Reference
 > **Scope**: Included command-line scripts for the benchmark pipeline.
 
-**Related docs**: [Package overview](../README.md) · [Docs index](README.md) · [API Reference](api_reference.md) · [Model Reference](model_reference.md) · [Custom Data Guide](custom_data_guide.md) · [Custom Model Guide](custom_model_guide.md) · [Attribution and Licenses](third_party_notices.md) · [CIKM 2025 Tutorial site](https://nde-for-ts.github.io/)
+**Related docs**: [Package overview](../README.md) · [Docs index](README.md) · [API Reference](api_reference.md) · [Model Reference](model_reference.md) · [Custom Data Guide](custom_data_guide.md) · [Custom Model Guide](custom_model_guide.md) · [Attribution and Licenses](attribution_and_licenses.md) · [CIKM 2025 Tutorial site](https://nde-for-ts.github.io/)
 
 This document covers the included scripts: [`scripts/set_splits.py`](../scripts/set_splits.py), [`scripts/param_search.py`](../scripts/param_search.py), [`scripts/model_run.py`](../scripts/model_run.py), and [`scripts/aggregate_results.py`](../scripts/aggregate_results.py). Built wheels do not install these files or expose console entry points.
 

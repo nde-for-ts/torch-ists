@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import json
-from importlib import metadata
+import re
+import sys
+from importlib import import_module, metadata
+from importlib.util import find_spec
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
@@ -17,12 +20,19 @@ PINNED_NFE_REPO = str(_PROVENANCE["source_repo"])
 PINNED_NFE_COMMIT = str(_PROVENANCE["source_commit"])
 PINNED_NFE_VERSION = str(_PROVENANCE["source_distribution"]).split("==", 1)[1]
 PINNED_STRIBOR_VERSION = str(_PROVENANCE["dependencies"]["stribor"])
+PINNED_TORCHDIFFEQ_REQUIREMENT = str(_PROVENANCE["dependencies"]["torchdiffeq"])
 EXPECTED_NFE_FILES = {
     str(path): str(digest) for path, digest in _PROVENANCE["files"].items()
 }
 
+_REFERENCE_CLASS_FILES = {
+    ("nfe.models.flow", "ResNetFlow"): "nfe/models/flow.py",
+    ("nfe.models.flow", "CouplingFlow"): "nfe/models/flow.py",
+    ("nfe.models.gru", "GRUFlow"): "nfe/models/gru.py",
+}
+
 NFE_INSTALL_COMMAND = (
-    'python -m pip install "stribor==0.1.0" "torchdiffeq>=0.2.2"\n'
+    'python -m pip install "stribor==0.1.0" "torchdiffeq==0.2.1"\n'
     "python -m pip install --no-deps "
     '"git+https://github.com/mbilos/neural-flows-experiments.git'
     f"@{PINNED_NFE_COMMIT}\""
@@ -50,6 +60,27 @@ def _sha256_file(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _numeric_version(value: object) -> tuple[int, int, int] | None:
+    match = re.fullmatch(r"\s*(\d+)(?:\.(\d+))?(?:\.(\d+))?\s*", str(value or ""))
+    if match is None:
+        return None
+    return tuple(int(part or 0) for part in match.groups())
+
+
+def _version_satisfies(actual: object, requirement: str) -> bool:
+    if requirement.startswith("=="):
+        return str(actual).strip() == requirement[2:].strip()
+    if requirement.startswith(">="):
+        actual_version = _numeric_version(actual)
+        minimum_version = _numeric_version(requirement[2:])
+        return (
+            actual_version is not None
+            and minimum_version is not None
+            and actual_version >= minimum_version
+        )
+    return str(actual).strip() == requirement.strip()
 
 
 def _read_direct_url(distribution: metadata.Distribution) -> dict[str, Any]:
@@ -83,9 +114,19 @@ def validate_nfe_installation() -> dict[str, Any]:
         )
 
     try:
-        metadata.distribution("torchdiffeq")
+        torchdiffeq_version = metadata.distribution("torchdiffeq").version
     except metadata.PackageNotFoundError:
+        torchdiffeq_version = None
         errors.append("torchdiffeq distribution is not installed")
+    if torchdiffeq_version is not None:
+        if not _version_satisfies(
+            torchdiffeq_version,
+            PINNED_TORCHDIFFEQ_REQUIREMENT,
+        ):
+            errors.append(
+                "torchdiffeq version must satisfy "
+                f"{PINNED_TORCHDIFFEQ_REQUIREMENT}, found {torchdiffeq_version}"
+            )
 
     if nfe_distribution is not None:
         if str(nfe_distribution.version) != PINNED_NFE_VERSION:
@@ -129,6 +170,7 @@ def validate_nfe_installation() -> dict[str, Any]:
         "source_commit": PINNED_NFE_COMMIT,
         "nfe_version": PINNED_NFE_VERSION,
         "stribor_version": PINNED_STRIBOR_VERSION,
+        "torchdiffeq_requirement": PINNED_TORCHDIFFEQ_REQUIREMENT,
         "errors": errors,
     }
 
@@ -146,6 +188,66 @@ def require_nfe_installation() -> dict[str, Any]:
     )
 
 
+def load_nfe_reference_class(module_name: str, class_name: str) -> type:
+    """Load one approved class from the validated external source tree."""
+
+    relative_path = _REFERENCE_CLASS_FILES.get((module_name, class_name))
+    if relative_path is None:
+        raise ValueError(f"Unsupported NFE reference class: {module_name}.{class_name}")
+
+    require_nfe_installation()
+    distribution = metadata.distribution("nfe")
+    expected_path = Path(distribution.locate_file(relative_path)).resolve()
+    expected_modules = {
+        "nfe": Path(distribution.locate_file("nfe/__init__.py")).resolve(),
+        "nfe.models": Path(distribution.locate_file("nfe/models/__init__.py")).resolve(),
+        module_name: expected_path,
+    }
+    for loaded_name, loaded_path in expected_modules.items():
+        loaded_module = sys.modules.get(loaded_name)
+        if loaded_module is None:
+            continue
+        loaded_file = getattr(loaded_module, "__file__", None)
+        if loaded_file is None or Path(loaded_file).resolve() != loaded_path:
+            raise NFEInstallationError(
+                f"The loaded {loaded_name} module does not come from the validated nfe distribution."
+            )
+
+    if "nfe" not in sys.modules:
+        root_spec = find_spec("nfe")
+        root_origin = getattr(root_spec, "origin", None)
+        if root_origin is None or Path(root_origin).resolve() != expected_modules["nfe"]:
+            raise NFEInstallationError(
+                "The importable nfe package does not come from the validated distribution."
+            )
+    if module_name not in sys.modules:
+        module_spec = find_spec(module_name)
+        module_origin = getattr(module_spec, "origin", None)
+        if module_origin is None or Path(module_origin).resolve() != expected_path:
+            raise NFEInstallationError(
+                f"The importable {module_name} module does not come from the validated nfe distribution."
+            )
+
+    module = import_module(module_name)
+    module_file = getattr(module, "__file__", None)
+    actual_path = Path(module_file).resolve() if module_file else None
+    if actual_path != expected_path:
+        raise NFEInstallationError(
+            f"The imported {module_name} module does not come from the validated nfe distribution."
+        )
+    if _sha256_file(actual_path) != EXPECTED_NFE_FILES[relative_path]:
+        raise NFEInstallationError(
+            f"The imported {module_name} module differs from the pinned source commit."
+        )
+
+    reference_class = getattr(module, class_name, None)
+    if not isinstance(reference_class, type) or reference_class.__module__ != module_name:
+        raise NFEInstallationError(
+            f"The validated {module_name} module does not define {class_name}."
+        )
+    return reference_class
+
+
 __all__ = [
     "EXPECTED_NFE_FILES",
     "NFE_INSTALL_COMMAND",
@@ -154,6 +256,8 @@ __all__ = [
     "PINNED_NFE_REPO",
     "PINNED_NFE_VERSION",
     "PINNED_STRIBOR_VERSION",
+    "PINNED_TORCHDIFFEQ_REQUIREMENT",
+    "load_nfe_reference_class",
     "require_nfe_installation",
     "validate_nfe_installation",
 ]

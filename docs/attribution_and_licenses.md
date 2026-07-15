@@ -1,21 +1,23 @@
 # torch-ists Attribution and Licenses
 
 > **Type**: Notices
-> **Scope**: Origin, source, and license for packaged methods and benchmark datasets.
+> **Scope**: Origin, source, and license for packaged methods with method-specific provenance — package-authored and third-party alike — plus benchmark-dataset provenance.
 
 **Related docs**: [Package overview](../README.md) · [Docs index](README.md) · [API Reference](api_reference.md) · [Model Reference](model_reference.md) · [Scripts Reference](scripts_reference.md) · [Custom Data Guide](custom_data_guide.md) · [Custom Model Guide](custom_model_guide.md) · [CIKM 2025 Tutorial site](https://nde-for-ts.github.io/)
 
-`torch-ists` is MIT-licensed (Copyright (c) 2024-2026 YongKyung Oh; see [LICENSE](../LICENSE)). Methods implemented in this package carry that license; included third-party code retains its upstream license. Standard `nn.*` baselines are omitted. Per-model papers are in the [Model Reference](model_reference.md). Paths are relative to `torch_ists/module/`.
+`torch-ists` is MIT-licensed (Copyright (c) 2024-2026 YongKyung Oh; see [LICENSE](../LICENSE)). The tables below treat methods with method-specific origin or source provenance uniformly: methods authored for this package carry the package's own MIT license; third-party methods retain their upstream license. Standard `nn.*` baselines (`cnn`, `rnn`, `lstm`, `gru`, `bilstm`, `gru-simple`, `transformer`, `transformer-mask`) are package-native PyTorch implementations covered by this package's MIT license and are summarized here rather than listed individually. Per-model papers are in the [Model Reference](model_reference.md). Paths are relative to `torch_ists/module/`.
 
 ## Package-authored methods
 
-| Method | Models | Path | Origin | License |
+Methods implemented in this package and covered by its MIT license (see [LICENSE](../LICENSE)). Listed here for complete provenance, not because they are third-party.
+
+| Method | Models | Path | Origin paper | License |
 |---|---|---|---|---|
-| Stable Neural SDEs | `neural_lsde`, `neural_lnsde`, `neural_gsde` | `sde/` | [Oh, Lim, Kim, ICLR 2024](https://arxiv.org/abs/2402.14989) | MIT (this package) |
-| DualDynamics | `dualdynamics`, `dualdynamics-r/g/c` | `flow/dualdynamics.py` | [Oh, Lim, Kim, AAAI 2025](https://arxiv.org/abs/2401.04979) | MIT (this package) |
-| FlowPath | `flowpath`, `flowpath-r/g/c` | `flow/flowpath.py` | [Oh et al., AAAI 2026](https://arxiv.org/abs/2511.10841) | MIT (this package) |
+| Stable Neural SDEs | `neural_lsde`, `neural_lnsde`, `neural_gsde` | `sde/` | Oh, Lim, Kim, *Stable Neural SDEs* (ICLR 2024) — [arXiv:2402.14989](https://arxiv.org/abs/2402.14989); repo [yongkyung-oh/Stable-Neural-SDEs](https://github.com/yongkyung-oh/Stable-Neural-SDEs) | MIT (this package) |
+| DualDynamics | `dualdynamics`, `dualdynamics-r/g/c` | `flow/dualdynamics.py` | Oh, Lim, Kim, *DualDynamics* (AAAI 2025) — [arXiv:2401.04979](https://arxiv.org/abs/2401.04979) | MIT (this package) |
+| FlowPath | `flowpath`, `flowpath-r/g/c` | `flow/flowpath.py` | Oh et al., *FlowPath* (AAAI 2026) — [arXiv:2511.10841](https://arxiv.org/abs/2511.10841) | MIT (this package) |
 | Native NeuralFlow operators | `neuralflow`, `neuralflow-r/g/c` | `flow/operators_native.py` | Package-authored adaptations informed by [Biloš et al. 2021](https://arxiv.org/abs/2110.13040) and its [reference repository](https://github.com/mbilos/neural-flows-experiments) | MIT (this package) |
-| SDE baselines | `naive_cde`, `neural_ode`, `neural_ode_t`, `neural_sde`, `neural_sde_t` | `sde/` | Package-authored baselines | MIT (this package) |
+| SDE baselines | `naive_cde`, `neural_ode`, `neural_ode_t`, `neural_sde`, `neural_sde_t` | `sde/` | Package-authored baselines (no external paper); integrate through the `torchsde` wrapper | MIT (this package) |
 
 DualDynamics and FlowPath reuse the native flow operators as a component but remain distinct methods and registry rows.
 
@@ -97,7 +99,7 @@ The `neuralflow` family is informed by the residual, GRU-style, and coupling arc
 
 ## Benchmark datasets
 
-The built-in benchmark loader downloads UCR/UEA archive datasets at runtime; they are not bundled with this package. Cite the archive when using those datasets:
+The built-in benchmark loader (`benchmark_loader`, and `download()`) uses the **UCR/UEA Time Series Classification Archive**. These datasets are not authored or owned by this package; they are downloaded at runtime (not bundled) from the archive and remain under the archive's own terms. When using them, cite the archive:
 
 - Dau et al., *The UCR Time Series Archive* (2019) — [arXiv:1810.07758](https://arxiv.org/abs/1810.07758)
 - Bagnall et al., *The UEA multivariate time series classification archive* (2018) — [arXiv:1811.00075](https://arxiv.org/abs/1811.00075)
@@ -109,12 +111,13 @@ Installed separately, each under its own license (not bundled):
 
 - **Core**: `torch`, `numpy`, `scipy`, `scikit-learn`
 - **Continuous-time backends** (`.[ode]` / `.[cde]` / `.[sde]`): `torchdiffeq`, `torchdyn`, `torchcde`, `torchsde`
+- **External NeuralFlow reference backend**: [`stribor==0.1.0`](https://github.com/mbilos/stribor) (MIT) and `torchdiffeq==0.2.1` (MIT); the pinned NFE checkout is installed separately and is not bundled because its repository does not publish a license
 - **Neural RDE log-signatures** (source-build optional extra): `signatory`
 - **Optional** (`.[tune]` / `.[data]`): `ray[tune]`, `pandas`, `sktime`
 
 ## Notes
 
-- Package-authored methods are listed separately from included third-party code.
+- Package-authored methods are listed in the [Package-authored methods](#package-authored-methods) table above for complete provenance; they carry this package's MIT license.
 - When updating included third-party code, keep its upstream header and source attribution current.
 - Per-model papers for all methods are in the [Model Reference](model_reference.md).
 

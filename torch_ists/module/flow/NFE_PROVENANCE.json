@@ -8,7 +8,7 @@
   "adapter_license": "MIT",
   "dependencies": {
     "stribor": "0.1.0",
-    "torchdiffeq": ">=0.2.2"
+    "torchdiffeq": "==0.2.1"
   },
   "files": {
     "nfe/__init__.py": "e405925b9cf5447da85f3057974e33c2f3204d535a5c9525450d8b9369934097",

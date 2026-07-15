@@ -53,14 +53,14 @@ data = [
 # ODE models: gru-dt, gru-d, gru-ode, ode-rnn, ode-rnn-spline, ode-lstm,
 # latentode, gru-ode-bayes
 ode = [
-    "torchdiffeq>=0.2.2",
+    "torchdiffeq>=0.2.1",
     "torchdyn>=1.0.6",
 ]
 
 # CDE/control-path models included in the packaged public scope:
 # neuralcde, neuralcde-l/r/c/h, neuralrde-1/2/3, ancde, exit, leap, flowpath-r/g/c, dualdynamics-r/g/c
 cde = [
-    "torchdiffeq>=0.2.2",
+    "torchdiffeq>=0.2.1",
     "torchcde>=0.2.5",
     # signatory is intentionally separate because the PyPI wheel is
     # torch-version-pinned. Use .[signatory] for source-checkout builds.
@@ -86,7 +86,7 @@ all = [
     "ray[tune]>=2.0",
     "pandas>=1.5",
     "sktime>=0.30",
-    "torchdiffeq>=0.2.2",
+    "torchdiffeq>=0.2.1",
     "torchdyn>=1.0.6",
     "torchcde>=0.2.5",
     "torchsde>=0.2.6",
@@ -98,7 +98,7 @@ Repository = "https://github.com/nde-for-ts/torch-ists"
 Issues = "https://github.com/nde-for-ts/torch-ists/issues"
 
 [tool.setuptools]
-license-files = ["LICENSE", "docs/third_party_notices.md", "docs/LICENSE-APACHE-2.0"]
+license-files = ["LICENSE", "docs/attribution_and_licenses.md", "docs/LICENSE-APACHE-2.0"]
 
 [tool.setuptools.packages.find]
 where = ["."]

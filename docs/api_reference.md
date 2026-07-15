@@ -6,7 +6,7 @@
 
 ---
 
-**Related docs**: [Package overview](../README.md) · [Docs index](README.md) · [Model Reference](model_reference.md) · [Scripts Reference](scripts_reference.md) · [Custom Data Guide](custom_data_guide.md) · [Custom Model Guide](custom_model_guide.md) · [Attribution and Licenses](third_party_notices.md) · [CIKM 2025 Tutorial site](https://nde-for-ts.github.io/)
+**Related docs**: [Package overview](../README.md) · [Docs index](README.md) · [Model Reference](model_reference.md) · [Scripts Reference](scripts_reference.md) · [Custom Data Guide](custom_data_guide.md) · [Custom Model Guide](custom_model_guide.md) · [Attribution and Licenses](attribution_and_licenses.md) · [CIKM 2025 Tutorial site](https://nde-for-ts.github.io/)
 
 ---
 
@@ -891,7 +891,7 @@ Current defaults:
 - `dualdynamics`: `flow_depth=2` by default
 - `flowpath`: `flow_depth=1` by default
 - `neuralflow` uses the residual-flow variant by default as a flow-only row. `dualdynamics` and `flowpath` are CDE/control-path rows. The package-authored native operators are the default and are adaptations rather than exact reference-repository reproductions.
-- `model_params={"flow_backend": "nfe"}` explicitly selects the separately installed NFE reference implementation for the flow families. The adapter accepts only the documented repository commit and `stribor==0.1.0`; missing or modified installations fail before upstream code is imported. The source-checkout benchmark scripts keep `flow_backend="native"`.
+- `model_params={"flow_backend": "nfe"}` explicitly selects the separately installed NFE reference implementation for the flow families. The adapter accepts only the documented repository commit, `stribor==0.1.0`, and its upstream-compatible `torchdiffeq==0.2.1`; missing, shadowed, or modified installations fail before the target flow module is imported. The source-checkout benchmark scripts keep `flow_backend="native"`.
 - Model names use residual-flow defaults: `neuralflow`, `dualdynamics`, and `flowpath`. Explicit `-r/-g/-c` variants remain accepted variants.
 
 Compatibility mapping:

@@ -3,7 +3,7 @@
 > **Type**: Guide
 > **Scope**: Custom model wrapper guide for user-owned PyTorch models.
 
-**Related docs**: [Package overview](../README.md) · [Docs index](README.md) · [API Reference](api_reference.md) · [Model Reference](model_reference.md) · [Custom Data Guide](custom_data_guide.md) · [Attribution and Licenses](third_party_notices.md) · [CIKM 2025 Tutorial site](https://nde-for-ts.github.io/)
+**Related docs**: [Package overview](../README.md) · [Docs index](README.md) · [API Reference](api_reference.md) · [Model Reference](model_reference.md) · [Custom Data Guide](custom_data_guide.md) · [Attribution and Licenses](attribution_and_licenses.md) · [CIKM 2025 Tutorial site](https://nde-for-ts.github.io/)
 
 This reference shows how to use `torch-ists` data utilities with your own PyTorch model. Custom models run in your project code.
 

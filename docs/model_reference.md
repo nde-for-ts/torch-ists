@@ -3,7 +3,7 @@
 > **Type**: Reference
 > **Scope**: Origin papers, reference repositories, and implementation notes for packaged models.
 
-**Related docs**: [Package overview](../README.md) · [Docs index](README.md) · [API Reference](api_reference.md) · [Scripts Reference](scripts_reference.md) · [Custom Data Guide](custom_data_guide.md) · [Custom Model Guide](custom_model_guide.md) · [Attribution and Licenses](third_party_notices.md) · [CIKM 2025 Tutorial site](https://nde-for-ts.github.io/)
+**Related docs**: [Package overview](../README.md) · [Docs index](README.md) · [API Reference](api_reference.md) · [Scripts Reference](scripts_reference.md) · [Custom Data Guide](custom_data_guide.md) · [Custom Model Guide](custom_model_guide.md) · [Attribution and Licenses](attribution_and_licenses.md) · [CIKM 2025 Tutorial site](https://nde-for-ts.github.io/)
 
 Use the API reference for class signatures and call patterns; use this document for model origins and reference implementations.
 
@@ -93,7 +93,7 @@ Package implementations informed by the original papers and repositories. They a
 
 `ode-rnn` and `latentode` come from the same NeurIPS 2019 paper but expose different package architectures: `ode-rnn` evolves a recurrent state directly between observations, while `latentode` learns a variational initial state and decodes a generative latent trajectory. Sample-level task heads use the inferred initial latent representation; sequence-level heads use the decoded trajectory. GRU-ODE-Bayes, Latent ODE, and NJ-ODE expose their method-specific objectives through `return_aux_loss=True`.
 
-The API keys in this section are the registry entries. Names such as `SourceLatentODEBackbone` and `SourceGRUODEBayesBackbone` are implementation class names, not additional models or aliases. The separate registry entries `gru-ode`/`gru-ode-bayes` and `ode-rnn-spline`/`ode-rnn` denote different packaged architectures and are counted independently.
+The API keys in this section are the registry entries. Names such as `SourceLatentODEBackbone` and `SourceGRUODEBayesBackbone` are implementation class names, not additional models or aliases. The separate registry entries `gru-ode`/`gru-ode-bayes` and `ode-rnn-spline`/`ode-rnn` denote different packaged architectures and are counted independently. Historical or pre-patch implementation snapshots remain internal and do not create additional public names such as `*-legacy` or `*-patched`.
 
 The packaged defaults are Euler for `ode-rnn`, GRU-ODE-Bayes, and NJ-ODE, and adaptive Dopri5 for Latent ODE.
 
@@ -157,7 +157,7 @@ Use `neuralflow` for the residual-flow default. The suffix selects an explicit f
 
 The default `native` operators are package-authored adaptations of the paper's residual, GRU-style, and coupling constructions. They enforce identity at zero elapsed time, expose forward/inverse transforms, and reject ambiguous time-axis broadcasting. They are not represented as byte-for-byte or numerically exact reproductions of the reference repository. Results and checkpoints produced with native NeuralFlow operators before `0.5.4` should be regenerated because the corrected transforms are numerically incompatible.
 
-An exact reference-code path is available by installing `mbilos/neural-flows-experiments` at commit `bd19f7c92461e83521e268c1a235ef845a3dd963` with `stribor==0.1.0`, then passing `model_params={"flow_backend": "nfe"}` to the Python API. The adapter verifies the installed repository URL, commit, and source files before import. Upstream source is not bundled, and the benchmark scripts continue to use the `native` backend so backend choice cannot be mixed within their stored results.
+An exact reference-code path is available by installing `mbilos/neural-flows-experiments` at commit `bd19f7c92461e83521e268c1a235ef845a3dd963` with `stribor==0.1.0` and `torchdiffeq==0.2.1`, then passing `model_params={"flow_backend": "nfe"}` to the Python API. The adapter verifies the installed repository URL, commit, dependency versions, import origin, and source files before loading the target flow module. Upstream source is not bundled, and the benchmark scripts continue to use the `native` backend so backend choice cannot be mixed within their stored results.
 
 Active NeuralFlow solver settings are rejected because there is no integration step to configure; the neutral shared-call setting `adjoint=False` remains accepted. Its strict raw-missing path uses mask-aware zero filling and supports only `imputation_strategy="zero"`.
 

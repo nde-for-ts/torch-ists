@@ -6,7 +6,7 @@
 
 It provides runtime APIs, benchmark scripts, and a built-in benchmark archive loader.
 
-**Related source docs**: [Docs index](docs/README.md) · [API Reference](docs/api_reference.md) · [Model Reference](docs/model_reference.md) · [Scripts Reference](docs/scripts_reference.md) · [Custom Data Guide](docs/custom_data_guide.md) · [Custom Model Guide](docs/custom_model_guide.md) · [Attribution and Licenses](docs/third_party_notices.md) · [CIKM 2025 Tutorial site](https://nde-for-ts.github.io/)
+**Related source docs**: [Docs index](docs/README.md) · [API Reference](docs/api_reference.md) · [Model Reference](docs/model_reference.md) · [Scripts Reference](docs/scripts_reference.md) · [Custom Data Guide](docs/custom_data_guide.md) · [Custom Model Guide](docs/custom_model_guide.md) · [Attribution and Licenses](docs/attribution_and_licenses.md) · [CIKM 2025 Tutorial site](https://nde-for-ts.github.io/)
 
 ## Overview
 
@@ -56,7 +56,7 @@ PYTHONNOUSERSITE=1 python -m pip install -e .[all]
 The package-authored NeuralFlow operators are the default. To use the exact external NFE reference backend, review the upstream repository's terms first; the pinned source does not publish a LICENSE file and is not bundled with this package. Install the required checkout explicitly:
 
 ```bash
-PYTHONNOUSERSITE=1 python -m pip install "stribor==0.1.0" "torchdiffeq>=0.2.2"
+PYTHONNOUSERSITE=1 python -m pip install "stribor==0.1.0" "torchdiffeq==0.2.1"
 PYTHONNOUSERSITE=1 python -m pip install --no-deps "git+https://github.com/mbilos/neural-flows-experiments.git@bd19f7c92461e83521e268c1a235ef845a3dd963"
 ```
 
@@ -165,7 +165,7 @@ User-owned `nn.Module` models can compose with packaged data, split, and preproc
 - `docs/scripts_reference.md` — included scripts: flags, outputs, and pipeline order
 - `docs/custom_data_guide.md` — guidance for adding user-provided datasets through the Python API
 - `docs/custom_model_guide.md` — guidance for using custom models alongside the package
-- `docs/third_party_notices.md` — upstream sources and licenses for third-party code in the package
+- `docs/attribution_and_licenses.md` — attribution and licenses for packaged methods, plus benchmark-dataset provenance
 
 Tutorial: <https://nde-for-ts.github.io/> (CIKM 2025).
 

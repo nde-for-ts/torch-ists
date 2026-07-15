@@ -23,6 +23,7 @@ _FLOW_BACKEND_ALIASES = {
     "nfe": "nfe",
     "stribor": "nfe",
     "nfe-stibor": "nfe",
+    "nfe-stribor": "nfe",
 }
 
 
