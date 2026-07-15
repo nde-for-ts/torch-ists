@@ -282,6 +282,7 @@ Requires:
 - Split artifacts keep the stable `train/valid/test` pickle format and are safe to reuse when the dataset and split path are intentional.
 - Param artifacts are matched by dataset, model, task, search policy, repeat policy, search seed, target source, forecasting horizon, and split seed set. Stored checksums from older artifacts are optional metadata and are not reuse requirements. Compatible classification artifacts remain reusable; experimental-task artifacts that predate the explicit target contract must be regenerated.
 - Output artifacts are reused when `model_run.py --check` matches the stored semantic details and validates prediction contents, shapes, sample indices, and targets directly. Stored contract checksums are not required. For a 100-condition result, validation also covers the exact ordered axes, uniqueness, full predictions, and complete channel-outage provenance. Structurally incomplete payloads are recomputed with `--no-check`.
+- Package version alone is not a reuse key. Upgrading does not require deleting all prior artifacts: reuse is decided from the semantic fields and directly validated payload structure above.
 
 ---
 

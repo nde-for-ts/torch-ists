@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 from pathlib import Path
 
@@ -15,15 +16,74 @@ from torch_ists.split_utils import make_stratified_splits
 
 
 def test_package_imports_and_version():
+    package_root = Path(__file__).resolve().parents[1]
     package_status = json.loads(
-        (Path(__file__).resolve().parents[1] / "PACKAGE_STATUS.json").read_text(
+        (package_root / "PACKAGE_STATUS.json").read_text(
             encoding="utf-8"
         )
     )
+    version = package_status["package_version"]
+    pyproject = (package_root / "pyproject.toml").read_text(encoding="utf-8")
+    readme = (package_root / "README.md").read_text(encoding="utf-8")
 
-    assert torch_ists.__version__ == package_status["package_version"]
+    assert torch_ists.__version__ == version
+    assert f'version = "{version}"' in pyproject
+    assert f"version-{version}-blue" in readme
     assert get_active_model_list() == package_status["included_models"]
     assert "interpolation" in get_data_config("cnn")
+
+
+def test_semantic_artifact_identity_does_not_require_content_hashes():
+    package_root = Path(__file__).resolve().parents[1]
+    common_path = package_root / "scripts" / "_common.py"
+    spec = importlib.util.spec_from_file_location("public_script_common", common_path)
+    assert spec is not None and spec.loader is not None
+    common = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(common)
+
+    identity = common.build_param_artifact_identity(
+        data_name="BasicMotions",
+        model_name="cnn",
+        task="classification",
+        target_source="label",
+        dataset_source="default",
+        split_seeds=[0],
+    )
+    assert not any("hash" in key.lower() for key in identity)
+    common.validate_param_artifact_identity(
+        {"artifact_identity": identity},
+        data_name="BasicMotions",
+        model_name="cnn",
+        task="classification",
+        target_source="label",
+        dataset_source="default",
+        split_seeds=[0],
+    )
+
+    legacy_identity = dict(identity)
+    legacy_identity.pop("split_seeds")
+    legacy_identity["split_sha256s"] = [{"seed": 0, "sha256": "optional-provenance"}]
+    common.validate_param_artifact_identity(
+        {"artifact_identity": legacy_identity},
+        data_name="BasicMotions",
+        model_name="cnn",
+        task="classification",
+        target_source="label",
+        dataset_source="default",
+        split_seeds=[0],
+    )
+
+
+def test_source_distribution_manifest_is_complete():
+    package_root = Path(__file__).resolve().parents[1]
+    manifest = (package_root / "MANIFEST.in").read_text(encoding="utf-8")
+    required = (
+        "include PACKAGE_STATUS.json",
+        "recursive-include docs *.md",
+        "recursive-include scripts *.py",
+    )
+    assert all(entry in manifest for entry in required)
+    assert not (package_root / "torch_ists" / "module" / "flow" / "_neural_flows").exists()
 
 
 def test_basic_classifier_forward_cpu():
