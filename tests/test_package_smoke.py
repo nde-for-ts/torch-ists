@@ -44,6 +44,137 @@ def test_basic_classifier_forward_cpu():
     assert torch.isfinite(logits).all()
 
 
+def test_ode_rnn_uses_batched_fixed_grid_evolution(monkeypatch):
+    pytest.importorskip("torchdiffeq")
+    from torch_ists.module.ode import source_variants
+
+    def reject_scalar_dispatch(*_args, **_kwargs):
+        raise AssertionError("ODE-RNN fixed-grid execution must remain batched")
+
+    monkeypatch.setattr(
+        source_variants,
+        "_integrate_scalar_interval",
+        reject_scalar_dispatch,
+    )
+    model = source_variants.SourceODERNNBackbone(
+        input_dim=2,
+        hidden_dim=5,
+        output_dim=5,
+        num_layers=1,
+    )
+    values = torch.randn(4, 3, 2)
+    mask = torch.ones_like(values)
+    sample_times = torch.tensor(
+        [[0.0, 0.25, 1.0], [0.0, 0.5, 1.0], [0.0, 0.75, 1.0], [0.0, 1.0, 2.0]]
+    )
+
+    stream, summary = model(
+        values,
+        mask,
+        sample_times,
+        torch.full((4,), 2, dtype=torch.long),
+        method="euler",
+        options={"step_size": 0.1},
+    )
+
+    assert stream.shape == (4, 3, 5)
+    assert summary.shape == (4, 5)
+    assert torch.isfinite(stream).all()
+    assert torch.isfinite(summary).all()
+
+
+def test_latent_ode_ignores_padding_only_timestamps():
+    pytest.importorskip("torchdiffeq")
+    from torch_ists.module.ode.source_variants import SourceLatentODEBackbone
+
+    torch.manual_seed(11)
+    model = SourceLatentODEBackbone(
+        input_dim=2,
+        hidden_dim=5,
+        output_dim=5,
+        num_layers=1,
+    )
+    model.eval()
+    values = torch.randn(2, 5, 2)
+    mask = torch.ones_like(values)
+    mask[0, 3:] = 0.0
+    values[0, 3:] = float("nan")
+    final_index = torch.tensor([2, 4])
+    base_times = torch.tensor(
+        [[0.0, 0.25, 0.5, 0.75, 1.0], [0.0, 0.25, 0.5, 0.75, 1.0]]
+    )
+    changed_times = base_times.clone()
+    changed_times[0, 3:] = torch.tensor([10.0, 20.0])
+
+    first = model(
+        values,
+        mask,
+        base_times,
+        final_index,
+        method="euler",
+        options={"step_size": 0.1},
+    )
+    second = model(
+        values,
+        mask,
+        changed_times,
+        final_index,
+        method="euler",
+        options={"step_size": 0.1},
+    )
+
+    assert torch.allclose(first[0][0, :3], second[0][0, :3])
+    assert torch.allclose(first[1], second[1])
+    assert torch.allclose(first[2], second[2])
+    assert torch.allclose(first[0][0, 3:], first[0][0, 2:3].expand(2, -1))
+
+
+def test_latent_sde_uses_each_sample_terminal_kl_and_holds_tail(monkeypatch):
+    pytest.importorskip("torchcde")
+    pytest.importorskip("torchsde")
+    from torch_ists.module.sde.latentsde import LatentSDE
+
+    model = LatentSDE(
+        input_channels=2,
+        hidden_channels=3,
+        hidden_hidden_channels=5,
+        num_hidden_layers=1,
+        kl=True,
+        kl_weight=1.0,
+    )
+
+    def fake_integrate(*, y0, times, **_kwargs):
+        result = y0.unsqueeze(0).repeat(times.numel(), 1, 1)
+        for step_index in range(times.numel()):
+            result[step_index, :, :-1] = float(step_index)
+            result[step_index, :, -1] = 10.0 * step_index
+        return result
+
+    monkeypatch.setattr(model, "_integrate", fake_integrate)
+    values = torch.full((2, 4, 2), float("nan"))
+    mask = torch.zeros_like(values)
+    delta = torch.zeros_like(values)
+    times = torch.tensor(
+        [[0.0, 1.0, float("nan"), float("nan")], [0.0, 1.0, 2.0, 3.0]]
+    )
+
+    _out, path, loss = model(
+        values,
+        mask,
+        delta,
+        times,
+        torch.tensor([1, 3]),
+        method="euler",
+        dt=0.1,
+        adjoint=False,
+        eps=torch.zeros(2, 3),
+    )
+
+    assert loss.item() == pytest.approx(20.0)
+    assert torch.allclose(path[0, 2:], path[0, 1:2].expand(2, -1))
+    assert torch.allclose(path[1, :, 0], torch.tensor([0.0, 1.0, 2.0, 3.0]))
+
+
 def test_distributed_flow_backend_is_native_only():
     from torch_ists.module.flow import resolve_flow_backend
 

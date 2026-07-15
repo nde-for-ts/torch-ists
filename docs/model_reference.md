@@ -95,6 +95,8 @@ Package implementations informed by the original papers and repositories. They a
 
 The packaged defaults are Euler for `ode-rnn`, GRU-ODE-Bayes, and NJ-ODE, and adaptive Dopri5 for Latent ODE.
 
+For variable-length batches, ODE-RNN evolves fixed-step intervals in batch, Latent ODE ignores padding-only timestamps during recognition and decoding, and both methods use each sample's final valid index for their returned representation. LatentSDE likewise evaluates path KL at each sample's own terminal step and holds the returned latent path constant across padding.
+
 The package's six task heads are shared adapters around these backbones. In particular, the NJ-ODE forecasting head projects the context representation to a fixed output horizon; it is not the paper's native future-time filtering path because the current forecasting target does not include a future timestamp grid.
 
 ---
@@ -133,7 +135,7 @@ ANCDE, EXIT, LEAP, DualDynamics, and FlowPath also use CDE-style control paths a
 |---|---|---|
 | `ancde` | Jhin et al., *Attentive Neural Controlled Differential Equations for Time-series Classification and Forecasting* (ICDM 2021). Reference repo: [sheoyon-jhin/ANCDE](https://github.com/sheoyon-jhin/ANCDE) | Attention-gated control path. No auxiliary loss. |
 | `exit` | Jhin et al., *EXIT: Extrapolation and Interpolation-based Neural Controlled Differential Equations for Time-series Classification and Forecasting* (ACM Web Conference 2022). Reference repo: [sheoyon-jhin/EXIT](https://github.com/sheoyon-jhin/EXIT) | Control path with kinetic-energy regularization. Returns an auxiliary term when called with `return_aux_loss=True`. |
-| `leap` | *LEAP: Learnable Path CDE* (citation pending) | Learnable-path CDE. Returns an auxiliary loss when called with `return_aux_loss=True`. |
+| `leap` | [Jhin et al., *Learnable Path in Neural Controlled Differential Equations* (AAAI 2023)](https://arxiv.org/abs/2301.04333) | Learnable-path CDE. Returns an auxiliary loss when called with `return_aux_loss=True`. |
 
 - **Solver and dependencies**: all three use `rk4` with a fixed-grid step size from input times; install `.[cde]` or `.[all]`.
 - **Preprocessing**: use `preprocess(X, model_name=...)` to obtain matching natural-cubic-spline coefficients.
