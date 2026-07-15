@@ -1,11 +1,23 @@
-# torch-ists Third-Party Notices
+# torch-ists Attribution and Licenses
 
 > **Type**: Notices
-> **Scope**: Upstream sources and licenses for third-party code included in the runtime.
+> **Scope**: Origin, source, and license for packaged methods and benchmark datasets.
 
-**Related docs**: [Package overview](../README.md) · [Docs index](README.md) · [API Reference](api_reference.md) · [Model Reference](model_reference.md) · [Custom Data Guide](custom_data_guide.md) · [Custom Model Guide](custom_model_guide.md) · [CIKM 2025 Tutorial site](https://nde-for-ts.github.io/)
+**Related docs**: [Package overview](../README.md) · [Docs index](README.md) · [API Reference](api_reference.md) · [Model Reference](model_reference.md) · [Scripts Reference](scripts_reference.md) · [Custom Data Guide](custom_data_guide.md) · [Custom Model Guide](custom_model_guide.md) · [CIKM 2025 Tutorial site](https://nde-for-ts.github.io/)
 
-`torch-ists` is MIT-licensed (Copyright (c) 2024-2026 YongKyung Oh; see [LICENSE](../LICENSE)). It also includes third-party code copied or adapted from the upstreams below; each retains its own license. Per-model papers and repositories are in the [Model Reference](model_reference.md). Paths are relative to `torch_ists/module/`.
+`torch-ists` is MIT-licensed (Copyright (c) 2024-2026 YongKyung Oh; see [LICENSE](../LICENSE)). Methods implemented in this package carry that license; included third-party code retains its upstream license. Standard `nn.*` baselines are omitted. Per-model papers are in the [Model Reference](model_reference.md). Paths are relative to `torch_ists/module/`.
+
+## Package-authored methods
+
+| Method | Models | Path | Origin | License |
+|---|---|---|---|---|
+| Stable Neural SDEs | `neural_lsde`, `neural_lnsde`, `neural_gsde` | `sde/` | [Oh, Lim, Kim, ICLR 2024](https://arxiv.org/abs/2402.14989) | MIT (this package) |
+| DualDynamics | `dualdynamics`, `dualdynamics-r/g/c` | `flow/dualdynamics.py` | [Oh, Lim, Kim, AAAI 2025](https://arxiv.org/abs/2401.04979) | MIT (this package) |
+| FlowPath | `flowpath`, `flowpath-r/g/c` | `flow/flowpath.py` | [Oh et al., AAAI 2026](https://arxiv.org/abs/2511.10841) | MIT (this package) |
+| Native NeuralFlow operators | `neuralflow`, `neuralflow-r/g/c` | `flow/operators_native.py` | Package-authored adaptations informed by [Biloš et al. 2021](https://arxiv.org/abs/2110.13040) and its [reference repository](https://github.com/mbilos/neural-flows-experiments) | MIT (this package) |
+| SDE baselines | `naive_cde`, `neural_ode`, `neural_ode_t`, `neural_sde`, `neural_sde_t` | `sde/` | Package-authored baselines | MIT (this package) |
+
+DualDynamics and FlowPath reuse the native flow operators as a component but remain distinct methods and registry rows.
 
 ## Third-party code
 
@@ -26,7 +38,7 @@
 | Neural RDE | `neuralrde-1/2/3` | `cde/nrde_model.py` | Adapted from the NeuralCDE metamodel lineage; method paper: [Morrill et al. 2021](https://arxiv.org/abs/2009.08295) | Apache-2.0 lineage for copied structure |
 | ANCDE | `ancde` | `cde/ancde/` | [sheoyon-jhin/ANCDE](https://github.com/sheoyon-jhin/ANCDE) | Apache-2.0 |
 | EXIT | `exit` | `cde/exit/` | [sheoyon-jhin/EXIT](https://github.com/sheoyon-jhin/EXIT) | Apache-2.0 |
-| LEAP | `leap` | `cde/leap/` | [alflsowl12/LEAP](https://github.com/alflsowl12/LEAP) | None |
+| LEAP | `leap` | `cde/leap/` | [jeongwhanchoi/LEAP](https://github.com/jeongwhanchoi/LEAP); method paper: [Jhin et al. 2023](https://arxiv.org/abs/2301.04333) | None |
 | TorchDiffEqPack | `exit`, `leap` | `cde/{exit,leap}/_controldiffeq/TorchDiffEqPack/` | [juntang-zhuang/TorchDiffEqPack](https://github.com/juntang-zhuang/TorchDiffEqPack) | MIT |
 
 ## MIT notices for included adaptations
@@ -77,6 +89,18 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 **None** means the upstream publishes no LICENSE file. Such code is all-rights-reserved by default; confirm redistribution rights with the original authors. Attribution is provided here and, where present, in source headers.
 
+### NeuralFlow reference implementation
+
+The `neuralflow` family is informed by the residual, GRU-style, and coupling architectures introduced in *Neural Flows: Efficient Alternative to Neural ODEs* (Biloš, Sommer, Rangapuram, Januschowski, Günnemann; NeurIPS 2021). The reference implementation is [`mbilos/neural-flows-experiments`](https://github.com/mbilos/neural-flows-experiments). That repository does not publish a LICENSE file, so this distribution does not bundle its source. The default operators in `flow/operators_native.py` are package-authored adaptations and are not claimed to be source-identical or numerically equivalent to the reference implementation.
+
+## Benchmark datasets
+
+The built-in benchmark loader downloads UCR/UEA archive datasets at runtime; they are not bundled with this package. Cite the archive when using those datasets:
+
+- Dau et al., *The UCR Time Series Archive* (2019) — [arXiv:1810.07758](https://arxiv.org/abs/1810.07758)
+- Bagnall et al., *The UEA multivariate time series classification archive* (2018) — [arXiv:1811.00075](https://arxiv.org/abs/1811.00075)
+- Archive site: <http://www.timeseriesclassification.com/>
+
 ## Runtime dependencies
 
 Installed separately, each under its own license (not bundled):
@@ -88,9 +112,9 @@ Installed separately, each under its own license (not bundled):
 
 ## Notes
 
-- The SDE / Stable Neural SDE modules (`sde/`) are the author's own ICLR 2024 work ([yongkyung-oh/Stable-Neural-SDEs](https://github.com/yongkyung-oh/Stable-Neural-SDEs)), same MIT license — not third-party.
-- When updating included code, keep its upstream header and source attribution current.
-- Re-implemented models that copy no upstream code are credited in the [Model Reference](model_reference.md), not here.
+- Package-authored methods are listed separately from included third-party code.
+- When updating included third-party code, keep its upstream header and source attribution current.
+- Per-model papers for all methods are in the [Model Reference](model_reference.md).
 
 ---
 

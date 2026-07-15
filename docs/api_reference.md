@@ -745,7 +745,7 @@ The classifier returns logits only.
 Behavior notes:
 - If `use_intensity` is omitted (`None`), runtime resolves it from `get_data_config(model_name)`.
 - `method` is a solver argument for continuous-time methods. Effective solver behavior remains model-specific; the package does not promise one package-wide default across ODE/CDE/SDE methods.
-- NeuralFlow (`neuralflow-*`) is flow-only and does not use a numerical solver; active solver settings raise `ValueError` instead of being ignored. The neutral shared-call setting `adjoint=False` is accepted for compatibility.
+- NeuralFlow (`neuralflow-*`) is flow-only and does not use a numerical solver; active solver settings raise `ValueError` instead of being ignored. The neutral shared-call setting `adjoint=False` is accepted for compatibility. Its default native transforms are identity at zero elapsed time, provide inverse transforms, and only expand a singleton initial-state time axis; other state/time length mismatches raise `ValueError`.
 - For sequence baselines, `transformer`, and `sand`, the packaged runtime applies `torch.nan_to_num(..., nan=0.0)` before the backbone call and does not pass a padding mask into the attention backbone.
 - `transformer-mask` uses the same zero-filled values, but it also applies `src_key_padding_mask` derived from the packaged observation mask. If a sequence is fully masked, the runtime treats that zero-filled row as an unmasked finite fallback so the Transformer encoder returns finite outputs.
 - `mtan` and `miam` consume zero-filled values together with the original sequence stack and normalized timestamps; they do not use interpolation coefficients. mTAN samples its variational latent representation in both training and evaluation mode, so set the random seed for repeatable single-sample inference or aggregate multiple samples. MIAM requires `hidden_dim >= 2`.
@@ -890,7 +890,7 @@ Current defaults:
 - `neuralflow`: `flow_depth=3` by default
 - `dualdynamics`: `flow_depth=2` by default
 - `flowpath`: `flow_depth=1` by default
-- `neuralflow` uses the residual-flow variant by default as a flow-only row. `dualdynamics` and `flowpath` are CDE/control-path rows. Distributed flow models use the package's native operators.
+- `neuralflow` uses the residual-flow variant by default as a flow-only row. `dualdynamics` and `flowpath` are CDE/control-path rows. The package-authored native operators are the default and are adaptations rather than exact reference-repository reproductions.
 - Model names use residual-flow defaults: `neuralflow`, `dualdynamics`, and `flowpath`. Explicit `-r/-g/-c` variants remain accepted variants.
 
 Compatibility mapping:

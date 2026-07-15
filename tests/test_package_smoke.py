@@ -282,6 +282,7 @@ def test_latent_sde_uses_each_sample_terminal_kl_and_holds_tail(monkeypatch):
 
 def test_distributed_flow_backend_is_native_only():
     from torch_ists.module.flow import resolve_flow_backend
+    from torch_ists.module.flow.operators_native import CouplingFlow, GRUFlow, ResNetFlow
 
     flow_root = Path(torch_ists.__file__).resolve().parent / "module" / "flow"
     assert resolve_flow_backend(None) == "native"
@@ -291,6 +292,27 @@ def test_distributed_flow_backend_is_native_only():
     assert not (flow_root / "_nfe_guard.py").exists()
     assert not (flow_root / "_neural_flows").exists()
     assert not (flow_root / "operators_nfe.py").exists()
+
+    x = torch.randn(2, 4, 3)
+    zero_time = torch.zeros(2, 4, 1)
+    positive_time = torch.ones(2, 4, 1)
+    for flow_class in (ResNetFlow, GRUFlow, CouplingFlow):
+        flow = flow_class(dim=3, n_layers=2, hidden_dims=[5]).eval()
+        at_zero = flow(x, zero_time)
+        transformed = flow(x, positive_time)
+        recovered = flow.inverse(transformed, positive_time)
+        assert torch.equal(at_zero, x)
+        assert torch.allclose(recovered, x, atol=2e-4, rtol=2e-4)
+
+
+def test_native_flow_time_axis_validation_is_fail_closed():
+    from torch_ists.module.flow.operators_native import ResNetFlow
+
+    flow = ResNetFlow(dim=3, n_layers=1, hidden_dims=[5])
+    evaluation_times = torch.zeros(2, 4, 1)
+    assert flow(torch.randn(2, 1, 3), evaluation_times).shape == (2, 4, 3)
+    with pytest.raises(ValueError, match="time dimension must be one or match"):
+        flow(torch.randn(2, 2, 3), evaluation_times)
 
 
 @pytest.mark.parametrize("model_name", ["tlstm", "plstm", "tglstm"])

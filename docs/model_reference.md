@@ -93,7 +93,7 @@ Package implementations informed by the original papers and repositories. They a
 
 `ode-rnn` and `latentode` come from the same NeurIPS 2019 paper but expose different package architectures: `ode-rnn` evolves a recurrent state directly between observations, while `latentode` learns a variational initial state and decodes a generative latent trajectory. Sample-level task heads use the inferred initial latent representation; sequence-level heads use the decoded trajectory. GRU-ODE-Bayes, Latent ODE, and NJ-ODE expose their method-specific objectives through `return_aux_loss=True`.
 
-The API keys in this section are the registry entries. Names such as `SourceLatentODEBackbone` and `SourceGRUODEBayesBackbone` identify internal implementation classes, not additional models or aliases. The separate registry entries `gru-ode`/`gru-ode-bayes` and `ode-rnn-spline`/`ode-rnn` denote different packaged architectures and are counted independently.
+The API keys in this section are the registry entries. Names such as `SourceLatentODEBackbone` and `SourceGRUODEBayesBackbone` are implementation class names, not additional models or aliases. The separate registry entries `gru-ode`/`gru-ode-bayes` and `ode-rnn-spline`/`ode-rnn` denote different packaged architectures and are counted independently.
 
 The packaged defaults are Euler for `ode-rnn`, GRU-ODE-Bayes, and NJ-ODE, and adaptive Dopri5 for Latent ODE.
 
@@ -154,6 +154,8 @@ ANCDE, EXIT, LEAP, DualDynamics, and FlowPath also use CDE-style control paths a
 Origin paper: [*Neural Flows: Efficient Alternative to Neural ODEs* (NeurIPS 2021)](https://arxiv.org/abs/2110.13040).
 
 Use `neuralflow` for the residual-flow default. The suffix selects an explicit flow variant: `-r` = residual flow, `-g` = GRU-style flow, and `-c` = coupling-style flow.
+
+The default `native` operators are package-authored adaptations of the paper's residual, GRU-style, and coupling constructions. They enforce identity at zero elapsed time, expose forward/inverse transforms, and reject ambiguous time-axis broadcasting. They are not represented as byte-for-byte or numerically exact reproductions of the reference repository. Results and checkpoints produced with native NeuralFlow operators before `0.5.4` should be regenerated because the corrected transforms are numerically incompatible.
 
 Active NeuralFlow solver settings are rejected because there is no integration step to configure; the neutral shared-call setting `adjoint=False` remains accepted. Its strict raw-missing path uses mask-aware zero filling and supports only `imputation_strategy="zero"`.
 
