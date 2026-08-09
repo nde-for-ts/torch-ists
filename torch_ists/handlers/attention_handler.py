@@ -113,7 +113,11 @@ class AttentionHandler(BaseHandler):
         model_name = kwargs.pop("model_name", getattr(model, "model_name", ""))
         strategy = kwargs.get("imputation_strategy", "zero")
 
-        data = self.preprocess_input(seq, times)
+        data = self.preprocess_input(
+            seq,
+            times,
+            sample_times=kwargs.get("sample_times"),
+        )
         x = apply_imputation(data["x"], strategy)
         seq_ts = data["seq_ts"]
 

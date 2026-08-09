@@ -288,6 +288,10 @@ class BaseHandler(ABC):
                 raise ValueError(
                     f"sample_times must have shape {(int(N), int(L))}, got {tuple(seq_ts.shape)}"
                 )
+            if not bool(torch.isfinite(seq_ts).all()):
+                raise ValueError("sample_times must be finite")
+            if L > 1 and not bool((seq_ts[:, 1:] > seq_ts[:, :-1]).all()):
+                raise ValueError("sample_times must be strictly increasing within each sample")
 
         # Use the last observed timestep. This preserves ragged NaN-padding
         # boundaries while avoiding the old count-1 compression bug under

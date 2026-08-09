@@ -1661,10 +1661,14 @@ def _train_single_seed(
         control_time_train_indices=train_idx,
         return_control_time_transform=True,
     )
-    sample_times = apply_control_time_transform(
-        timestamps,
-        control_time_state,
-        sequence_length=int(preprocess_X.shape[2]),
+    sample_times = (
+        apply_control_time_transform(
+            timestamps,
+            control_time_state,
+            sequence_length=int(preprocess_X.shape[2]),
+        )
+        if control_time_state["effective_source"] == "physical"
+        else None
     )
     X_missing_norm, normalization_summary = normalize_with_train_stats(X_missing, train_idx)
     train_missing_summary = compute_train_missing_summary(X_missing, train_idx)

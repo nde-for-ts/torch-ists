@@ -2602,10 +2602,14 @@ def run_model(
     control_transform_metadata["effective_transform"] = effective_control_transform
     control_transform_metadata["consumes_coefficients"] = bool(consumes_coefficients)
     control_time_metadata = control_time_transform_metadata(control_time_state)
-    sample_times = apply_control_time_transform(
-        timestamps,
-        control_time_state,
-        sequence_length=int(X.shape[2]),
+    sample_times = (
+        apply_control_time_transform(
+            timestamps,
+            control_time_state,
+            sequence_length=int(X.shape[2]),
+        )
+        if control_time_state["effective_source"] == "physical"
+        else None
     )
     X_missing_norm, normalization_summary = normalize_with_train_stats(X_missing, train_idx)
     train_missing_summary = compute_train_missing_summary(X_missing, train_idx)
@@ -2958,7 +2962,11 @@ def run_model(
                 output = model(
                     seq,
                     batch['coeffs'].to(device),
-                    sample_times=batch["sample_times"].to(device),
+                    sample_times=(
+                        None
+                        if "sample_times" not in batch
+                        else batch["sample_times"].to(device)
+                    ),
                 )
                 logit = output[0] if isinstance(output, tuple) else output
                 y_true.append(y.cpu().numpy())
@@ -3007,7 +3015,11 @@ def run_model(
                 output = model(
                     seq,
                     batch['coeffs'].to(device),
-                    sample_times=batch["sample_times"].to(device),
+                    sample_times=(
+                        None
+                        if "sample_times" not in batch
+                        else batch["sample_times"].to(device)
+                    ),
                 )
                 pred = output[0] if isinstance(output, tuple) else output
                 target = batch["target"].to(device).float()
@@ -3254,10 +3266,14 @@ def _evaluate_robustness(
         control_time_train_indices=train_idx,
         control_time_transform_state=resolved_control_time_state,
     )
-    sample_times = apply_control_time_transform(
-        timestamps,
-        resolved_control_time_state,
-        sequence_length=int(evaluation_inputs.shape[2]),
+    sample_times = (
+        apply_control_time_transform(
+            timestamps,
+            resolved_control_time_state,
+            sequence_length=int(evaluation_inputs.shape[2]),
+        )
+        if resolved_control_time_state["effective_source"] == "physical"
+        else None
     )
     train_stats, _normalization_summary = compute_train_normalization_stats(train_missing_ref, train_idx)
 
@@ -3366,7 +3382,11 @@ def _evaluate_robustness(
                                 output = model(
                                     seq,
                                     batch['coeffs'].to(device),
-                                    sample_times=batch["sample_times"].to(device),
+                                    sample_times=(
+                                        None
+                                        if "sample_times" not in batch
+                                        else batch["sample_times"].to(device)
+                                    ),
                                 )
                                 logit = output[0] if isinstance(output, tuple) else output
 
@@ -3407,7 +3427,11 @@ def _evaluate_robustness(
                                 output = model(
                                     seq,
                                     batch['coeffs'].to(device),
-                                    sample_times=batch["sample_times"].to(device),
+                                    sample_times=(
+                                        None
+                                        if "sample_times" not in batch
+                                        else batch["sample_times"].to(device)
+                                    ),
                                 )
                                 pred = output[0] if isinstance(output, tuple) else output
                                 target = batch["target"].to(device).float()

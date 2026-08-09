@@ -159,6 +159,36 @@ def test_source_ode_registry_names_are_canonical_and_distinct():
     assert internal_class_names.isdisjoint(active_models)
 
 
+@pytest.mark.parametrize(
+    ("sample_times", "message"),
+    (
+        ([[0.0, 1.0, 1.0, 2.0]], "strictly increasing"),
+        ([[0.0, 1.0, float("nan"), 2.0]], "finite"),
+    ),
+)
+def test_source_handler_rejects_invalid_exact_sample_times(sample_times, message):
+    pytest.importorskip("torchdiffeq")
+    from torch_ists.handlers.source_ode_handler import SourceODEHandler
+
+    class RejectForward(torch.nn.Module):
+        model_name = "ode-rnn"
+
+        def forward(self, *_args, **_kwargs):
+            raise AssertionError("invalid clocks must fail before model forward")
+
+    seq = torch.zeros(1, 3, 2, 4)
+    seq[:, 1] = 1.0
+    with pytest.raises(ValueError, match=message):
+        SourceODEHandler().forward(
+            RejectForward(),
+            seq,
+            None,
+            torch.linspace(0.0, 1.0, 4),
+            model_name="ode-rnn",
+            sample_times=torch.tensor(sample_times),
+        )
+
+
 def test_inherited_runtime_configuration_guards():
     from torch_ists.config import default_method_for_model
     from torch_ists.module.attention.miam import AttentionMIAMModel

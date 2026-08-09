@@ -149,7 +149,11 @@ class SourceODEHandler(BaseHandler):
         **kwargs: Any,
     ):
         del coeffs
-        data = self.preprocess_input(seq, times)
+        data = self.preprocess_input(
+            seq,
+            times,
+            sample_times=kwargs.get("sample_times"),
+        )
         model_params = self._coerce_mapping(kwargs.get("model_params"))
         model_name = kwargs.get("model_name", getattr(model, "model_name", ""))
         solver = self.resolve_solver_config(
@@ -172,7 +176,10 @@ class SourceODEHandler(BaseHandler):
 
         x = data["x"]
         mask = seq[:, 1, :, :].permute(0, 2, 1)
-        step_times = _reconstruct_sample_times(data["seq_delta"], times, data["seq_mask"])
+        if kwargs.get("sample_times") is None:
+            step_times = _reconstruct_sample_times(data["seq_delta"], times, data["seq_mask"])
+        else:
+            step_times = data["seq_ts"]
         final_index = self.get_final_index(mask.max(dim=-1).values, x.size(1))
         return model(
             x,
