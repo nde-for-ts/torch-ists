@@ -16,9 +16,11 @@ def _control_knot_grid_constructor(control_knots: torch.Tensor):
         knots = frozen_knots.to(device=requested_times.device, dtype=requested_times.dtype)
         start = requested_times[0]
         end = requested_times[-1]
-        control_interior = knots[(knots > start) & (knots < end)]
+        lower = torch.minimum(start, end)
+        upper = torch.maximum(start, end)
+        control_interior = knots[(knots > lower) & (knots < upper)]
         requested_interior = requested_times[1:-1]
-        return torch.unique(
+        ordered_grid = torch.unique(
             torch.cat(
                 [
                     start.reshape(1),
@@ -29,6 +31,9 @@ def _control_knot_grid_constructor(control_knots: torch.Tensor):
             ),
             sorted=True,
         )
+        if bool(end < start):
+            ordered_grid = ordered_grid.flip(0)
+        return ordered_grid
 
     return construct_grid
 

@@ -133,6 +133,8 @@ ANCDE, EXIT, LEAP, DualDynamics, and FlowPath also use CDE-style control paths a
 
 `ancde`, `exit`, and `leap` are Neural CDE methods that consume interpolation coefficients and use CDE control paths. The default solver is `rk4` with a fixed-grid step size derived from the input times.
 
+Fixed CDE grids contain the instantiated control knots in both forward and reverse adjoint directions.
+
 | Model | Paper | Behavior |
 |---|---|---|
 | `ancde` | Jhin et al., *Attentive Neural Controlled Differential Equations for Time-series Classification and Forecasting* (ICDM 2021). Reference repo: [sheoyon-jhin/ANCDE](https://github.com/sheoyon-jhin/ANCDE) | Attention-gated control path. No auxiliary loss. |

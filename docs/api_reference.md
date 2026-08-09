@@ -526,6 +526,8 @@ When `model_name` is set, `interpolate` and `use_intensity` default to `get_data
 
 The interpolation parameter remains a shared normalized grid even when physical timestamps are supplied. Per-sample elapsed physical time is a separate control channel, so irregular gaps are preserved without introducing an `[N,L]` solver grid. CDE fixed-step schedules contain the instantiated control knots, and adaptive linear or rectilinear paths receive control-derived kink locations.
 
+Fixed CDE schedules preserve the requested direction during adjoint backpropagation.
+
 The package scripts expose the same value transform through `--control-value-transform` and request `standardize` by default. It is effective only for models whose handlers consume interpolation coefficients; direct sequence, attention, event-driven, and direct-flow models resolve to identity behavior. Parameter search and model evaluation must use the same setting, and robustness evaluation reuses the fitted training state. Pass `--control-value-transform identity` when reproducing earlier coefficient scales.
 
 #### Interpolation Modes

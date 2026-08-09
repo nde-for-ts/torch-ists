@@ -109,6 +109,37 @@ def test_basic_classifier_forward_cpu():
     assert torch.isfinite(logits).all()
 
 
+def test_control_knot_grid_and_adjoint_backward_preserve_direction():
+    pytest.importorskip("torchcde")
+    torchdiffeq = pytest.importorskip("torchdiffeq")
+    from torch_ists.module.cde._solver import _control_knot_grid_constructor
+
+    knots = torch.tensor([0.0, 0.25, 0.5, 0.75, 1.0])
+    construct_grid = _control_knot_grid_constructor(knots)
+    ascending = construct_grid(None, torch.ones(1), torch.tensor([0.0, 1.0]))
+    descending = construct_grid(None, torch.ones(1), torch.tensor([1.0, 0.0]))
+    assert torch.equal(descending, ascending.flip(0))
+
+    class ExponentialField(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.rate = torch.nn.Parameter(torch.tensor(0.5))
+
+        def forward(self, _time, state):
+            return self.rate * state
+
+    field = ExponentialField()
+    solution = torchdiffeq.odeint_adjoint(
+        field,
+        torch.ones(1),
+        torch.tensor([0.0, 1.0]),
+        method="rk4",
+        options={"grid_constructor": construct_grid},
+    )
+    solution[-1].sum().backward()
+    assert torch.isfinite(field.rate.grad)
+
+
 def test_source_ode_registry_names_are_canonical_and_distinct():
     from torch_ists.config.models.ode import ODE_MODELS, ODE_SOURCE_MODELS
 
