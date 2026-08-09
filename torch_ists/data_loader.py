@@ -6,6 +6,26 @@ from typing import Any, Dict, Optional, Sequence
 
 import numpy as np
 
+from .task_registry import normalize_task
+
+
+_SCALAR_DATAFRAME_TASKS = frozenset(
+    {"classification", "regression", "outlier_detection"}
+)
+
+
+def _validate_numpy_target(y: np.ndarray, task: str) -> np.ndarray:
+    task_name = normalize_task(task)
+    if y.ndim != 1:
+        raise ValueError(f"y must be 1D [N] for task={task_name!r}, got shape {y.shape}")
+    if task_name == "classification":
+        if not np.issubdtype(y.dtype, np.number) or not np.isfinite(y).all():
+            raise ValueError("classification targets must be finite and integer-like")
+        if not np.equal(y, np.floor(y)).all():
+            raise ValueError("classification targets must be integer-like")
+        return y.astype(np.int64, copy=False)
+    return y
+
 
 @dataclass
 class DatasetBundle:
@@ -17,13 +37,20 @@ class DatasetBundle:
     metadata: Optional[Dict[str, Any]] = None
 
     def summary(self) -> Dict[str, Any]:
-        return {
+        metadata = dict(self.metadata or {})
+        task = normalize_task(str(metadata.get("task", "classification")))
+        summary = {
             "num_samples": int(self.X.shape[0]),
             "num_features": int(self.X.shape[1]),
             "seq_len": int(self.X.shape[2]),
             "has_timestamps": self.timestamps is not None,
-            "num_classes": int(len(np.unique(self.y))),
+            "task": task,
+            "target_shape": list(self.y.shape[1:]),
+            "target_dtype": str(self.y.dtype),
         }
+        if task == "classification":
+            summary["num_classes"] = int(len(np.unique(self.y)))
+        return summary
 
 
 class DataLoader:
@@ -39,12 +66,11 @@ class DataLoader:
         target_dtype: Optional[str] = None,
     ) -> DatasetBundle:
         X = np.asarray(X)
-        y = np.asarray(y)
+        task_name = normalize_task(task)
+        y = _validate_numpy_target(np.asarray(y), task_name)
 
         if X.ndim != 3:
             raise ValueError(f"X must be 3D [N, D, L], got shape {X.shape}")
-        if y.ndim != 1:
-            raise ValueError(f"y must be 1D [N], got shape {y.shape}")
         if X.shape[0] != y.shape[0]:
             raise ValueError(f"X and y sample count mismatch: {X.shape[0]} != {y.shape[0]}")
 
@@ -65,9 +91,9 @@ class DataLoader:
             metadata={
                 "source": "numpy",
                 "runtime": "torch_ists",
-                "task": str(task),
-                "target_shape": list(target_shape) if target_shape is not None else None,
-                "target_dtype": str(target_dtype) if target_dtype is not None else None,
+                "task": task_name,
+                "target_shape": list(y.shape[1:]),
+                "target_dtype": str(y.dtype),
             },
         )
 
@@ -82,6 +108,16 @@ class DataLoader:
         target_shape: Optional[Sequence[int]] = None,
         target_dtype: Optional[str] = None,
     ) -> DatasetBundle:
+        task_name = normalize_task(task)
+        if task_name not in _SCALAR_DATAFRAME_TASKS:
+            raise ValueError(
+                f"DataFrame loading for task={task_name!r} cannot represent the required "
+                "target structure as one scalar target per series; use from_numpy with a "
+                "task-owned target payload."
+            )
+        if target_shape is not None and tuple(target_shape) not in {(), (1,)}:
+            raise ValueError("DataFrame loading supports one scalar target per series")
+
         try:
             import pandas as pd  # type: ignore
         except ImportError as e:
@@ -102,20 +138,41 @@ class DataLoader:
         else:
             groups = [("single_series", df.sort_values(time_col))]
 
+        target_values = []
+        for i, (_, g) in enumerate(groups):
+            series_targets = g[label_col].to_numpy()
+            if series_targets.ndim != 1 or any(
+                np.asarray(value).ndim != 0 for value in series_targets
+            ):
+                raise ValueError("DataFrame loading supports one scalar target per series")
+            first_target = series_targets[0]
+            if not np.all(series_targets == first_target):
+                raise ValueError(
+                    f"{label_col!r} must be constant within each series; "
+                    f"series {i} contains multiple targets"
+                )
+            target_values.append(first_target)
+
         max_len = max(len(g) for _, g in groups)
         num_samples = len(groups)
         num_features = len(feature_cols)
 
         X = np.full((num_samples, num_features, max_len), np.nan, dtype=np.float32)
         ts = np.full((num_samples, max_len), np.nan, dtype=np.float64)
-        y = np.empty((num_samples,), dtype=np.int64)
 
         for i, (_, g) in enumerate(groups):
             values = g[list(feature_cols)].to_numpy(dtype=np.float32)
             cur_len = values.shape[0]
             X[i, :, :cur_len] = values.T
             ts[i, :cur_len] = g[time_col].to_numpy(dtype=np.float64)
-            y[i] = int(g[label_col].to_numpy()[0])
+
+        raw_targets = np.asarray(target_values)
+        if task_name == "classification":
+            y = _validate_numpy_target(raw_targets, task_name)
+        else:
+            if not np.issubdtype(raw_targets.dtype, np.number):
+                raise ValueError(f"{task_name} targets must be numeric")
+            y = raw_targets
 
         return DatasetBundle(
             X=X,
@@ -126,9 +183,9 @@ class DataLoader:
                 "runtime": "torch_ists",
                 "num_groups": num_samples,
                 "id_col": id_col if id_col in df.columns else None,
-                "task": str(task),
-                "target_shape": list(target_shape) if target_shape is not None else None,
-                "target_dtype": str(target_dtype) if target_dtype is not None else None,
+                "task": task_name,
+                "target_shape": list(y.shape[1:]),
+                "target_dtype": str(y.dtype),
             },
         )
 

@@ -1,6 +1,6 @@
 # torch-ists
 
-[![Version](https://img.shields.io/badge/version-0.6.5-blue)](pyproject.toml) [![Python](https://img.shields.io/badge/python-%3E%3D3.10-blue)](pyproject.toml) [![PyTorch](https://img.shields.io/badge/PyTorch-%3E%3D2.0-ee4c2c)](pyproject.toml) [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![Package status](https://img.shields.io/badge/status-preview-orange)](#project-status)
+[![Version](https://img.shields.io/badge/version-0.6.6-blue)](pyproject.toml) [![Python](https://img.shields.io/badge/python-%3E%3D3.10-blue)](pyproject.toml) [![PyTorch](https://img.shields.io/badge/PyTorch-%3E%3D2.0-ee4c2c)](pyproject.toml) [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![Package status](https://img.shields.io/badge/status-preview-orange)](#project-status)
 
 **PyTorch toolkit for irregularly sampled multivariate time series with continuous-time methods (Neural ODE/CDE/SDE) and discrete-time baselines.**
 
@@ -61,7 +61,7 @@ PYTHONNOUSERSITE=1 python -m pip install --no-deps "git+https://github.com/mbilo
 PYTHONNOUSERSITE=1 python -c "from torch_ists.module.flow.nfe_reference import require_nfe_installation; print(require_nfe_installation()['valid'])"
 ```
 
-The final command validates the repository URL, commit, dependency versions, import location, and source files without importing the external model code. The selector applies to `neuralflow`, `flowpath`, `dualdynamics`, and the shipped low-level `FusionCDE` class. Canonical search and model-run scripts record explicit `stribor` and fail closed rather than falling back; `"nfe"` and related historical spellings are accepted only as input aliases and serialize as `stribor`. FusionCDE is shipped for semantic migration but is not an active row in the 52-model registry in `0.6.5`.
+The final command validates the repository URL, commit, dependency versions, import location, and source files without importing the external model code. The selector applies to `neuralflow`, `flowpath`, `dualdynamics`, and the shipped low-level `FusionCDE` class. Canonical search and model-run scripts record explicit `stribor` and fail closed rather than falling back; direct construction can request the same strict policy with `model_params={"flow_backend": "stribor"}`. `"nfe"` and related historical spellings are accepted only as input aliases and serialize as `stribor`. FusionCDE was introduced in `0.6.5` for semantic migration and remains outside the active 52-model registry.
 
 **Source-checkout scripts require `torchcde`.** The `scripts/set_splits.py` -> `scripts/param_search.py` -> `scripts/model_run.py` pipeline shares one preprocessing path that builds interpolation coefficients with `torchcde`. This applies to sequence baselines too. Install `.[all]` (recommended) or at least `.[tune,cde]`.
 
@@ -84,6 +84,11 @@ y = np.asarray([0, 1] * 20)
 bundle = DataLoader.from_numpy(X, y)
 print(bundle.X.shape, bundle.y.shape)
 ```
+
+Loader task names are validated. Long-format DataFrame input supports one constant scalar target per
+series for classification, regression, and outlier detection; regression keeps fractional targets
+instead of coercing them to class IDs. Bundle summaries report the validated task and actual target
+shape/dtype.
 
 For a built-in benchmark dataset:
 
@@ -122,6 +127,9 @@ seq = torch.stack([X_missing, X_mask, X_delta], dim=1)  # [N, 3, L, D]
 logits = model(seq, coeffs=None)
 print(logits.shape)  # torch.Size([40, 2])
 ```
+
+Models follow ordinary PyTorch device movement: after `model.to(new_device)`, forward-time input
+routing uses the live parameter/buffer device rather than the device string passed at construction.
 
 Coefficient-driven CDE and SDE rows consume the `coeffs` returned by `preprocess(...)`. Direct sequence, attention, and event-driven rows, including ODE-LSTM, the direct ODE-RNN models, Neural Jump ODE (NJ-ODE), and LatentSDE, use the sequence stack and accept `coeffs=None`.
 

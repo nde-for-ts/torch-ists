@@ -241,7 +241,7 @@ class ists_layer(nn.Module):
         self.flow_depth = int(depth_config["flow_depth"])
         self.flow_num_layers = self.flow_depth
 
-        self.device = _resolve_device(device)
+        runtime_device = _resolve_device(device)
 
         handler = HandlerRegistry.get_handler(self.model_name)
         config = {
@@ -266,13 +266,24 @@ class ists_layer(nn.Module):
         self.seq_layer = handler.create_model(
             model_name=self.model_name,
             config=config,
-            device=self.device,
+            device=runtime_device,
         )
         self.returns_loss = has_auxiliary_loss(self.model_name)
         self.uses_filled = getattr(handler, "uses_filled", False)
         self.aux_nan_event_count = 0
 
-        self.seq_layer.to(self.device)
+        self.seq_layer.to(runtime_device)
+
+    @property
+    def device(self) -> torch.device:
+        """Return the live module device after any ``Module.to(...)`` move."""
+        for tensor in self.parameters():
+            return tensor.device
+        for tensor in self.buffers():
+            return tensor.device
+        raise RuntimeError(
+            "ists_layer has no parameter or buffer from which to derive a runtime device"
+        )
 
     def forward(self, seq: torch.Tensor, coeffs: Optional[torch.Tensor] = None, **kwargs):
         if seq.ndim != 4:

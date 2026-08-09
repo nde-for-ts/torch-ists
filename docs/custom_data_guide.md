@@ -56,7 +56,7 @@ Missing values should be represented as `NaN`. For variable-length series, pad s
 |---|---|---|
 | Built-in benchmark archive dataset | `benchmark_loader.get_data("BasicMotions")` | Loads UCR/UEA TRAIN+TEST, pools them, then lets user code define train/valid/test. |
 | In-memory NumPy arrays | `DataLoader.from_numpy(X, y)` | `X [N,D,L]`, `y [N]`, optional `timestamps [N,L]`. |
-| Long-format pandas data frame | `DataLoader.from_dataframe(...)` | Groups by `series_id` by default, sorts each group by `time_col`, pads with `NaN`. |
+| Long-format pandas data frame | `DataLoader.from_dataframe(...)` | Scalar-per-series classification, regression, or outlier targets; groups by `series_id`, validates a constant target, sorts by time, and pads with `NaN`. |
 | NPZ file from Python | `DataLoader.from_file("data.npz")` | Accepts `X`/`y` or `x`/`Y`; optional `timestamps`. |
 | NPZ file in source-checkout scripts | `--dataset-source npz --dataset-npz data/ToyDataset.npz` | Accepts `X`/`y` or `x`/`Y`; optional `timestamps [N,L]` are validated and recorded. |
 
@@ -96,7 +96,10 @@ bundle = DataLoader.from_file(
 )
 ```
 
-`DataLoader.from_dataframe` and CSV/parquet `from_file` return a `DatasetBundle` without writing NPZ; persist `bundle.X` and `bundle.y` when you need a portable array payload.
+`DataLoader.from_dataframe` and CSV/parquet `from_file` return a `DatasetBundle` without writing NPZ.
+Pass `task="regression"` to preserve fractional regression targets. Unknown task names, inconsistent
+targets within a series, non-integer classification labels, and DataFrame tasks requiring structured
+targets fail closed. Persist `bundle.X` and `bundle.y` when you need a portable array payload.
 
 ## 5. Generate or Reuse Splits
 

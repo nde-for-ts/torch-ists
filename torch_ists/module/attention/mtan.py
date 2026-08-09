@@ -23,12 +23,12 @@ class MultiTimeAttention(nn.Module):
         device: str = "cpu",
     ):
         super().__init__()
+        del device
         assert embed_time % num_heads == 0
         self.embed_time = embed_time
         self.embed_time_k = embed_time // num_heads
         self.h = num_heads
         self.nhidden = nhidden
-        self.device = device
         self.linears = nn.ModuleList(
             [
                 nn.Linear(embed_time, embed_time),
@@ -82,12 +82,12 @@ class MTANEncoder(nn.Module):
         device: str = "cpu",
     ):
         super().__init__()
+        del device
         self.embed_time = embed_time
         self.dim = input_dim
-        self.device = device
         self.register_buffer("query", query.clone().detach())
         self.learn_emb = learn_emb
-        self.att = MultiTimeAttention(2 * input_dim, nhidden, embed_time, num_heads, device)
+        self.att = MultiTimeAttention(2 * input_dim, nhidden, embed_time, num_heads)
         self.gru_rnn = nn.GRU(nhidden, nhidden, bidirectional=True, batch_first=True)
         self.hiddens_to_z0 = nn.Sequential(
             nn.Linear(2 * nhidden, 50),
@@ -99,7 +99,7 @@ class MTANEncoder(nn.Module):
             self.linear = nn.Linear(1, 1)
 
     def learn_time_embedding(self, tt):
-        tt = tt.to(self.device).unsqueeze(-1)
+        tt = tt.to(self.query.device).unsqueeze(-1)
         out2 = torch.sin(self.periodic(tt))
         out1 = self.linear(tt)
         return torch.cat([out1, out2], -1)

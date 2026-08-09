@@ -317,11 +317,11 @@ def from_numpy(
 | Parameter | Type | Shape | Description |
 |-----------|------|-------|-------------|
 | `X` | `np.ndarray` | `[N, D, L]` | Time series data |
-| `y` | `np.ndarray` | `[N]` | Labels (0-indexed integers) |
+| `y` | `np.ndarray` | `[N]` | One scalar target per sample; classification values must be finite and integer-like |
 | `timestamps` | `Optional[np.ndarray]` | `[N, L]` | Time stamps (optional) |
-| `task` | `str` | scalar | Metadata field; default `"classification"` |
-| `target_shape` | `Optional[Sequence[int]]` | metadata | Optional target metadata stored in the bundle |
-| `target_dtype` | `Optional[str]` | metadata | Optional target dtype metadata stored in the bundle |
+| `task` | `str` | scalar | Validated task name; default `"classification"` |
+| `target_shape` | `Optional[Sequence[int]]` | metadata | Compatibility hint; the returned bundle records the actual target shape |
+| `target_dtype` | `Optional[str]` | metadata | Compatibility hint; the returned bundle records the actual target dtype |
 
 #### Returns
 
@@ -347,6 +347,9 @@ bundle = DataLoader.from_numpy(X, y)
 print(bundle.X.shape)  # (100, 8, 64)
 ```
 
+Unknown task names fail before a bundle is created. `DatasetBundle.summary()` reports `task`, actual
+target shape, and target dtype; classification summaries additionally report `num_classes`.
+
 ---
 
 ### 3.2 `DataLoader.from_dataframe()`
@@ -368,6 +371,11 @@ def from_dataframe(
     target_dtype: Optional[str] = None,
 ) -> DatasetBundle:
 ```
+
+The long-format loader currently accepts scalar-per-series `classification`, `regression`, and
+`outlier_detection` targets. Every row in a series must carry the same target. Classification targets
+must be finite and integer-like; regression targets retain their numeric dtype, including fractional
+values. Tasks that require structured targets fail before sequence arrays are allocated.
 
 #### Example
 
@@ -767,6 +775,8 @@ The classifier returns logits only.
 `file` is an optional compatibility / pass-through parameter and should be left unset (`file=None`) for normal use; this also applies to `ists_model` and `ists_layer`.
 
 Behavior notes:
+- Calling `.to(...)` after construction moves the complete model normally. Forward-time input routing
+  derives the live device from module parameters or buffers instead of a constructor-time string.
 - If `use_intensity` is omitted (`None`), runtime resolves it from `get_data_config(model_name)`.
 - `method` is a solver argument for continuous-time methods. Effective solver behavior remains model-specific; the package does not promise one package-wide default across ODE/CDE/SDE methods.
 - NeuralFlow (`neuralflow-*`) is flow-only and does not use a numerical solver; active solver settings raise `ValueError` instead of being ignored. The neutral shared-call setting `adjoint=False` is accepted for compatibility. Its default native transforms are identity at zero elapsed time, provide inverse transforms, and only expand a singleton initial-state time axis; other state/time length mismatches raise `ValueError`.
