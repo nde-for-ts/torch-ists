@@ -26,7 +26,7 @@ class NeuralFlow(nn.Module):
         flow_depth: int | None = None,
         input_option: str = "x",
         flow_option: str = "c",
-        flow_backend: str = "native",
+        flow_backend: str = "auto",
     ):
         super().__init__()
         if input_option != "x":
@@ -42,7 +42,7 @@ class NeuralFlow(nn.Module):
 
         self.input_option = input_option
         self.flow_option = flow_option
-        self.flow_backend = resolve_flow_backend(flow_backend)
+        self.requested_flow_backend = resolve_flow_backend(flow_backend)
 
         hidden = int(hidden_channels)
         resolved_head_depth = num_hidden_layers if head_depth is None else head_depth
@@ -60,11 +60,17 @@ class NeuralFlow(nn.Module):
         flow_hidden = [hidden] * self.head_depth
         self.flow_network = build_flow_operator(
             flow_option=flow_option,
-            backend=self.flow_backend,
+            backend=self.requested_flow_backend,
             dim=hidden,
             n_layers=self.flow_depth,
             hidden_dims=flow_hidden,
         )
+        self.flow_backend = self.flow_network.backend
+        self.used_flow_backend_fallback = (
+            self.requested_flow_backend == "auto" and self.flow_backend == "native"
+        )
+        # Expose the effective backend (``auto`` -> real stribor/native build).
+        self.flow_backend = getattr(self.flow_network, "backend", self.flow_backend)
 
     @staticmethod
     def _fill_missing_x(x: torch.Tensor, seq_mask: torch.Tensor) -> torch.Tensor:

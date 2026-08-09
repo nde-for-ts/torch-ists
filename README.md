@@ -1,6 +1,6 @@
 # torch-ists
 
-[![Version](https://img.shields.io/badge/version-0.6.4-blue)](pyproject.toml) [![Python](https://img.shields.io/badge/python-%3E%3D3.10-blue)](pyproject.toml) [![PyTorch](https://img.shields.io/badge/PyTorch-%3E%3D2.0-ee4c2c)](pyproject.toml) [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![Package status](https://img.shields.io/badge/status-preview-orange)](#project-status)
+[![Version](https://img.shields.io/badge/version-0.6.5-blue)](pyproject.toml) [![Python](https://img.shields.io/badge/python-%3E%3D3.10-blue)](pyproject.toml) [![PyTorch](https://img.shields.io/badge/PyTorch-%3E%3D2.0-ee4c2c)](pyproject.toml) [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![Package status](https://img.shields.io/badge/status-preview-orange)](#project-status)
 
 **PyTorch toolkit for irregularly sampled multivariate time series with continuous-time methods (Neural ODE/CDE/SDE) and discrete-time baselines.**
 
@@ -53,7 +53,7 @@ PYTHONNOUSERSITE=1 python -m pip install -e .[sde]
 PYTHONNOUSERSITE=1 python -m pip install -e .[all]
 ```
 
-The package-authored NeuralFlow operators are the default. To use the exact external NFE reference backend, review the upstream repository's terms first; the pinned source does not publish a LICENSE file and is not bundled with this package. Install the required checkout explicitly:
+Flow models request the `auto` backend by default. It validates and uses the reviewed Stribor implementation when the pinned external checkout is available, then falls back to the package-authored native operators only for expected installation or provenance failures. Explicit `stribor` is fail-closed, while explicit `native` skips the external probe. Review the upstream repository's terms first; the pinned source does not publish a LICENSE file and is not bundled with this package. Install the required checkout explicitly:
 
 ```bash
 PYTHONNOUSERSITE=1 python -m pip install "stribor==0.1.0" "torchdiffeq==0.2.1"
@@ -61,7 +61,7 @@ PYTHONNOUSERSITE=1 python -m pip install --no-deps "git+https://github.com/mbilo
 PYTHONNOUSERSITE=1 python -c "from torch_ists.module.flow.nfe_reference import require_nfe_installation; print(require_nfe_installation()['valid'])"
 ```
 
-The final command validates the repository URL, commit, dependency versions, import location, and source files without importing the external model code. Activate this backend only in the Python API with `model_params={"flow_backend": "nfe"}`. The source-checkout benchmark scripts always use the package-authored native backend.
+The final command validates the repository URL, commit, dependency versions, import location, and source files without importing the external model code. The selector applies to `neuralflow`, `flowpath`, `dualdynamics`, and the shipped low-level `FusionCDE` class. Canonical search and model-run scripts record explicit `stribor` and fail closed rather than falling back; `"nfe"` and related historical spellings are accepted only as input aliases and serialize as `stribor`. FusionCDE is shipped for semantic migration but is not an active row in the 52-model registry in `0.6.5`.
 
 **Source-checkout scripts require `torchcde`.** The `scripts/set_splits.py` -> `scripts/param_search.py` -> `scripts/model_run.py` pipeline shares one preprocessing path that builds interpolation coefficients with `torchcde`. This applies to sequence baselines too. Install `.[all]` (recommended) or at least `.[tune,cde]`.
 

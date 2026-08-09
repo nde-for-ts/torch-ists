@@ -145,7 +145,7 @@ _ODE_SOLVER_MODELS = frozenset(
     ]
 )
 _CDE_SOLVER_MODELS = frozenset(_CDE_CONTROL_BY_MODEL) | frozenset(_NEURALRDE_DEPTH)
-_FLOW_PREFIXES = ("neuralflow-", "dualdynamics-", "flowpath-")
+_FLOW_PREFIXES = ("neuralflow-", "dualdynamics-", "flowpath-", "fusioncde-")
 DEFAULT_NEURALRDE_LOGSIGNATURE_WINDOW_LENGTH = 10
 
 _MODEL_NATIVE_EXTRA_PARAM_CANDIDATES = {
@@ -454,7 +454,7 @@ def build_param_artifact_identity(
             if task_name == "forecasting" and forecast_horizon is not None
             else None
         )
-    return {
+    identity = {
         "data_name": str(data_name),
         "model_name": _canonical_model_name(model_name),
         "task": task_name,
@@ -463,6 +463,10 @@ def build_param_artifact_identity(
         "dataset_source": str(dataset_source or "").strip().lower(),
         "split_seeds": _normalize_split_seeds(split_seeds),
     }
+    method_definition = _method_definition_for_model(model_name)
+    if method_definition is not None:
+        identity["method_definition"] = method_definition
+    return identity
 
 
 def validate_param_artifact_identity(
@@ -521,8 +525,11 @@ def validate_param_artifact_identity(
         "forecast_horizon": actual_forecast_horizon,
         "dataset_source": str(identity.get("dataset_source") or "").strip().lower(),
         "split_seeds": actual_split_seeds,
+        "method_definition": str(identity.get("method_definition") or "").strip().lower(),
     }
     compared_fields = ["data_name", "model_name", "task", "target_source"]
+    if expected.get("method_definition"):
+        compared_fields.append("method_definition")
     if actual_task == "classification":
         if actual["dataset_source"]:
             compared_fields.append("dataset_source")
@@ -639,6 +646,15 @@ def _canonical_model_name(model_name: str) -> str:
     return normalized
 
 
+def _method_definition_for_model(model_name: str) -> str | None:
+    normalized = _canonical_model_name(model_name)
+    if normalized.startswith("flowpath-"):
+        return "flowpath-input-x-learned-control"
+    if normalized.startswith("fusioncde-"):
+        return "fusioncde-raw-fixed-control-fusion"
+    return None
+
+
 def _is_flow_model_name(model_name: str) -> bool:
     normalized = _canonical_model_name(model_name)
     try:
@@ -649,13 +665,35 @@ def _is_flow_model_name(model_name: str) -> bool:
         return normalized.startswith(_FLOW_PREFIXES)
 
 
+def _is_flowpath_model_name(model_name: str) -> bool:
+    return _canonical_model_name(model_name).startswith("flowpath-")
+
+
+def _normalize_flow_backend_for_output(value: object) -> str:
+    backend = str(value).strip().lower()
+    aliases = {
+        "default": "stribor",
+        "native": "native",
+        "stribor": "stribor",
+        "nfe": "stribor",
+        "nfe-stibor": "stribor",
+        "nfe-stribor": "stribor",
+    }
+    normalized = aliases.get(backend)
+    if normalized is None:
+        raise ValueError(
+            f"Unsupported flow backend: {value!r}. Allowed backends: ['native', 'stribor']"
+        )
+    return normalized
+
+
 def _default_flow_depth_for_model(model_name: str) -> int:
     normalized = _canonical_model_name(model_name)
     if normalized.startswith("neuralflow-"):
         return 3
     if normalized.startswith("dualdynamics-"):
         return 2
-    if normalized.startswith("flowpath-"):
+    if normalized.startswith(("flowpath-", "fusioncde-")):
         return 1
     return 2
 
@@ -708,13 +746,19 @@ def _resolve_native_axis_metadata(normalized_model: str, profile: str) -> dict:
         native_axes.append("num_hidden_layers")
 
     if _is_flow_model_name(normalized_model):
-        depth_axis = "head_depth"
-        native_axes = ["hidden_dim", "head_depth"]
-        if native_profile:
-            native_axes.append("flow_depth")
+        if _is_flowpath_model_name(normalized_model):
+            depth_axis = "num_hidden_layers"
+            native_axes = ["hidden_dim", "num_hidden_layers"]
+            fixed_axes.append("flow_depth=1")
+            fixed_axes.append("model_params.flow_backend=stribor")
         else:
-            fixed_axes.append("flow_depth")
-        fixed_axes.append("model_params.flow_backend=native")
+            depth_axis = "head_depth"
+            native_axes = ["hidden_dim", "head_depth"]
+            if native_profile:
+                native_axes.append("flow_depth")
+            else:
+                fixed_axes.append("flow_depth")
+            fixed_axes.append("model_params.flow_backend=stribor")
     elif normalized_model in _SAND_MODELS:
         width_axis = "model_params.d_model"
         depth_axis = "model_params.n_layers"
@@ -859,7 +903,13 @@ def resolve_effective_param_config(
             value = _coerce_int_choice(value, default=int(default_value), allowed=allowed)
         model_params[key] = value
 
-    if _is_flow_model_name(normalized_model):
+    if _is_flowpath_model_name(normalized_model):
+        flow_depth = 1
+        num_layers = 1
+        num_hidden_layers = depth_level
+        head_depth = depth_level
+        model_params.setdefault("flow_backend", "stribor")
+    elif _is_flow_model_name(normalized_model):
         if _is_model_native_profile(profile):
             raw_flow_depth = config.get(
                 "flow_depth",
@@ -874,7 +924,7 @@ def resolve_effective_param_config(
         num_layers = 1
         num_hidden_layers = depth_level
         head_depth = depth_level
-        model_params.setdefault("flow_backend", "native")
+        model_params.setdefault("flow_backend", "stribor")
     elif normalized_model in _SAND_MODELS:
         flow_depth = _default_flow_depth_for_model(normalized_model)
         num_layers = 1
@@ -892,6 +942,11 @@ def resolve_effective_param_config(
         flow_depth = _default_flow_depth_for_model(normalized_model)
         num_layers, num_hidden_layers = _resolve_layer_depth(normalized_model, depth_level)
         head_depth = depth_level
+
+    if _is_flow_model_name(normalized_model):
+        model_params["flow_backend"] = _normalize_flow_backend_for_output(
+            model_params["flow_backend"]
+        )
 
     saved = dict(config)
     saved["search_profile"] = profile

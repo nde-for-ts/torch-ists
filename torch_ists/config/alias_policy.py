@@ -8,12 +8,16 @@ FLOW_ALIAS_TO_CANONICAL = {
     "neuralflow_x_g": "neuralflow-g",
     "neuralflow_x_c": "neuralflow-c",
     "flowpath": "flowpath-r",
-    "neuralflowcde_x_r": "flowpath-r",
-    "neuralflowcde_x_g": "flowpath-g",
-    "neuralflowcde_x_c": "flowpath-c",
+    "neuralflowcde_x_r": "fusioncde-r",
+    "neuralflowcde_x_g": "fusioncde-g",
+    "neuralflowcde_x_c": "fusioncde-c",
     "flowpath_x_r": "flowpath-r",
     "flowpath_x_g": "flowpath-g",
     "flowpath_x_c": "flowpath-c",
+    "fusioncde": "fusioncde-r",
+    "fusioncde_x_r": "fusioncde-r",
+    "fusioncde_x_g": "fusioncde-g",
+    "fusioncde_x_c": "fusioncde-c",
     "dualdynamics": "dualdynamics-r",
     "dualdynamics_x_r": "dualdynamics-r",
     "dualdynamics_x_g": "dualdynamics-g",
@@ -33,6 +37,9 @@ FLOW_CANONICAL_MODELS = frozenset(
         "flowpath-r",
         "flowpath-g",
         "flowpath-c",
+        "fusioncde-r",
+        "fusioncde-g",
+        "fusioncde-c",
         "dualdynamics-r",
         "dualdynamics-g",
         "dualdynamics-c",
@@ -47,6 +54,9 @@ FLOW_STRICT_RAW_CANONICAL_MODELS = frozenset(
         "flowpath-r",
         "flowpath-g",
         "flowpath-c",
+        "fusioncde-r",
+        "fusioncde-g",
+        "fusioncde-c",
     }
 )
 
@@ -63,6 +73,10 @@ FLOW_STRICT_RAW_ALIAS_MODELS = frozenset(
         "flowpath_x_r",
         "flowpath_x_g",
         "flowpath_x_c",
+        "fusioncde",
+        "fusioncde_x_r",
+        "fusioncde_x_g",
+        "fusioncde_x_c",
     }
 )
 

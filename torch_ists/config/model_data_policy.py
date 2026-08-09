@@ -148,7 +148,7 @@ def _default_flow_depth_for_model(canonical_name: str) -> int:
         return 3
     if canonical_name.startswith("dualdynamics-"):
         return 2
-    if canonical_name.startswith("flowpath-"):
+    if canonical_name.startswith(("flowpath-", "fusioncde-")):
         return 1
     return _FLOW_DEFAULT_DEPTH
 

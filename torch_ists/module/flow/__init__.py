@@ -9,10 +9,11 @@ from .operators import resolve_flow_backend
 _LAZY_EXPORTS = {
     "NeuralFlow": (".neuralflow", "NeuralFlow"),
     "FlowPath": (".flowpath", "FlowPath"),
+    "FusionCDE": (".fusioncde", "FusionCDE"),
     "DualDynamics": (".dualdynamics", "DualDynamics"),
 }
 
-__all__ = ["NeuralFlow", "FlowPath", "DualDynamics", "resolve_flow_backend"]
+__all__ = ["NeuralFlow", "FlowPath", "FusionCDE", "DualDynamics", "resolve_flow_backend"]
 
 
 def __getattr__(name: str):

@@ -10,6 +10,10 @@ import torch.nn as nn
 from .nfe_reference import NFE_INSTALL_COMMAND, load_nfe_reference_class
 
 
+class StriborBackendUnavailableError(RuntimeError):
+    """The reviewed external backend cannot be loaded in this environment."""
+
+
 def _make_hidden_dims(hidden_dims: Iterable[int] | None, fallback: int) -> list[int]:
     dims = [int(value) for value in (hidden_dims or []) if int(value) > 0]
     return dims if dims else [int(fallback)]
@@ -19,14 +23,9 @@ def _load_reference_class(module_name: str, class_name: str):
     try:
         reference_class = load_nfe_reference_class(module_name, class_name)
     except ModuleNotFoundError as exc:
-        raise RuntimeError(
+        raise StriborBackendUnavailableError(
             "The pinned NFE checkout could not be imported because an optional dependency "
             f"is missing: {exc.name}. Install the reference backend with:\n{NFE_INSTALL_COMMAND}"
-        ) from exc
-    except ImportError as exc:
-        raise RuntimeError(
-            "The pinned NFE checkout or one of its optional dependencies could not be imported. "
-            f"Install the reference backend with:\n{NFE_INSTALL_COMMAND}"
         ) from exc
     if not issubclass(reference_class, nn.Module):
         raise RuntimeError(f"The validated NFE class is not a torch module: {module_name}.{class_name}")
@@ -37,7 +36,7 @@ class _BaseNFEAdapter(nn.Module):
     def __init__(self, model: nn.Module, n_layers: int):
         super().__init__()
         self.model = model
-        self.backend = "nfe"
+        self.backend = "stribor"
         self.num_layers = max(1, int(n_layers))
 
     @property
@@ -114,4 +113,9 @@ class CouplingFlow(_BaseNFEAdapter):
         super().__init__(model=model, n_layers=depth)
 
 
-__all__ = ["ResNetFlow", "GRUFlow", "CouplingFlow"]
+__all__ = [
+    "StriborBackendUnavailableError",
+    "ResNetFlow",
+    "GRUFlow",
+    "CouplingFlow",
+]

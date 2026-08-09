@@ -14,14 +14,17 @@ from ..module.flow.operators import resolve_flow_backend
 
 
 class FlowHandler(BaseHandler):
-    """Handler for canonical `neuralflow-{r,g,c}`, `dualdynamics-{r,g,c}`, and `flowpath-{r,g,c}` models."""
+    """Handler for NeuralFlow, FlowPath, FusionCDE, and DualDynamics models."""
 
     name: str = "flow"
     _FLOW_OPTIONS = ("r", "g", "c")
     _NEURALFLOW_MODELS = frozenset(f"neuralflow-{flow}" for flow in _FLOW_OPTIONS)
     _FLOWPATH_MODELS = frozenset(f"flowpath-{flow}" for flow in _FLOW_OPTIONS)
+    _FUSIONCDE_MODELS = frozenset(f"fusioncde-{flow}" for flow in _FLOW_OPTIONS)
     _DUALDYNAMICS_MODELS = frozenset(f"dualdynamics-{flow}" for flow in _FLOW_OPTIONS)
-    _SUPPORTED_MODELS = _NEURALFLOW_MODELS | _FLOWPATH_MODELS | _DUALDYNAMICS_MODELS
+    _SUPPORTED_MODELS = (
+        _NEURALFLOW_MODELS | _FLOWPATH_MODELS | _FUSIONCDE_MODELS | _DUALDYNAMICS_MODELS
+    )
     _FLOW_SOLVER_DEFAULT_METHOD = "rk4"
     _FLOW_ALLOWED_METHODS = {"euler", "midpoint", "rk4", "dopri5"}
     _FLOW_METHOD_ALIASES = {
@@ -32,8 +35,15 @@ class FlowHandler(BaseHandler):
     }
 
     @staticmethod
-    def _resolve_flow_backend(config: Dict[str, Any], model_params: Dict[str, Any]) -> str:
-        return resolve_flow_backend(config.get("flow_backend", model_params.get("flow_backend")))
+    def _resolve_flow_backend(
+        config: Dict[str, Any],
+        model_params: Dict[str, Any],
+        *,
+        default: str | None = None,
+    ) -> str:
+        return resolve_flow_backend(
+            config.get("flow_backend", model_params.get("flow_backend", default))
+        )
 
     def can_handle(self, model_name: str) -> bool:
         return model_name in self._SUPPORTED_MODELS
@@ -157,7 +167,11 @@ class FlowHandler(BaseHandler):
         coeff_dim = self._control_channels(input_dim, use_intensity)
         flow_option = model_name.rsplit("-", 1)[-1]
         model_params = self._coerce_mapping(config.get("model_params"))
-        flow_backend = self._resolve_flow_backend(config, model_params)
+        flow_backend = self._resolve_flow_backend(
+            config,
+            model_params,
+            default="auto",
+        )
 
         if model_name in self._NEURALFLOW_MODELS:
             model = NeuralFlow(
@@ -185,12 +199,49 @@ class FlowHandler(BaseHandler):
                 alias_map=self._FLOW_METHOD_ALIASES,
             )
             func = FinalTanhT(
-                input_channels=hidden_dim,
+                input_channels=coeff_dim,
                 hidden_channels=hidden_dim,
                 hidden_hidden_channels=hidden_dim,
                 num_hidden_layers=num_hidden_layers,
             )
             model = FlowPath(
+                input_channels=coeff_dim,
+                hidden_channels=hidden_dim,
+                num_hidden_layers=num_hidden_layers,
+                head_depth=head_depth,
+                flow_depth=flow_depth,
+                output_channels=hidden_dim,
+                input_option="x",
+                flow_option=flow_option,
+                flow_backend=flow_backend,
+                func=func,
+            )
+            model.solver_method = solver["method"]
+            model.solver_options = dict(solver["options"])
+            model.solver_kwargs = {
+                key: solver[key]
+                for key in ("rtol", "atol", "adjoint", "dt")
+                if solver[key] is not None
+            }
+        elif model_name in self._FUSIONCDE_MODELS:
+            from ..module.cde import FinalTanhT
+            from ..module.flow.fusioncde import FusionCDE
+
+            solver = self.resolve_solver_config(
+                direct=config,
+                model_params=model_params,
+                model=None,
+                default_method=self._FLOW_SOLVER_DEFAULT_METHOD,
+                allowed_methods=self._FLOW_ALLOWED_METHODS,
+                alias_map=self._FLOW_METHOD_ALIASES,
+            )
+            func = FinalTanhT(
+                input_channels=hidden_dim,
+                hidden_channels=hidden_dim,
+                hidden_hidden_channels=hidden_dim,
+                num_hidden_layers=num_hidden_layers,
+            )
+            model = FusionCDE(
                 input_channels=coeff_dim,
                 hidden_channels=hidden_dim,
                 num_hidden_layers=num_hidden_layers,
@@ -266,14 +317,16 @@ class FlowHandler(BaseHandler):
             sample_times=kwargs.get("sample_times"),
         )
         runtime_model_name = str(getattr(model, "model_name", kwargs.get("model_name", "")))
-        strict_raw_models = self._NEURALFLOW_MODELS | self._FLOWPATH_MODELS
+        strict_raw_models = self._NEURALFLOW_MODELS | self._FLOWPATH_MODELS | self._FUSIONCDE_MODELS
         seq_mask = data["seq_mask"]
         if runtime_model_name in strict_raw_models:
             seq_mask = self._full_channel_mask(seq)
             self._validate_raw_missing_contract(data["x"], seq_mask)
 
         call_kwargs: Dict[str, Any] = {}
-        solver_runtime_models = self._FLOWPATH_MODELS | self._DUALDYNAMICS_MODELS
+        solver_runtime_models = (
+            self._FLOWPATH_MODELS | self._FUSIONCDE_MODELS | self._DUALDYNAMICS_MODELS
+        )
         if runtime_model_name in solver_runtime_models:
             call_kwargs = self._build_solver_call_kwargs(model, kwargs)
 

@@ -129,7 +129,7 @@ Neural RDE methods:
 
 `neuralcde` uses the original `controldiffeq` reference; the `-l/-r/-c/-h` variants use the `torchcde` library and select the interpolation scheme for the control path. `neuralrde-1/2/3` first builds a natural-spline path, then applies log-signature windows at the requested depth. Keep native missing values as `NaN` before `preprocess(...)`; the interpolation path is built from that missing-aware input.
 
-ANCDE, EXIT, LEAP, DualDynamics, and FlowPath also use CDE-style control paths and consume interpolation coefficients.
+ANCDE, EXIT, LEAP, and DualDynamics also use CDE-style control paths and consume interpolation coefficients. FlowPath uses a learned control built directly from the raw value/time path.
 
 ---
 
@@ -161,9 +161,9 @@ Origin paper: [*Neural Flows: Efficient Alternative to Neural ODEs* (NeurIPS 202
 
 Use `neuralflow` for the residual-flow default. The suffix selects an explicit flow variant: `-r` = residual flow, `-g` = GRU-style flow, and `-c` = coupling-style flow.
 
-The default `native` operators are package-authored adaptations of the paper's residual, GRU-style, and coupling constructions. They enforce identity at zero elapsed time, expose forward/inverse transforms, and reject ambiguous time-axis broadcasting. They are not represented as byte-for-byte or numerically exact reproductions of the reference repository. Results and checkpoints produced with native NeuralFlow operators before `0.5.4` should be regenerated because the corrected transforms are numerically incompatible.
+The `native` operators are package-authored adaptations of the paper's residual, GRU-style, and coupling constructions. They enforce identity at zero elapsed time, expose forward/inverse transforms, and reject ambiguous time-axis broadcasting. They are not represented as byte-for-byte or numerically exact reproductions of the reference repository. Results and checkpoints produced with native NeuralFlow operators before `0.5.4` should be regenerated because the corrected transforms are numerically incompatible.
 
-An exact reference-code path is available by installing `mbilos/neural-flows-experiments` at commit `bd19f7c92461e83521e268c1a235ef845a3dd963` with `stribor==0.1.0` and `torchdiffeq==0.2.1`, then passing `model_params={"flow_backend": "nfe"}` to the Python API. The adapter verifies the installed repository URL, commit, dependency versions, import origin, and source files before loading the target flow module. Upstream source is not bundled, and the benchmark scripts continue to use the `native` backend so backend choice cannot be mixed within their stored results.
+An exact reference-code path is available by installing `mbilos/neural-flows-experiments` at commit `bd19f7c92461e83521e268c1a235ef845a3dd963` with `stribor==0.1.0` and `torchdiffeq==0.2.1`. The adapter verifies the installed repository URL, commit, dependency versions, import origin, and source files before loading the target flow module. Upstream source is not bundled. The runtime default `auto` tries this reviewed Stribor backend first and falls back to `native` only for expected installation or provenance failures. Explicit `stribor` is fail-closed, explicit `native` skips the probe, and canonical search/model-run settings store explicit `stribor`. Older `nfe` spellings are input-only aliases.
 
 Active NeuralFlow solver settings are rejected because there is no integration step to configure; the neutral shared-call setting `adjoint=False` remains accepted. Its strict raw-missing path uses mask-aware zero filling and supports only `imputation_strategy="zero"`.
 
@@ -173,7 +173,7 @@ For missing-data handling, `neuralflow` and its explicit variants keep raw missi
 
 ## 8. DualDynamics and FlowPath
 
-DualDynamics and FlowPath are flow-based Neural CDE / control-path methods. They consume interpolation coefficients, use CDE-style control paths, and include flow components; they are not flow-only comparators. Both default to `rk4` with a fixed-grid step size from the input times.
+DualDynamics and FlowPath are flow-based Neural CDE / control-path methods rather than flow-only comparators. DualDynamics consumes interpolation coefficients. FlowPath follows the official `input_option='x'` structure: it accepts the shared `coeffs` argument for API compatibility but builds its learned control directly from the mask-aware raw `[time, x]` path. Both default to `rk4` with a fixed-grid step size from the input times.
 
 | Model group | Models |
 |---|---|
@@ -186,7 +186,9 @@ Origin papers:
 
 Use `dualdynamics` and `flowpath` for residual-flow defaults. The suffix selects an explicit flow variant: `-r` = residual flow, `-g` = GRU-style flow, and `-c` = coupling-style flow. These remain CDE/control-path methods.
 
-For missing-data handling, use `preprocess(X, model_name=...)` to build matching interpolation coefficients. `flowpath-*` also keeps the raw missing-value path; `dualdynamics-*` follows the coefficient-driven control path.
+The low-level `FusionCDE` class preserves the prior coefficient-augmented package adaptation by fusing the raw path with a fixed-spline control. It is behavior-defined, is not presented as official FlowPath, and is not an active row in the 52-model registry in `0.6.5`. Historical artifacts are not renamed or rewritten: old `flowpath-*` results retain their original lineage and must not be loaded as native parameters for corrected FlowPath.
+
+For missing-data handling, use `preprocess(X, model_name=...)`. `flowpath-*` keeps the mask-aware raw missing-value path and ignores the generated coefficients; `dualdynamics-*` follows the coefficient-driven control path.
 
 ---
 

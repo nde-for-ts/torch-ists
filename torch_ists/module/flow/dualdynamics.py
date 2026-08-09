@@ -30,7 +30,7 @@ class DualDynamics(nn.Module):
         flow_depth: int | None = None,
         input_option: str = "x",
         flow_option: str = "c",
-        flow_backend: str = "native",
+        flow_backend: str = "auto",
     ):
         super().__init__()
         if input_option != "x":
@@ -46,7 +46,7 @@ class DualDynamics(nn.Module):
 
         self.input_option = input_option
         self.flow_option = flow_option
-        self.flow_backend = resolve_flow_backend(flow_backend)
+        self.requested_flow_backend = resolve_flow_backend(flow_backend)
         self.input_channels = int(input_channels)
         self.func = func
 
@@ -66,10 +66,15 @@ class DualDynamics(nn.Module):
         flow_hidden = [hidden] * self.head_depth
         self.flow_network = build_flow_operator(
             flow_option=flow_option,
-            backend=self.flow_backend,
+            backend=self.requested_flow_backend,
             dim=hidden,
             n_layers=self.flow_depth,
             hidden_dims=flow_hidden,
+        )
+        # Expose the effective backend (``auto`` -> real stribor/native build).
+        self.flow_backend = self.flow_network.backend
+        self.used_flow_backend_fallback = (
+            self.requested_flow_backend == "auto" and self.flow_backend == "native"
         )
 
     def _normalize_seq_ts(self, x: torch.Tensor, seq_ts: torch.Tensor) -> torch.Tensor:

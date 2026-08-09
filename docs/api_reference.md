@@ -910,16 +910,17 @@ See [Custom Model Guide](custom_model_guide.md) for the wrapper pattern.
 `head_depth` and `flow_depth` are different knobs.
 
 - `head_depth`: controls the depth of the prediction head after the backbone. `1` applies a direct projection, and `k > 1` adds `k - 1` hidden-to-hidden layers before the final projection.
-- `flow_depth`: controls the number of flow blocks for `neuralflow`, `dualdynamics`, `flowpath`, and their explicit flow variants.
+- `flow_depth`: controls the number of flow blocks for `neuralflow`, `dualdynamics`, and their explicit flow variants. FlowPath fixes this depth to `1`; the shipped low-level FusionCDE class retains its own flow-depth setting.
 
 Current defaults:
 - `cnn`, `rnn`, `lstm`, `gru`: `head_depth` is not used
 - `neuralcde*`, `neuralrde-*`, and the SDE baseline/stable-SDE models: `head_depth` defaults to the script/runtime-provided layer depth
 - `neuralflow`: `flow_depth=3` by default
 - `dualdynamics`: `flow_depth=2` by default
-- `flowpath`: `flow_depth=1` by default
-- `neuralflow` uses the residual-flow variant by default as a flow-only row. `dualdynamics` and `flowpath` are CDE/control-path rows. The package-authored native operators are the default and are adaptations rather than exact reference-repository reproductions.
-- `model_params={"flow_backend": "nfe"}` explicitly selects the separately installed NFE reference implementation for the flow families. The adapter accepts only the documented repository commit, `stribor==0.1.0`, and its upstream-compatible `torchdiffeq==0.2.1`; missing, shadowed, or modified installations fail before the target flow module is imported. The source-checkout benchmark scripts keep `flow_backend="native"`.
+- `flowpath`: `flow_depth=1` is fixed; `num_hidden_layers` is its single official depth axis
+- `neuralflow` uses the residual-flow variant by default as a flow-only row. `dualdynamics` and `flowpath` are CDE/control-path rows. FlowPath builds its learned control from the raw value/time path and accepts but does not consume interpolation coefficients.
+- `flow_backend="auto"` is the runtime default for all flow models. It validates and tries the reviewed Stribor backend first, then falls back to the package-authored native operators only for expected installation or provenance failures. The reviewed path requires the documented repository commit, `stribor==0.1.0`, and `torchdiffeq==0.2.1`. Explicit `stribor` is fail-closed; explicit `native` bypasses the external probe. Runtime objects expose `requested_flow_backend`, effective `flow_backend`, and `used_flow_backend_fallback`. Older `nfe` spellings are input aliases only and normalize to `stribor`. Canonical search/model-run settings write explicit `stribor`.
+- The low-level `FusionCDE` class preserves the earlier coefficient-augmented flow/CDE dataflow but is not an active row in the 52-model registry in `0.6.5`.
 - Model names use residual-flow defaults: `neuralflow`, `dualdynamics`, and `flowpath`. Explicit `-r/-g/-c` variants remain accepted variants.
 
 Compatibility mapping:
@@ -972,7 +973,7 @@ def get_data_config(model_name: str) -> Dict[str, Any]:
 | `neuralrde-1/2/3` | `'natural'` | `False` | consumes `coeffs`; computes log-signature control paths at the selected depth |
 | `ancde`, `exit`, `leap` | `'natural'` | `False` | consumes `coeffs`; uses CDE control paths with `rk4` and a fixed-grid step from input times |
 | `dualdynamics` and explicit variants | `'hermite'` | `False` | consumes `coeffs`; uses flow-based CDE/control-path dynamics |
-| `flowpath` and explicit variants | `'hermite'` | `False` | consumes `coeffs` and keeps the raw missing-value path for mask-aware flow handling |
+| `flowpath` and explicit variants | `'hermite'` | `False` | accepts but ignores `coeffs`; builds a learned control from the raw value/time path with mask-aware missing-value handling |
 | `gru-d`, `gru-dt`, `ode-rnn-spline` | `'natural'` | `True` | consumes `coeffs` with intensity channels |
 | `gru-ode` | `'natural'` | `False` | consumes `coeffs` |
 | `ode-lstm` | `'cubic'` | `False` | runtime ignores `coeffs`; uses imputed values, elapsed time deltas, and the any-channel observation mask directly |

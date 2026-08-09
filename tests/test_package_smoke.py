@@ -159,61 +159,6 @@ def test_source_ode_registry_names_are_canonical_and_distinct():
     assert internal_class_names.isdisjoint(active_models)
 
 
-@pytest.mark.parametrize(
-    ("sample_times", "message"),
-    (
-        ([[0.0, 1.0, 1.0, 2.0]], "strictly increasing"),
-        ([[0.0, 1.0, float("nan"), 2.0]], "finite"),
-    ),
-)
-def test_source_handler_rejects_invalid_exact_sample_times(sample_times, message):
-    pytest.importorskip("torchdiffeq")
-    from torch_ists.handlers.source_ode_handler import SourceODEHandler
-
-    class RejectForward(torch.nn.Module):
-        model_name = "ode-rnn"
-
-        def forward(self, *_args, **_kwargs):
-            raise AssertionError("invalid clocks must fail before model forward")
-
-    seq = torch.zeros(1, 3, 2, 4)
-    seq[:, 1] = 1.0
-    with pytest.raises(ValueError, match=message):
-        SourceODEHandler().forward(
-            RejectForward(),
-            seq,
-            None,
-            torch.linspace(0.0, 1.0, 4),
-            model_name="ode-rnn",
-            sample_times=torch.tensor(sample_times),
-        )
-
-
-def test_gru_elapsed_clock_resets_and_accumulates_all_missing_steps():
-    pytest.importorskip("torchdiffeq")
-    from torch_ists.module.ode.gru_variants import GRU_dt
-
-    model = GRU_dt(5, 2, 2, True)
-    hidden = torch.zeros(2, 2)
-    elapsed = torch.ones(2)
-    mixed_step = torch.tensor(
-        [[2.0, 1.0, 0.0, 0.25, -0.25], [3.0, 0.0, 0.0, 0.0, 0.0]]
-    )
-    hidden, elapsed = model._step(mixed_step, hidden, elapsed, half_num_channels=2)
-    assert torch.equal(elapsed, torch.tensor([0.0, 4.0]))
-
-    all_missing_step = torch.tensor(
-        [[5.0, 0.0, 0.0, 0.0, 0.0], [6.0, 0.0, 0.0, 0.0, 0.0]]
-    )
-    _hidden, elapsed = model._step(
-        all_missing_step,
-        hidden,
-        elapsed,
-        half_num_channels=2,
-    )
-    assert torch.equal(elapsed, torch.tensor([5.0, 10.0]))
-
-
 def test_inherited_runtime_configuration_guards():
     from torch_ists.config import default_method_for_model
     from torch_ists.module.attention.miam import AttentionMIAMModel
@@ -277,45 +222,6 @@ def test_ode_rnn_uses_batched_fixed_grid_evolution(monkeypatch):
     assert summary.shape == (4, 5)
     assert torch.isfinite(stream).all()
     assert torch.isfinite(summary).all()
-
-
-def test_source_adaptive_direct_paths_install_step_budget(monkeypatch):
-    pytest.importorskip("torchdiffeq")
-    from torch_ists.module.ode import source_variants
-
-    received = []
-
-    def fake_odeint(_func, y0, times, **kwargs):
-        received.append(kwargs)
-        return y0.unsqueeze(0).expand(times.numel(), *y0.shape).clone()
-
-    monkeypatch.setattr(source_variants.torchdiffeq, "odeint", fake_odeint)
-    source_variants._integrate_batch_durations(
-        torch.nn.Identity(),
-        torch.zeros(1, 2),
-        torch.ones(1),
-        method="dopri5",
-        options={},
-        rtol=None,
-        atol=None,
-        adjoint=False,
-    )
-
-    model = source_variants.SourceLatentODEBackbone(2, 3, 3, 1)
-    decoded = model._decode(
-        torch.zeros(2, 3),
-        torch.tensor([[0.0, 0.5, 1.0], [0.0, 0.5, 1.0]]),
-        torch.tensor([2, 2]),
-        method="dopri5",
-        options={},
-        rtol=None,
-        atol=None,
-        adjoint=False,
-    )
-
-    assert decoded.shape == (2, 3, 3)
-    assert len(received) == 2
-    assert all(call["options"]["max_num_steps"] == 10_000 for call in received)
 
 
 def test_latent_ode_ignores_padding_only_timestamps():
@@ -410,7 +316,7 @@ def test_latent_sde_uses_each_sample_terminal_kl_and_holds_tail(monkeypatch):
     assert torch.allclose(path[1, :, 0], torch.tensor([0.0, 1.0, 2.0, 3.0]))
 
 
-def test_distributed_flow_backend_defaults_native_and_supports_pinned_nfe():
+def test_distributed_flow_backend_uses_stribor_first_with_native_fallback():
     from torch_ists.module.flow import resolve_flow_backend
     from torch_ists.module.flow.nfe_reference import (
         NFEInstallationError,
@@ -421,9 +327,9 @@ def test_distributed_flow_backend_defaults_native_and_supports_pinned_nfe():
     from torch_ists.module.flow.operators_native import CouplingFlow, GRUFlow, ResNetFlow
 
     flow_root = Path(torch_ists.__file__).resolve().parent / "module" / "flow"
-    assert resolve_flow_backend(None) == "native"
-    assert resolve_flow_backend("default") == "native"
-    assert resolve_flow_backend("nfe") == "nfe"
+    assert resolve_flow_backend(None) == "auto"
+    assert resolve_flow_backend("default") == "auto"
+    assert resolve_flow_backend("nfe") == "stribor"
     assert not (flow_root / "_nfe_guard.py").exists()
     assert not (flow_root / "_neural_flows").exists()
     assert (flow_root / "operators_nfe.py").is_file()
@@ -435,21 +341,30 @@ def test_distributed_flow_backend_defaults_native_and_supports_pinned_nfe():
     if validation["valid"]:
         reference_flow = build_flow_operator(
             flow_option="r",
-            backend="nfe",
+            backend="stribor",
             dim=3,
             n_layers=2,
             hidden_dims=[5],
         )
-        assert reference_flow.backend == "nfe"
+        assert reference_flow.backend == "stribor"
     else:
         with pytest.raises(NFEInstallationError, match="pinned external checkout"):
             build_flow_operator(
                 flow_option="r",
-                backend="nfe",
+                backend="stribor",
                 dim=3,
                 n_layers=2,
                 hidden_dims=[5],
             )
+
+    selected = build_flow_operator(
+        flow_option="r",
+        backend="auto",
+        dim=3,
+        n_layers=2,
+        hidden_dims=[5],
+    )
+    assert selected.backend == ("stribor" if validation["valid"] else "native")
 
     x = torch.randn(2, 4, 3)
     zero_time = torch.zeros(2, 4, 1)

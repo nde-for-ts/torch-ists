@@ -16,10 +16,11 @@ Methods implemented in this package and covered by its MIT license (see [LICENSE
 | Stable Neural SDEs | `neural_lsde`, `neural_lnsde`, `neural_gsde` | `sde/` | Oh, Lim, Kim, *Stable Neural SDEs* (ICLR 2024) — [arXiv:2402.14989](https://arxiv.org/abs/2402.14989); repo [yongkyung-oh/Stable-Neural-SDEs](https://github.com/yongkyung-oh/Stable-Neural-SDEs) | MIT (this package) |
 | DualDynamics | `dualdynamics`, `dualdynamics-r/g/c` | `flow/dualdynamics.py` | Oh, Lim, Kim, *DualDynamics* (AAAI 2025) — [arXiv:2401.04979](https://arxiv.org/abs/2401.04979) | MIT (this package) |
 | FlowPath | `flowpath`, `flowpath-r/g/c` | `flow/flowpath.py` | Oh et al., *FlowPath* (AAAI 2026) — [arXiv:2511.10841](https://arxiv.org/abs/2511.10841) | MIT (this package) |
+| FusionCDE class | low-level class; not an active registry row in `0.6.5` | `flow/fusioncde.py` | Package adaptation preserving the coefficient-augmented raw/fixed-control fusion; no separate origin-paper claim | MIT (this package) |
 | Native NeuralFlow operators | `neuralflow`, `neuralflow-r/g/c` | `flow/operators_native.py` | Package-authored adaptations informed by [Biloš et al. 2021](https://arxiv.org/abs/2110.13040) and its [reference repository](https://github.com/mbilos/neural-flows-experiments) | MIT (this package) |
 | SDE baselines | `naive_cde`, `neural_ode`, `neural_ode_t`, `neural_sde`, `neural_sde_t` | `sde/` | Package-authored baselines (no external paper); integrate through the `torchsde` wrapper | MIT (this package) |
 
-DualDynamics and FlowPath reuse the native flow operators as a component but remain distinct methods and registry rows.
+NeuralFlow, DualDynamics, FlowPath, and FusionCDE can use the native flow operators as a component. FusionCDE is a descriptive package class and is not presented as official FlowPath or as a novel method.
 
 ## Third-party code
 
@@ -95,7 +96,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 ### NeuralFlow reference implementation
 
-The `neuralflow` family is informed by the residual, GRU-style, and coupling architectures introduced in *Neural Flows: Efficient Alternative to Neural ODEs* (Biloš, Sommer, Rangapuram, Januschowski, Günnemann; NeurIPS 2021). The reference implementation is [`mbilos/neural-flows-experiments`](https://github.com/mbilos/neural-flows-experiments). That repository does not publish a LICENSE file, so this distribution does not bundle its source. The default operators in `flow/operators_native.py` are package-authored adaptations and are not claimed to be source-identical or numerically equivalent to the reference implementation. The optional `flow_backend="nfe"` adapter loads a user-installed checkout pinned to commit `bd19f7c92461e83521e268c1a235ef845a3dd963`; `flow/NFE_PROVENANCE.json` records the validated source files. The adapter and manifest are MIT-licensed package code, not copies of upstream source.
+The `neuralflow` family is informed by the residual, GRU-style, and coupling architectures introduced in *Neural Flows: Efficient Alternative to Neural ODEs* (Biloš, Sommer, Rangapuram, Januschowski, Günnemann; NeurIPS 2021). The reference implementation is [`mbilos/neural-flows-experiments`](https://github.com/mbilos/neural-flows-experiments). That repository does not publish a LICENSE file, so this distribution does not bundle its source. The operators in `flow/operators_native.py` are package-authored adaptations and are not claimed to be source-identical or numerically equivalent to the reference implementation. Runtime `flow_backend="auto"` validates and tries the reviewed Stribor path first, with a narrowly scoped native fallback; explicit `stribor` remains fail-closed. The adapter loads a user-installed checkout pinned to commit `bd19f7c92461e83521e268c1a235ef845a3dd963`, while older `nfe` spellings remain input aliases only. `flow/NFE_PROVENANCE.json` records the validated source files. The adapter and manifest are MIT-licensed package code, not copies of upstream source.
 
 ## Benchmark datasets
 
