@@ -66,7 +66,7 @@ The source-checkout script chain resolves local file and artifact roots to absol
 
 ## 4. Build a User-Provided NPZ Dataset
 
-For portable exchange, write user-provided data as an NPZ file with `X` and `y` keys:
+For classification, write user-provided data as an NPZ file with `X` and `y` keys:
 
 ```python
 import numpy as np
@@ -79,6 +79,8 @@ y = np.asarray(raw_labels, dtype=np.int64)    # [N]
 bundle = DataLoader.from_numpy(X, y)
 np.savez("data/ToyDataset.npz", X=bundle.X.astype(np.float32), y=bundle.y.astype(np.int64))
 ```
+
+For a preview task, the dataset file may omit `y`; store `X [N,D,L]` in the dataset NPZ and the task target in `<targets-root>/<dataset>.npz`. Regression accepts `[N]` or `[N,R]` targets. Run `set_splits.py --task <task> --targets-root <targets-root>` so the task-isolated split is validated and generated before search.
 
 For long-format table input, convert through `DataLoader` first:
 
@@ -98,7 +100,7 @@ bundle = DataLoader.from_file(
 
 ## 5. Generate or Reuse Splits
 
-Use the split helpers when you already have a fixed split and want to store it in the package split format:
+Use the split helpers when you already have a fixed classification split and want to store it in the package split format. Preview task scripts generate deterministic label-independent splits at task-suffixed paths and do not reuse this classification path:
 
 ```python
 from pathlib import Path

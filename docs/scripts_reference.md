@@ -68,11 +68,11 @@ The split/search/run scripts also write JSON run logs under `evidence/`.
 
 ### Preview-task target bundles
 
-For a non-classification task, pass `--target-source dataset --targets-root <targets-root>`. The scripts load `<targets-root>/<dataset>.npz`. The dataset NPZ and target bundle are separate files; in this release the dataset NPZ still contains `X [N,D,L]` and the split label `y [N]`.
+For a non-classification task, pass `--target-source dataset --targets-root <targets-root>`. The scripts load `<targets-root>/<dataset>.npz`. The dataset NPZ and target bundle are separate files. Classification requires `X [N,D,L]` and `y [N]`; preview tasks may use an X-only dataset NPZ.
 
 | Task | Required target-bundle entries | Shape | Value contract |
 |---|---|---|---|
-| regression | `regression_target` | `[N]` or `[N,1]` | finite numeric values, loaded as `float32` |
+| regression | `regression_target` | `[N]` or `[N,R]`, `R >= 1` | finite dataset-native values, loaded as `float32` |
 | forecasting | `forecasting_target` | `[N,H,D]` | finite numeric values; `--forecast-horizon H` is required |
 | imputation | `imputation_target`, `imputation_loss_mask` | both `[N,L,D]` | finite target and binary `0/1` mask, loaded as `float32` |
 | outlier detection | `outlier_detection_target` | `[N]` or `[N,1]` | binary `0/1`, loaded as `float32` |
@@ -84,13 +84,13 @@ A bounded bundle matching the README toy data can be created with:
 PYTHONNOUSERSITE=1 python -c "import numpy as np, pathlib; n,l,d,h=40,24,3,4; p=pathlib.Path('/tmp/torch_ists_demo/targets'); p.mkdir(parents=True,exist_ok=True); np.savez(p/'Demo.npz', regression_target=np.zeros((n,1),'float32'), forecasting_target=np.zeros((n,h,d),'float32'), imputation_target=np.zeros((n,l,d),'float32'), imputation_loss_mask=np.ones((n,l,d),'float32'), outlier_detection_target=(np.arange(n)%4==0).astype('float32')[:,None], change_detection_target=np.zeros((n,l,1),'float32'), change_detection_loss_mask=np.ones((n,l,1),'float32'))"
 ```
 
-Non-classification artifacts append the task name. For the default single-search and standard run, the paths are `<param-root>/<dataset>/<dataset>_<model>__task_<task>` and `<out-root>/<dataset>/<missing_rate>/<dataset>_<missing_rate>_<model>_<seed>__task_<task>`.
+Non-classification artifacts append the task name. Split, parameter, and standard-run paths are `<split-root>/<dataset>/<dataset>_<seed>__task_<task>`, `<param-root>/<dataset>/<dataset>_<model>__task_<task>`, and `<out-root>/<dataset>/<missing_rate>/<dataset>_<missing_rate>_<model>_<seed>__task_<task>`. Preview splits are deterministic and label-independent; an unsuffixed classification split is never reused for a preview task.
 
 ---
 
 ## 2. `set_splits.py`
 
-**Purpose**: Generate stratified train/validation/test splits for a dataset with a fixed seed.
+**Purpose**: Generate stratified classification splits or deterministic label-independent preview-task splits with a fixed seed.
 
 **Usage**:
 
@@ -104,7 +104,10 @@ PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/set_splits.py --dataset-name Basi
 |---|---|---|---|
 | `--dataset-name` | `str` | (required) | Dataset id used in the split file path. |
 | `--dataset-source` | `{default,npz}` | `default` | Dataset source backend. `default` loads benchmark archive data by dataset name through `torch_ists.benchmark_loader.get_data`; `npz` loads a local file through `--dataset-npz`. |
-| `--dataset-npz` | `str` | `None` | Required when `--dataset-source npz`; NPZ must contain `X [N,D,L]` and `y [N]`; optional `timestamps [N,L]` are validated and recorded. |
+| `--dataset-npz` | `str` | `None` | Required when `--dataset-source npz`; classification requires `X [N,D,L]` and `y [N]`, while preview tasks require `X` and may omit `y`; optional `timestamps [N,L]` are validated and recorded. |
+| `--task` | `{classification, regression, forecasting, imputation, outlier_detection, change_detection}` | `classification` | Selects stratified classification splitting or task-isolated deterministic preview splitting. |
+| `--forecast-horizon` | `int` | `None` | Required positive horizon for `forecasting`. |
+| `--targets-root` | `str` | `targets` | Root containing the dataset target bundle for preview-task validation. |
 | `--seed` | `int` | `42` | Random seed for the stratified split. Default `42` is the hyperparameter search seed (disjoint from evaluation seeds `0-4`); pass `--seed 0..4` to generate the evaluation splits, or `--seed 0` for ICLR 2024 reproducibility. |
 | `--if-exists` | `{reuse, fail}` | `reuse` | Behavior when the split artifact already exists. `reuse` keeps the existing file; `fail` raises. |
 | `--out-dir` (alias `--output-dir`) | `str` | `split` | Root directory for split artifacts. |
@@ -114,7 +117,7 @@ PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/set_splits.py --dataset-name Basi
 
 ### Output
 
-- **Split file** (pickle): `<out-dir>/<dataset-name>/<dataset-name>_<seed>` containing `(train_idx, valid_idx, test_idx)`.
+- **Split file** (pickle): classification uses `<out-dir>/<dataset-name>/<dataset-name>_<seed>`; preview tasks use `<out-dir>/<dataset-name>/<dataset-name>_<seed>__task_<task>`. Both contain `(train_idx, valid_idx, test_idx)`.
 - **Run log**: `<contract-dir>/<run-id>/split.manifest.json`.
 
 ---
@@ -163,9 +166,9 @@ This is a bounded smoke run; the full defaults (`--num-samples 50 --max-num-epoc
 | `--contract-dir` | `str` | `evidence` | Directory for JSON run logs (stage = `search`). |
 | `--run-id` | `str` | (auto) | Run identifier. |
 | `--runtime-baseline-id` | `str` | `None` | Optional caller-supplied flat run label. Leave unset for shared benchmark artifacts. |
-| `--task` | `{classification, regression, forecasting, imputation, outlier_detection, change_detection}` | `classification` | Task head. `classification` is stable; other task heads are experimental. |
+| `--task` | `{classification, regression, forecasting, imputation, outlier_detection, change_detection}` | `classification` | Task head. `classification` is stable; other task heads are preview workflows. |
 | `--forecast-horizon` | `int` | `None` | Required positive horizon for `forecasting`. |
-| `--target-source` | `{dataset, surrogate}` | `dataset` | Target source. Experimental non-classification tasks require dataset targets; surrogate targets are rejected. |
+| `--target-source` | `{dataset}` | `dataset` | Preview tasks require a dataset-owned target bundle. |
 | `--targets-root` | `str` | `targets` | Root directory for dataset target bundles when a task uses external targets. |
 
 ### Search Policy And Repeat
@@ -244,9 +247,9 @@ PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/model_run.py \
 | `--contract-dir` | `str` | `evidence` | Directory for JSON run logs (stage = `run`). |
 | `--run-id` | `str` | (auto) | Run identifier. |
 | `--runtime-baseline-id` | `str` | `None` | Optional caller-supplied flat run label. Leave unset for shared benchmark artifacts. |
-| `--task` | `{classification, regression, forecasting, imputation, outlier_detection, change_detection}` | `classification` | Task head. `classification` is stable; other task heads are experimental. |
+| `--task` | `{classification, regression, forecasting, imputation, outlier_detection, change_detection}` | `classification` | Task head. `classification` is stable; other task heads are preview workflows. |
 | `--forecast-horizon` | `int` | `None` | Required positive horizon for `forecasting`. |
-| `--target-source` | `{dataset, surrogate}` | `dataset` | Target source. Experimental non-classification tasks require dataset targets; surrogate targets are rejected. |
+| `--target-source` | `{dataset}` | `dataset` | Preview tasks require a dataset-owned target bundle. |
 | `--targets-root` | `str` | `targets` | Root directory for dataset target bundles. |
 
 ### Evaluation Regimes
@@ -272,9 +275,9 @@ PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/model_run.py \
 ### Task Support Tiers
 
 - **Stable**: `classification` (default).
-- **Experimental**: `regression`, `forecasting`, `imputation`, `outlier_detection`, `change_detection` (available through `ists_model`).
+- **Preview**: `regression`, `forecasting`, `imputation`, `outlier_detection`, `change_detection` (available through `ists_model`).
 
-The task and metric tables describe both `ists_model` outputs and the corresponding script workflow. Experimental tasks require dataset-owned targets and may change in a later release; the 100-condition robustness profile remains classification-only.
+The task and metric tables describe both `ists_model` outputs and the corresponding script workflow. Preview tasks require dataset-owned targets and may change in a later release; the 100-condition robustness profile remains classification-only.
 
 ### Metrics
 
@@ -285,6 +288,10 @@ The task and metric tables describe both `ists_model` outputs and the correspond
 | `change_detection` | BCE, `change_acc`, balanced accuracy, F1, AUROC, AUPRC on supervised positions |
 | `regression`, `forecasting` | MSE, MAE |
 | `imputation` | MSE, MAE on the supplied supervision mask |
+
+For outlier and change detection, the training split must contain both binary classes. A validation or test split may contain one class; AUROC and AUPRC are then stored as unavailable with an explicit reason, while BCE, accuracy, balanced accuracy, and F1 remain available.
+
+Before hyperparameter search, the workflow validates the selected model/task combination and rejects requests that require unsupported native future-time prediction, ragged suffix handling, or causal guarantees. This happens before trials are launched.
 
 ### Output
 
@@ -299,7 +306,7 @@ Requires:
 
 ### Artifact Reuse Boundaries
 
-- Split artifacts keep the stable `train/valid/test` pickle format and are safe to reuse when the dataset and split path are intentional.
+- Classification split paths and bytes remain unchanged. Preview tasks use task-suffixed paths and never reuse an unsuffixed classification split.
 - Param artifacts are matched by dataset, model, task, search policy, repeat policy, search seed, target source, forecasting horizon, and split seed set. Stored checksums from older artifacts are optional metadata and are not reuse requirements. Compatible classification artifacts remain reusable; experimental-task artifacts that predate the explicit target contract must be regenerated.
 - Output artifacts are reused when `model_run.py --check` matches the stored semantic details and validates prediction contents, shapes, sample indices, and targets directly. Stored contract checksums are not required. For a 100-condition result, validation also covers the exact ordered axes, uniqueness, full predictions, and complete channel-outage provenance. Structurally incomplete payloads are recomputed with `--no-check`.
 - Package version alone is not a reuse key. Upgrading does not require deleting all prior artifacts: reuse is decided from the semantic fields and directly validated payload structure above.
@@ -342,7 +349,8 @@ Path patterns produced by the scripts:
 
 | Artifact | Path |
 |---|---|
-| Split | `<split-root>/<dataset>/<dataset>_<seed>` |
+| Split (classification) | `<split-root>/<dataset>/<dataset>_<seed>` |
+| Split (preview task) | `<split-root>/<dataset>/<dataset>_<seed>__task_<task>` |
 | Params (default single) | `<param-root>/<dataset>/<dataset>_<model>` |
 | Params (default aggregated) | `<param-root>/<dataset>/<dataset>_<model>_aggregated` |
 | Params (preview task) | `<param-root>/<dataset>/<dataset>_<model>__task_<task>` |

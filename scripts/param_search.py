@@ -117,6 +117,17 @@ def _abspath_or_none(path):
     return os.path.abspath(os.path.expanduser(str(path)))
 
 
+def _normalize_target_source_arg(raw: str) -> str:
+    normalized = str(raw).strip().lower()
+    if normalized == "surrogate":
+        raise argparse.ArgumentTypeError(
+            "--target-source surrogate is no longer supported; provide a dataset-owned target bundle"
+        )
+    if normalized != "dataset":
+        raise argparse.ArgumentTypeError("--target-source must be dataset")
+    return normalized
+
+
 def _normalize_search_profile_arg(raw: str) -> str:
     try:
         return normalize_search_profile(raw)
@@ -207,7 +218,12 @@ def _build_expected_param_artifact_identity(
         if dataset_npz is None or not Path(dataset_npz).exists():
             raise FileNotFoundError(f"Dataset NPZ not found: {dataset_npz}")
     for seed in split_seeds:
-        split_path = Path(split_root) / data_name / f"{data_name}_{int(seed)}"
+        split_path = resolve_task_split_path(
+            split_root,
+            data_name,
+            int(seed),
+            task=task_name,
+        )
         if not split_path.exists():
             raise FileNotFoundError(f"Split artifact not found: {split_path}")
     return build_param_artifact_identity(
@@ -472,7 +488,7 @@ def parse_cli_args():
             "change_detection",
         ],
         default="classification",
-        help="Task head. Classification is stable; other task heads are experimental.",
+        help="Task head. Classification is stable; other task heads are preview workflows.",
     )
     parser.add_argument(
         "--forecast-horizon",
@@ -482,10 +498,10 @@ def parse_cli_args():
     )
     parser.add_argument(
         "--target-source",
-        type=str,
-        choices=["dataset", "surrogate"],
+        type=_normalize_target_source_arg,
         default="dataset",
-        help="Target source for non-classification tasks; surrogate targets are rejected.",
+        metavar="{dataset}",
+        help="Dataset-owned target source for non-classification tasks.",
     )
     parser.add_argument(
         "--targets-root",
@@ -576,10 +592,13 @@ from _training_runtime import (
     train,
 )
 from task_target_contracts import (
+    infer_task_output_dim,
     load_task_targets_npz,
     mask_imputation_inputs,
+    resolve_task_split_path,
     validate_task_splits,
 )
+from torch_ists.task_registry import validate_model_task_capability
 
 from torch_ists.config import (
     get_data_config,
@@ -668,6 +687,7 @@ def _collect_task_metadata(
         dataset_name=data_name,
         dataset_source=dataset_source,
         dataset_npz=dataset_npz,
+        task=task,
     )
     X = dataset_payload.X
     Y = dataset_payload.y
@@ -675,7 +695,7 @@ def _collect_task_metadata(
     num_data = int(X.shape[0])
     num_dim = int(X.shape[1])
     seq_len = int(X.shape[2])
-    split_path = os.path.join(split_root, data_name, f"{data_name}_{seed}")
+    split_path = resolve_task_split_path(split_root, data_name, seed, task=task)
     with open(split_path, "rb") as f:
         train_idx, valid_idx, test_idx = pickle.load(f)
     timestamp_delta_scale, timestamp_summary = resolve_timestamp_delta_metadata(
@@ -702,6 +722,7 @@ def _collect_task_metadata(
             num_samples=num_data,
             seq_len=seq_len,
             input_dim=num_dim,
+            input_values=X,
         )
         target_spec = dict(target_spec)
         target_spec["split_supervision"] = validate_task_splits(
@@ -852,6 +873,7 @@ def _count_model_params_for_config(
     task: str,
     forecast_horizon,
     model_config: dict,
+    output_dim: int | None = None,
 ) -> int:
     effective = _normalize_param_config_for_save(
         model_name,
@@ -873,10 +895,17 @@ def _count_model_params_for_config(
     if str(task).strip().lower() == "classification":
         model = ists_classifier(num_class=int(num_class), **common_kwargs)
     else:
+        resolved_output_dim = (
+            int(output_dim)
+            if output_dim is not None
+            else 1
+            if str(task).strip().lower() in {"regression", "outlier_detection", "change_detection"}
+            else int(input_dim)
+        )
         model = ists_model(
             num_class=int(num_class),
             task=task,
-            output_dim=max(1, int(input_dim)),
+            output_dim=max(1, resolved_output_dim),
             forecast_horizon=forecast_horizon,
             **common_kwargs,
         )
@@ -926,6 +955,7 @@ def _resolve_constrained_capacity_config(
     num_class: int,
     task: str,
     forecast_horizon,
+    output_dim: int | None,
     search_profile: str,
     search_space: dict,
 ) -> dict:
@@ -975,6 +1005,7 @@ def _resolve_constrained_capacity_config(
                     task=task,
                     forecast_horizon=forecast_horizon,
                     model_config=cfg,
+                    output_dim=output_dim,
                 )
                 candidates.append(
                     {
@@ -1483,6 +1514,7 @@ def _train_single_seed(
         dataset_name=data_name,
         dataset_source=dataset_source,
         dataset_npz=dataset_npz,
+        task=task,
     )
     X = dataset_payload.X
     Y = dataset_payload.y
@@ -1490,10 +1522,10 @@ def _train_single_seed(
     num_data = X.shape[0]
     num_dim = X.shape[1]
     seq_len = X.shape[2]
-    num_class = len(np.unique(Y))
+    num_class = len(np.unique(Y)) if task == "classification" else 1
 
     # Load split file
-    split_path = os.path.join(split_root, data_name, f'{data_name}_{seed}')
+    split_path = resolve_task_split_path(split_root, data_name, seed, task=task)
     if not os.path.exists(split_path):
         raise FileNotFoundError(
             f"Split file not found: {split_path}. "
@@ -1526,6 +1558,7 @@ def _train_single_seed(
             num_samples=int(num_data),
             seq_len=int(seq_len),
             input_dim=int(num_dim),
+            input_values=X,
         )
         target_spec = dict(target_spec)
         target_spec["split_supervision"] = validate_task_splits(
@@ -1664,7 +1697,7 @@ def _train_single_seed(
             **model_kwargs
         )
     else:
-        output_dim = 1 if task in {"regression", "outlier_detection", "change_detection"} else int(num_dim)
+        output_dim = int(target_spec["output_dim"])
         model = ists_model(
             model_name=model_name,
             input_dim=num_dim,
@@ -1872,11 +1905,30 @@ def optimize(
         dataset_name=data_name,
         dataset_source=dataset_source,
         dataset_npz=dataset_npz,
+        task=task,
     )
     _, timestamp_summary = resolve_timestamp_delta_metadata(
         dataset_payload.timestamps,
         summary=dataset_payload.timestamp_summary,
     )
+    task_output_dim = None
+    if str(task).strip().lower() != "classification":
+        task_target, _, _ = load_task_targets_npz(
+            dataset=data_name,
+            targets_root=targets_root,
+            task=task,
+            horizon=forecast_horizon,
+            num_samples=int(dataset_payload.X.shape[0]),
+            seq_len=int(dataset_payload.X.shape[2]),
+            input_dim=int(dataset_payload.X.shape[1]),
+            input_values=dataset_payload.X,
+        )
+        task_output_dim = infer_task_output_dim(
+            task=task,
+            target=task_target,
+            input_dim=int(dataset_payload.X.shape[1]),
+        )
+    validate_model_task_capability(model_name, task)
     constrained_capacity_config = None
     if search_policy == CONSTRAINED_SEARCH_POLICY:
         X_capacity = dataset_payload.X
@@ -1896,6 +1948,7 @@ def optimize(
             num_class=num_class,
             task=task,
             forecast_horizon=forecast_horizon,
+            output_dim=task_output_dim,
             search_profile=search_profile,
             search_space=search_space,
         )
@@ -2428,8 +2481,9 @@ def main():
                 task=args.task,
             )
             split_seeds = _fixed_search_seed_set(args.search_repeat, SEED)
+            validate_model_task_capability(model_name, args.task)
             split_paths = [
-                os.path.join(args.split_root, data_name, f"{data_name}_{seed}")
+                str(resolve_task_split_path(args.split_root, data_name, seed, task=args.task))
                 for seed in split_seeds
             ]
             missing_split_paths = [path for path in split_paths if not os.path.exists(path)]

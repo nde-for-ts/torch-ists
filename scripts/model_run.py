@@ -103,6 +103,17 @@ def _abspath_or_none(path):
     return os.path.abspath(os.path.expanduser(str(path)))
 
 
+def _normalize_target_source_arg(raw: str) -> str:
+    normalized = str(raw).strip().lower()
+    if normalized == "surrogate":
+        raise argparse.ArgumentTypeError(
+            "--target-source surrogate is no longer supported; provide a dataset-owned target bundle"
+        )
+    if normalized != "dataset":
+        raise argparse.ArgumentTypeError("--target-source must be dataset")
+    return normalized
+
+
 def _normalize_search_profile_arg(raw: str) -> str:
     try:
         return normalize_search_profile(raw)
@@ -249,7 +260,12 @@ def _expected_param_target_identity(
         else [int(model_config.get("search_algorithm_seed", 42))]
     )
     for split_seed in split_seeds:
-        split_path = Path(split_root) / data_name / f"{data_name}_{split_seed}"
+        split_path = resolve_task_split_path(
+            split_root,
+            data_name,
+            split_seed,
+            task=task_name,
+        )
         if not split_path.exists():
             raise FileNotFoundError(f"Split artifact not found: {split_path}")
     return {
@@ -887,7 +903,7 @@ def parse_cli_args():
             "change_detection",
         ],
         default="classification",
-        help="Task head. Classification is stable; other task heads are experimental.",
+        help="Task head. Classification is stable; other task heads are preview workflows.",
     )
     parser.add_argument(
         "--forecast-horizon",
@@ -897,10 +913,10 @@ def parse_cli_args():
     )
     parser.add_argument(
         "--target-source",
-        type=str,
-        choices=["dataset", "surrogate"],
+        type=_normalize_target_source_arg,
         default="dataset",
-        help="Target source for non-classification tasks; surrogate targets are rejected.",
+        metavar="{dataset}",
+        help="Dataset-owned target source for non-classification tasks.",
     )
     parser.add_argument(
         "--targets-root",
@@ -998,10 +1014,13 @@ from _training_runtime import (
     train,
 )
 from task_target_contracts import (
+    infer_task_output_dim,
     load_task_targets_npz,
     mask_imputation_inputs,
+    resolve_task_split_path,
     validate_task_splits,
 )
+from torch_ists.task_registry import validate_model_task_capability
 from torch_ists.config import (
     get_data_config,
     get_active_model_list,
@@ -1087,6 +1106,7 @@ def _build_output_contract(
     dataset_source,
     data_shape,
     num_class,
+    output_dim,
     missing_rate,
     evaluation_regime,
     train_missing_type,
@@ -1117,6 +1137,7 @@ def _build_output_contract(
         "dataset_source": str(dataset_source),
         "data_shape": [int(value) for value in data_shape],
         "num_class": int(num_class),
+        "output_dim": None if output_dim is None else int(output_dim),
         "model": str(model_name),
         "model_parameters": copy.deepcopy(model_parameters),
         "seed": int(seed),
@@ -1186,7 +1207,14 @@ def _expected_task_prediction_shape(task, count, expected_contract, output_path)
         )
     input_dim = int(data_shape[1])
     seq_len = int(data_shape[2])
-    if task in {"regression", "outlier_detection"}:
+    if task == "regression":
+        output_dim = int((expected_contract or {}).get("output_dim", 0))
+        if output_dim <= 0:
+            raise OutputArtifactContractError(
+                f"Output artifact {output_path} cannot be reused: regression output width is invalid."
+            )
+        return (count, output_dim)
+    if task == "outlier_detection":
         return (count, 1)
     if task == "forecasting":
         horizon = expected_contract.get("forecast_horizon")
@@ -1799,16 +1827,30 @@ def _compute_binary_detection_metrics(
     probs = torch.sigmoid(logits).numpy()
     pred_label = probs >= 0.5
     true_label = target >= 0.5
-    if np.unique(true_label).size != 2:
-        raise ValueError(f"{task} metrics require both binary classes")
+    has_both_classes = np.unique(true_label).size == 2
+    availability = {"available": bool(has_both_classes)}
+    if not has_both_classes:
+        availability["reason"] = "requires both binary classes"
     acc = float(np.mean(pred_label == true_label))
     return {
         "bce": bce,
         accuracy_key: acc,
         "balanced_accuracy": float(balanced_accuracy_score(true_label.ravel(), pred_label.ravel())),
         "f1": float(f1_score(true_label.ravel(), pred_label.ravel(), zero_division=0)),
-        "auroc": float(roc_auc_score(true_label.ravel(), probs.ravel())),
-        "auprc": float(average_precision_score(true_label.ravel(), probs.ravel())),
+        "auroc": (
+            float(roc_auc_score(true_label.ravel(), probs.ravel()))
+            if has_both_classes
+            else None
+        ),
+        "auprc": (
+            float(average_precision_score(true_label.ravel(), probs.ravel()))
+            if has_both_classes
+            else None
+        ),
+        "metric_availability": {
+            "auroc": dict(availability),
+            "auprc": dict(availability),
+        },
         "supervised_element_count": supervised_count,
     }
 
@@ -2196,6 +2238,7 @@ def run_model(
     solver_budget_seq_len_threshold=0,
 ):
     task = str(task).strip().lower()
+    validate_model_task_capability(model_name, task)
     if robustness_mode:
         robustness_test_rates = _parse_missing_rates(robustness_test_rates)
         robustness_test_mechanisms = _parse_robustness_mechanisms(robustness_test_mechanisms)
@@ -2238,6 +2281,7 @@ def run_model(
         dataset_name=data_name,
         dataset_source=dataset_source,
         dataset_npz=dataset_npz,
+        task=task,
     )
     X = dataset_payload.X
     Y = dataset_payload.y
@@ -2246,7 +2290,7 @@ def run_model(
     num_data = X.shape[0]
     num_dim = X.shape[1]
     seq_len = X.shape[2]
-    num_class = len(np.unique(Y))
+    num_class = len(np.unique(Y)) if task == "classification" else 1
     solver_exclusion_reason = _solver_budget_exclusion_reason(
         model_name,
         seq_len,
@@ -2274,8 +2318,7 @@ def run_model(
 #     valid_idx, test_idx = sklearn.model_selection.train_test_split(test_idx, train_size=0.5, shuffle=True, stratify=Y[test_idx], random_state=SEED)
 
     # load splits
-    out_name = '_'.join([data_name, str(SEED)])
-    split_path = os.path.join(split_root, data_name, out_name)
+    split_path = resolve_task_split_path(split_root, data_name, SEED, task=task)
     with open(split_path, 'rb') as f:
         train_idx, valid_idx, test_idx = pickle.load(f)
     task_targets = None
@@ -2291,6 +2334,7 @@ def run_model(
             num_samples=int(num_data),
             seq_len=int(seq_len),
             input_dim=int(num_dim),
+            input_values=X,
         )
         target_spec = dict(target_spec)
         target_spec["split_supervision"] = validate_task_splits(
@@ -2319,6 +2363,11 @@ def run_model(
         seq_len=seq_len,
     )
     batch_size = int(batch_policy["batch_size"])
+    task_output_dim = (
+        None
+        if task == "classification"
+        else infer_task_output_dim(task=task, target=task_targets, input_dim=int(num_dim))
+    )
 
     # set learning params
     lr_policy = resolve_learning_rate_policy(model_config.get("lr"), require_config=True)
@@ -2356,6 +2405,7 @@ def run_model(
         dataset_source=dataset_source,
         data_shape=X.shape,
         num_class=num_class,
+        output_dim=task_output_dim,
         missing_rate=0.0 if robustness_mode else missing_rate,
         evaluation_regime=evaluation_regime,
         train_missing_type=train_missing_type,
@@ -2375,7 +2425,11 @@ def run_model(
             out_path,
             output_contract,
             expected_sample_indices=test_idx,
-            expected_y_true=np.asarray(Y)[np.asarray(test_idx, dtype=np.int64)],
+            expected_y_true=(
+                np.asarray(Y)[np.asarray(test_idx, dtype=np.int64)]
+                if task == "classification"
+                else None
+            ),
         )
         return None
     lr = float(lr_policy["lr"])
@@ -2524,7 +2578,7 @@ def run_model(
             **model_kwargs,
         )
     else:
-        output_dim = 1 if task in {"regression", "outlier_detection", "change_detection"} else int(num_dim)
+        output_dim = int(task_output_dim)
         model = ists_model(
             model_name=model_name,
             input_dim=num_dim,
@@ -3336,7 +3390,14 @@ def main():
                             robustness_test_mechanisms=args.robustness_test_mechanisms,
                             robustness_channel_sync_options=args.robustness_channel_sync_options,
                         )
-                        split_path = os.path.join(args.split_root, data_name, f"{data_name}_{seed}")
+                        split_path = str(
+                            resolve_task_split_path(
+                                args.split_root,
+                                data_name,
+                                seed,
+                                task=args.task,
+                            )
+                        )
                         if args.existing_policy == "fail":
                             reason = "output artifact already exists (--check, existing-policy=fail)"
                             skipped.append(
@@ -3526,7 +3587,14 @@ def main():
                                 robustness_mode=False,
                                 task=args.task,
                             )
-                            split_path = os.path.join(args.split_root, data_name, f"{data_name}_{seed}")
+                            split_path = str(
+                                resolve_task_split_path(
+                                    args.split_root,
+                                    data_name,
+                                    seed,
+                                    task=args.task,
+                                )
+                            )
                             if args.existing_policy == "fail":
                                 reason = "output artifact already exists (--check, existing-policy=fail)"
                                 skipped.append(

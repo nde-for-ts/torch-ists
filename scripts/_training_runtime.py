@@ -267,26 +267,32 @@ class ists_dataset(Dataset):
         target_masks=None,
     ):
         self.task = _resolve_task(task)
-        self.Y = y[split]
+        self.Y = None if y is None else y[split]
         self.X_missing = x_missing[split, ...]
         self.X_mask = x_mask[split, ...]
         self.X_delta = x_delta[split, ...]
         self.Coeffs = coeffs[split, ...]
-        self.Targets = self.Y if targets is None else targets[split, ...]
+        if targets is None:
+            if self.Y is None:
+                raise ValueError("classification labels are required when task targets are absent")
+            self.Targets = self.Y
+        else:
+            self.Targets = targets[split, ...]
         self.TargetMasks = None if target_masks is None else target_masks[split, ...]
 
     def __len__(self) -> int:
-        return len(self.Y)
+        return len(self.X_missing)
 
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
         sample = {
-            "label": self.Y[idx],
             "target": self.Targets[idx],
             "x_missing": self.X_missing[idx],
             "x_mask": self.X_mask[idx],
             "x_delta": self.X_delta[idx],
             "coeffs": self.Coeffs[idx],
         }
+        if self.Y is not None:
+            sample["label"] = self.Y[idx]
         if self.TargetMasks is not None:
             sample["target_mask"] = self.TargetMasks[idx]
         return sample
@@ -332,7 +338,7 @@ def train(
     use_raw_missing = _resolve_raw_missing_policy(str(model_name), model)
 
     for batch in train_iter:
-        y = batch["label"].long().to(device)
+        y = batch["label"].long().to(device) if task == "classification" else None
         mask = _expand_mask_or_delta(batch["x_mask"], batch["x_missing"])
         delta = _expand_mask_or_delta(batch["x_delta"], batch["x_missing"])
         x_values = batch["x_missing"] if use_raw_missing else torch.nan_to_num(batch["x_missing"], 0.0)
@@ -347,6 +353,7 @@ def train(
         )
 
         if task == "classification":
+            assert y is not None
             logits, aux_loss = _split_prediction_and_aux_loss(output)
             loss = criterion(logits, y)
             if aux_loss is not None:
@@ -422,7 +429,7 @@ def evaluate(
 
     with torch.no_grad():
         for batch in val_iter:
-            y = batch["label"].long().to(device)
+            y = batch["label"].long().to(device) if task == "classification" else None
             mask = _expand_mask_or_delta(batch["x_mask"], batch["x_missing"])
             delta = _expand_mask_or_delta(batch["x_delta"], batch["x_missing"])
             x_values = batch["x_missing"] if use_raw_missing else torch.nan_to_num(batch["x_missing"], 0.0)
@@ -435,6 +442,7 @@ def evaluate(
                 request_aux=True,
             )
             if task == "classification":
+                assert y is not None
                 logits, aux_loss = _split_prediction_and_aux_loss(output)
                 loss = criterion(logits, y)
                 if aux_loss is not None:

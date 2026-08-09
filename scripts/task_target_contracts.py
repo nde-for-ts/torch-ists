@@ -25,6 +25,81 @@ IMPUTATION_MASK_KEY = "imputation_loss_mask"
 CHANGE_DETECTION_MASK_KEY = "change_detection_loss_mask"
 
 
+def resolve_task_split_path(
+    split_root: str | Path,
+    dataset: str,
+    seed: int,
+    *,
+    task: str,
+) -> Path:
+    """Return the unchanged classification path or a task-isolated preview path."""
+    task_name = str(task).strip().lower()
+    stem = f"{dataset}_{int(seed)}"
+    if task_name != "classification":
+        if task_name not in SUPPORTED_TARGET_TASKS:
+            raise ValueError(f"Unsupported task for split path: {task!r}")
+        stem = f"{stem}__task_{task_name}"
+    return Path(split_root) / str(dataset) / stem
+
+
+def make_fixed_task_splits(
+    *,
+    num_samples: int,
+    seed: int,
+    train: float = 0.7,
+    valid: float = 0.15,
+    test: float = 0.15,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Build deterministic label-independent splits for preview tasks."""
+    n = int(num_samples)
+    if n < 3:
+        raise ValueError("preview task splits require at least 3 samples")
+    if min(train, valid, test) <= 0 or abs((train + valid + test) - 1.0) > 1e-8:
+        raise ValueError("train/valid/test ratios must be positive and sum to 1.0")
+    train_count = int(np.floor(n * float(train)))
+    holdout_count = n - train_count
+    valid_count = int(np.floor(holdout_count * float(valid) / float(valid + test)))
+    test_count = holdout_count - valid_count
+    if min(train_count, valid_count, test_count) <= 0:
+        raise ValueError(
+            "preview task split ratios produce an empty split: "
+            f"train={train_count}, valid={valid_count}, test={test_count}"
+        )
+    indices = np.random.RandomState(int(seed)).permutation(n).astype(np.int64)
+    return (
+        indices[:train_count],
+        indices[train_count : train_count + valid_count],
+        indices[train_count + valid_count :],
+    )
+
+
+def infer_task_output_dim(
+    *,
+    task: str,
+    target: torch.Tensor,
+    input_dim: int,
+) -> int:
+    """Infer the shared task-head width from a validated target."""
+    task_name = str(task).strip().lower()
+    if task_name == "regression":
+        if target.ndim != 2 or int(target.shape[1]) <= 0:
+            raise ValueError("regression target must have shape [N,R] with R >= 1")
+        return int(target.shape[1])
+    if task_name in {"forecasting", "imputation"}:
+        return int(input_dim)
+    if task_name in {"outlier_detection", "change_detection"}:
+        return 1
+    raise ValueError(f"Output width inference is unsupported for task={task!r}")
+
+
+def _binary_metric_availability(class_count: int) -> Dict[str, Dict[str, Any]]:
+    available = int(class_count) == 2
+    status = {"available": available}
+    if not available:
+        status["reason"] = "requires both binary classes"
+    return {"auroc": dict(status), "auprc": dict(status)}
+
+
 def mask_imputation_inputs(
     inputs: torch.Tensor,
     supervision_mask: torch.Tensor,
@@ -76,11 +151,13 @@ def validate_task_splits(
         split_summary = {"supervised_element_count": int(supervised.numel())}
         if task_name in {"outlier_detection", "change_detection"}:
             classes = torch.unique(supervised).detach().cpu().tolist()
-            if set(classes) != {0.0, 1.0}:
+            class_count = int(len(classes))
+            if str(split_name).strip().lower() in {"train", "training"} and set(classes) != {0.0, 1.0}:
                 raise ValueError(
                     f"{split_name} split must contain both binary classes for {task_name}"
                 )
-            split_summary["binary_class_count"] = 2
+            split_summary["binary_class_count"] = class_count
+            split_summary["metric_availability"] = _binary_metric_availability(class_count)
         summary[str(split_name)] = split_summary
     return summary
 
@@ -106,14 +183,34 @@ def _validate_first_dim(name: str, value: np.ndarray, expected_n: int) -> None:
         )
 
 
+def _validate_input_values(
+    input_values: Any,
+    *,
+    num_samples: int,
+    seq_len: int,
+    input_dim: int,
+) -> Optional[np.ndarray]:
+    if input_values is None:
+        return None
+    if torch.is_tensor(input_values):
+        input_values = input_values.detach().cpu().numpy()
+    values = np.asarray(input_values, dtype=np.float32)
+    expected = (int(num_samples), int(input_dim), int(seq_len))
+    if tuple(values.shape) != expected:
+        raise ValueError(
+            f"input_values must have dataset shape [N,D,L]={expected}, got {values.shape}"
+        )
+    return values
+
+
 def _validate_regression_target(target: np.ndarray, *, num_samples: int) -> np.ndarray:
     if target.ndim == 1:
         target = target.reshape(num_samples, 1)
     elif target.ndim != 2:
-        raise ValueError(f"regression_target must be 1D/2D [N] or [N,1], got {target.shape}")
+        raise ValueError(f"regression_target must be 1D/2D [N] or [N,R], got {target.shape}")
     _validate_first_dim("regression_target", target, num_samples)
-    if target.shape[1] != 1:
-        raise ValueError(f"regression_target second dimension must be 1, got {target.shape[1]}")
+    if target.shape[1] <= 0:
+        raise ValueError("regression_target second dimension R must be >= 1")
     if not np.isfinite(target).all():
         raise ValueError("regression_target must be finite")
     return target
@@ -269,6 +366,7 @@ def load_task_targets_npz(
     num_samples: int,
     seq_len: int,
     input_dim: int,
+    input_values: Any = None,
 ) -> tuple[torch.Tensor, Optional[torch.Tensor], Dict[str, Any]]:
     task_name = str(task).strip().lower()
     if task_name not in SUPPORTED_TARGET_TASKS:
@@ -277,6 +375,12 @@ def load_task_targets_npz(
             f"Supported tasks are {sorted(SUPPORTED_TARGET_TASKS)}"
         )
 
+    validated_inputs = _validate_input_values(
+        input_values,
+        num_samples=num_samples,
+        seq_len=seq_len,
+        input_dim=input_dim,
+    )
     target_path = Path(targets_root) / f"{dataset}.npz"
     if not target_path.exists():
         raise FileNotFoundError(f"Target bundle not found for dataset={dataset}: {target_path}")
@@ -337,6 +441,31 @@ def load_task_targets_npz(
                 expected_shape=(num_samples, seq_len, 1),
             )
 
+    valid_time_policy = None
+    raw_unit_comparison_count = 0
+    if validated_inputs is not None:
+        valid_time = np.isfinite(validated_inputs).any(axis=1)
+        valid_time_policy = "any_finite_input_channel"
+        if target_mask is not None:
+            supervised_time = np.asarray(target_mask > 0.5).any(axis=2)
+            if np.any(supervised_time & ~valid_time):
+                raise ValueError(
+                    f"{task_name} supervision mask selects invalid/padded time steps"
+                )
+        if task_name == "imputation":
+            raw_layout = validated_inputs.transpose(0, 2, 1)
+            comparable = (target_mask > 0.5) & np.isfinite(raw_layout)
+            raw_unit_comparison_count = int(np.count_nonzero(comparable))
+            if raw_unit_comparison_count and not np.allclose(
+                target[comparable],
+                raw_layout[comparable],
+                rtol=1e-5,
+                atol=1e-6,
+            ):
+                raise ValueError(
+                    "imputation_target supervised values must match dataset-native input values"
+                )
+
     target_tensor = _as_float_tensor(target)
     mask_tensor = _as_float_tensor(target_mask) if target_mask is not None else None
     target_spec: Dict[str, Any] = {
@@ -346,6 +475,14 @@ def load_task_targets_npz(
         "target_key": TASK_TARGET_KEYS[task_name],
         "target_shape": [int(x) for x in target_tensor.shape],
         "target_dtype": str(target_tensor.dtype),
+        "target_value_space": "dataset_native",
+        "valid_time_policy": valid_time_policy,
+        "raw_unit_comparison_count": raw_unit_comparison_count,
+        "output_dim": infer_task_output_dim(
+            task=task_name,
+            target=target_tensor,
+            input_dim=input_dim,
+        ),
         "forecast_horizon": target_horizon if task_name == "forecasting" else None,
         "mask_key": (
             IMPUTATION_MASK_KEY

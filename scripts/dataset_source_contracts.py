@@ -17,7 +17,7 @@ TIMESTAMP_COMMON_GRID_ATOL = 1e-6
 @dataclass(frozen=True)
 class DatasetPayload:
     X: np.ndarray
-    y: np.ndarray
+    y: np.ndarray | None
     timestamps: np.ndarray | None = None
     timestamp_summary: dict[str, Any] | None = None
 
@@ -50,17 +50,25 @@ def _remap_labels_to_contiguous(y: np.ndarray) -> np.ndarray:
     return np.array([label_to_index[label] for label in y], dtype=np.int64)
 
 
-def _validate_xy(X: np.ndarray, y: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+def _validate_x(X: np.ndarray) -> np.ndarray:
     X = np.asarray(X, dtype=np.float32)
-    y = np.asarray(y)
     if X.ndim != 3:
         raise ValueError(f"X must be 3D [N, D, L], got shape {X.shape}")
+    return X
+
+
+def _validate_y(y: np.ndarray, X: np.ndarray) -> np.ndarray:
+    y = np.asarray(y)
     if y.ndim != 1:
         raise ValueError(f"y must be 1D [N], got shape {y.shape}")
     if X.shape[0] != y.shape[0]:
         raise ValueError(f"sample mismatch: X has {X.shape[0]}, y has {y.shape[0]}")
-    y = _remap_labels_to_contiguous(y)
-    return X, y
+    return _remap_labels_to_contiguous(y)
+
+
+def _validate_xy(X: np.ndarray, y: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    X = _validate_x(X)
+    return X, _validate_y(y, X)
 
 
 def _count_monotonic_failures(timestamps: np.ndarray) -> int:
@@ -231,7 +239,11 @@ def _validate_timestamps(timestamps: np.ndarray | None, X: np.ndarray) -> np.nda
     return timestamps
 
 
-def load_dataset_npz_payload(path: str | Path) -> DatasetPayload:
+def load_dataset_npz_payload(
+    path: str | Path,
+    *,
+    task: str = "classification",
+) -> DatasetPayload:
     path = Path(path)
     if path.suffix.lower() != ".npz":
         raise ValueError(f"--dataset-npz must point to a .npz file, got: {path}")
@@ -241,10 +253,18 @@ def load_dataset_npz_payload(path: str | Path) -> DatasetPayload:
     keys = set(loaded.files)
     x_key = "X" if "X" in keys else "x" if "x" in keys else None
     y_key = "y" if "y" in keys else "Y" if "Y" in keys else None
-    if x_key is None or y_key is None:
-        raise ValueError(f"dataset npz must include X/y keys, got: {sorted(keys)}")
+    if x_key is None:
+        raise ValueError(f"dataset npz must include X, got: {sorted(keys)}")
 
-    X, y = _validate_xy(loaded[x_key], loaded[y_key])
+    task_name = str(task).strip().lower()
+    if task_name == "classification" and y_key is None:
+        raise ValueError(
+            "classification dataset npz must include X/y keys; "
+            f"got: {sorted(keys)}"
+        )
+
+    X = _validate_x(loaded[x_key])
+    y = None if y_key is None else _validate_y(loaded[y_key], X)
     timestamps = _validate_timestamps(loaded["timestamps"] if "timestamps" in keys else None, X)
     return DatasetPayload(
         X=X,
@@ -289,12 +309,13 @@ def load_dataset_payload(
     dataset_name: str,
     dataset_source: str,
     dataset_npz: str | Path | None,
+    task: str = "classification",
 ) -> DatasetPayload:
     normalized = normalize_dataset_source(dataset_source)
     if normalized == "npz":
         if not dataset_npz:
             raise ValueError("--dataset-npz is required when --dataset-source=npz")
-        return load_dataset_npz_payload(dataset_npz)
+        return load_dataset_npz_payload(dataset_npz, task=task)
     if normalized == "default":
         return load_default_dataset_payload(dataset_name)
     raise ValueError(f"Unsupported dataset_source: {dataset_source}")
@@ -305,10 +326,12 @@ def load_dataset(
     dataset_name: str,
     dataset_source: str,
     dataset_npz: str | Path | None,
-) -> Tuple[np.ndarray, np.ndarray]:
+    task: str = "classification",
+) -> Tuple[np.ndarray, np.ndarray | None]:
     payload = load_dataset_payload(
         dataset_name=dataset_name,
         dataset_source=dataset_source,
         dataset_npz=dataset_npz,
+        task=task,
     )
     return payload.X, payload.y

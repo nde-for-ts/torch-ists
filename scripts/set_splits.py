@@ -8,6 +8,12 @@ from pathlib import Path
 
 from _common import configure_runtime_paths
 from dataset_source_contracts import load_dataset_payload, normalize_dataset_source
+from task_target_contracts import (
+    load_task_targets_npz,
+    make_fixed_task_splits,
+    resolve_task_split_path,
+    validate_task_splits,
+)
 
 sys.dont_write_bytecode = True
 
@@ -27,6 +33,7 @@ def _load_dataset(args):
         dataset_name=args.dataset_name,
         dataset_source=args.dataset_source,
         dataset_npz=args.dataset_npz,
+        task=args.task,
     )
 
 
@@ -46,6 +53,30 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to .npz file containing X and y (required when --dataset-source=npz)",
     )
     parser.add_argument("--seed", type=int, default=42, help="Random seed for split generation (default 42; eval seeds 0-4 are disjoint).")
+    parser.add_argument(
+        "--task",
+        choices=[
+            "classification",
+            "regression",
+            "forecasting",
+            "imputation",
+            "outlier_detection",
+            "change_detection",
+        ],
+        default="classification",
+        help="Task that owns the split artifact (default: classification).",
+    )
+    parser.add_argument(
+        "--targets-root",
+        default="targets",
+        help="Root containing <dataset>.npz task target bundles.",
+    )
+    parser.add_argument(
+        "--forecast-horizon",
+        type=int,
+        default=None,
+        help="Required target horizon for forecasting splits.",
+    )
     parser.add_argument(
         "--if-exists",
         choices=["reuse", "fail"],
@@ -110,10 +141,28 @@ def main() -> int:
             save_splits,
         )
 
-        split_path = get_split_path(Path(args.out_dir), args.dataset_name, args.seed)
+        split_path = resolve_task_split_path(
+            args.out_dir,
+            args.dataset_name,
+            args.seed,
+            task=args.task,
+        )
         reuse_existing = False
         payload = _load_dataset(args)
         timestamp_summary = payload.timestamp_summary
+        target_spec = None
+
+        if args.task != "classification":
+            target, target_mask, target_spec = load_task_targets_npz(
+                dataset=args.dataset_name,
+                targets_root=args.targets_root,
+                task=args.task,
+                horizon=args.forecast_horizon,
+                num_samples=int(payload.X.shape[0]),
+                seq_len=int(payload.X.shape[2]),
+                input_dim=int(payload.X.shape[1]),
+                input_values=payload.X,
+            )
 
         if split_path.exists():
             if args.if_exists == "fail":
@@ -121,9 +170,34 @@ def main() -> int:
             train_idx, valid_idx, test_idx = load_splits(split_path)
             reuse_existing = True
         else:
-            train_idx, valid_idx, test_idx = make_stratified_splits(y=payload.y, seed=args.seed)
+            if args.task == "classification":
+                assert payload.y is not None
+                train_idx, valid_idx, test_idx = make_stratified_splits(y=payload.y, seed=args.seed)
+            else:
+                train_idx, valid_idx, test_idx = make_fixed_task_splits(
+                    num_samples=int(payload.X.shape[0]),
+                    seed=args.seed,
+                )
             if not args.dry_run:
                 save_splits(split_path, train_idx, valid_idx, test_idx)
+        if args.task != "classification":
+            assert target_spec is not None
+            target_spec = dict(target_spec)
+            target_spec["split_supervision"] = validate_task_splits(
+                task=args.task,
+                target=target,
+                target_mask=target_mask,
+                splits={"training": train_idx, "validation": valid_idx, "test": test_idx},
+            )
+        preview_fields = (
+            {}
+            if args.task == "classification"
+            else {
+                "task": args.task,
+                "split_policy": "deterministic_fixed",
+                "target_spec": target_spec,
+            }
+        )
         manifest_path, _manifest = write_manifest(
             stage="split",
             contract_dir=args.contract_dir,
@@ -144,6 +218,7 @@ def main() -> int:
                     "valid": int(len(valid_idx)),
                     "test": int(len(test_idx)),
                 },
+                **preview_fields,
             },
         )
 
@@ -162,6 +237,7 @@ def main() -> int:
                 "valid": int(len(valid_idx)),
                 "test": int(len(test_idx)),
             },
+            **preview_fields,
         }
         print(json.dumps(result, indent=2))
         return 0

@@ -698,7 +698,7 @@ Canonical model construction lives in `torch_ists.model`.
 
 Task support tiers:
 - `classification`: stable path
-- `regression`, `forecasting`, `imputation`, `outlier_detection`, `change_detection`: experimental
+- `regression`, `forecasting`, `imputation`, `outlier_detection`, `change_detection`: preview
 
 Use `ists_classifier` for the stable classification path. Non-classification tasks are available through `ists_model`.
 
@@ -799,6 +799,10 @@ Broader task surface:
 - `classification` is the stable packaged path.
 
 The five non-classification outputs are shared package task-head adapters. A model's original paper may define a narrower prediction problem; for example, the NJ-ODE forecasting adapter does not reproduce paper-native future-time filtering because the current target contract does not carry a future timestamp grid.
+
+The source-checkout workflow accepts X-only dataset NPZ files for preview tasks, stores their deterministic splits at task-suffixed paths, and infers regression `output_dim` from `[N,R]` dataset targets. Target values stay in dataset-native units; shape, dtype, mask, valid-time, and horizon checks run before training.
+
+`torch_ists.task_registry.get_model_task_capabilities(model_name)` returns data-driven capability fields for the selected model. `validate_model_task_capability(model_name, task, ...)` rejects unsupported requirements, including native future-time prediction, ragged suffix handling, and causal guarantees, before hyperparameter search.
 
 Behavior notes:
 - If `use_intensity` is omitted (`None`), runtime resolves it from `get_data_config(model_name)` inside `ists_layer`.
