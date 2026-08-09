@@ -78,6 +78,8 @@ ODE-style recurrent methods. The GRU-D, GRU-ODE, and ODE-RNN-spline rows are bui
 
 `gru-d` and `gru-dt` are discrete updates and use no numerical solver. The packaged defaults are Euler for `gru-ode`, RK4 for `ode-rnn-spline`, and adaptive Dopri5 for `ode-lstm`.
 
+When physical timestamps are supplied, `gru-d`, `gru-dt`, and `ode-rnn-spline` use each sample's event durations; timestamp-free calls keep the normalized shared grid.
+
 Source ODE rows prefer the exact event clock when physical timestamps are supplied and otherwise retain elapsed-delta reconstruction.
 
 ---

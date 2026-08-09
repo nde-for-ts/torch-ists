@@ -40,14 +40,10 @@ class _GRU(torch.nn.Module):
             x_i_piece[:, 0] += dt
             new_h = self.gru_cell(x_i_piece, h)
             h = torch.where(observation.unsqueeze(1), new_h, h)
-            dt += torch.where(
-                observation,
-                torch.tensor(0.0, dtype=x_i.dtype, device=x_i.device),
-                x_i[:, 0],
-            )
+        dt = torch.where(observation, torch.zeros_like(dt), dt + x_i[:, 0])
         return h, dt
 
-    def forward(self, times, coeffs, final_index, z0=None, stream=True):
+    def forward(self, times, coeffs, final_index, z0=None, stream=True, sample_times=None):
         if isinstance(coeffs, torch.Tensor):
             coeffs = torch.chunk(coeffs, chunks=4, dim=-1)
 
@@ -55,9 +51,31 @@ class _GRU(torch.nn.Module):
         x = torch.stack([interp.evaluate(t) for t in times], dim=-2)
         half_num_channels = (self.input_channels - 1) // 2
 
+        if sample_times is None:
+            runtime_times = times.unsqueeze(0).expand(x.shape[0], -1)
+        else:
+            runtime_times = torch.as_tensor(sample_times, dtype=x.dtype, device=x.device)
+            if tuple(runtime_times.shape) != tuple(x.shape[:2]):
+                raise ValueError(
+                    "sample_times must match the coefficient batch/time dimensions; "
+                    f"got {tuple(runtime_times.shape)} and {tuple(x.shape[:2])}"
+                )
+            if not bool(torch.isfinite(runtime_times).all()):
+                raise ValueError("sample_times must be finite")
+            if runtime_times.shape[1] > 1 and not bool(
+                (runtime_times[:, 1:] > runtime_times[:, :-1]).all()
+            ):
+                raise ValueError("sample_times must be strictly increasing")
+
+        control_times = x[:, :, 0].clone()
+        if not torch.allclose(control_times, runtime_times, atol=1e-5, rtol=1e-5):
+            raise ValueError(
+                "sample_times must use the same clock as the coefficient time channel"
+            )
+
         x[:, 1:, 1 : 1 + half_num_channels] -= x[:, :-1, 1 : 1 + half_num_channels]
-        x[:, 0, 0] -= times[0]
-        x[:, 1:, 0] -= times[:-1]
+        x[:, 0, 0] = control_times[:, 0] - runtime_times[:, 0]
+        x[:, 1:, 0] = control_times[:, 1:] - control_times[:, :-1]
 
         batch_dims = x.shape[:-2]
         if z0 is None:
@@ -71,7 +89,7 @@ class _GRU(torch.nn.Module):
             half_num_channels,
         )
         hs = [h]
-        time_diffs = times[1:] - times[:-1]
+        time_diffs = (runtime_times[:, 1:] - runtime_times[:, :-1]).unbind(dim=1)
         for time_diff, x_i in zip(time_diffs, x_unbound[1:]):
             h = self.evolve(h, time_diff)
             h, dt = self._step(x_i, h, dt, half_num_channels)
@@ -103,7 +121,11 @@ class GRU_D(_GRU):
         self.decay = torch.nn.Linear(1, hidden_channels)
 
     def evolve(self, h, time_diff):
-        return h * torch.exp(-self.decay(time_diff.unsqueeze(0)).squeeze(0).relu())
+        durations = time_diff.reshape(-1, 1).to(dtype=h.dtype, device=h.device)
+        decay = self.decay(durations).relu()
+        if time_diff.ndim == 0:
+            decay = decay.squeeze(0)
+        return h * torch.exp(-decay)
 
 
 class _ODERNNFunc(torch.nn.Module):
@@ -149,7 +171,14 @@ class ODERNN(_GRU):
         self.solver_kwargs = dict(solver_kwargs or {})
 
     def evolve(self, h, time_diff):
-        t = torch.tensor([0, time_diff.item()], dtype=time_diff.dtype, device=time_diff.device)
+        durations = torch.as_tensor(time_diff, dtype=h.dtype, device=h.device).reshape(-1)
+        if durations.numel() == 1 and h.shape[0] != 1:
+            durations = durations.expand(h.shape[0])
+        if durations.numel() != h.shape[0]:
+            raise ValueError("ODE-RNN requires one duration per batch row")
+        if not bool(torch.isfinite(durations).all()) or bool((durations < 0).any()):
+            raise ValueError("ODE-RNN durations must be finite and non-negative")
+
         call_kwargs = {"method": self.solver_method}
         options = dict(self.solver_options)
         dt_value = self.solver_kwargs.get("dt")
@@ -163,5 +192,14 @@ class ODERNN(_GRU):
 
         use_adjoint = bool(self.solver_kwargs.get("adjoint", True))
         odeint_fn = torchdiffeq.odeint_adjoint if use_adjoint else torchdiffeq.odeint
-        out = odeint_fn(func=self.func, y0=h, t=t, **call_kwargs)
-        return out[1]
+        evolved = h
+        positive = durations > 0
+        if not bool(positive.any()):
+            return evolved
+        for duration in torch.unique(durations[positive].detach(), sorted=True):
+            indices = torch.nonzero(durations == duration, as_tuple=False).reshape(-1)
+            initial = h.index_select(0, indices)
+            interval = torch.stack([duration.new_zeros(()), duration])
+            out = odeint_fn(func=self.func, y0=initial, t=interval, **call_kwargs)
+            evolved = evolved.index_copy(0, indices, out[1])
+        return evolved

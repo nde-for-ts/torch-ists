@@ -189,6 +189,31 @@ def test_source_handler_rejects_invalid_exact_sample_times(sample_times, message
         )
 
 
+def test_gru_elapsed_clock_resets_and_accumulates_all_missing_steps():
+    pytest.importorskip("torchdiffeq")
+    from torch_ists.module.ode.gru_variants import GRU_dt
+
+    model = GRU_dt(5, 2, 2, True)
+    hidden = torch.zeros(2, 2)
+    elapsed = torch.ones(2)
+    mixed_step = torch.tensor(
+        [[2.0, 1.0, 0.0, 0.25, -0.25], [3.0, 0.0, 0.0, 0.0, 0.0]]
+    )
+    hidden, elapsed = model._step(mixed_step, hidden, elapsed, half_num_channels=2)
+    assert torch.equal(elapsed, torch.tensor([0.0, 4.0]))
+
+    all_missing_step = torch.tensor(
+        [[5.0, 0.0, 0.0, 0.0, 0.0], [6.0, 0.0, 0.0, 0.0, 0.0]]
+    )
+    _hidden, elapsed = model._step(
+        all_missing_step,
+        hidden,
+        elapsed,
+        half_num_channels=2,
+    )
+    assert torch.equal(elapsed, torch.tensor([5.0, 10.0]))
+
+
 def test_inherited_runtime_configuration_guards():
     from torch_ists.config import default_method_for_model
     from torch_ists.module.attention.miam import AttentionMIAMModel

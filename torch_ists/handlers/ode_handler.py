@@ -193,7 +193,11 @@ class ODEHandler(BaseHandler):
         if coeffs is None:
             raise ValueError("ODE models require interpolation coeffs.")
 
-        data = self.preprocess_input(seq, times)
+        data = self.preprocess_input(
+            seq,
+            times,
+            sample_times=kwargs.get("sample_times"),
+        )
         model_params = self._coerce_mapping(kwargs.get("model_params"))
         model_name = kwargs.get("model_name", getattr(model, "model_name", ""))
         solver = self.resolve_solver_config(
@@ -233,6 +237,8 @@ class ODEHandler(BaseHandler):
             call_kwargs["atol"] = solver["atol"]
         if solver["adjoint"] is not None:
             call_kwargs["adjoint"] = solver["adjoint"]
+        if kwargs.get("sample_times") is not None:
+            call_kwargs["sample_times"] = data["seq_ts"]
 
         # Only pass solver kwargs that the concrete model forward supports.
         params = inspect.signature(model.forward).parameters
