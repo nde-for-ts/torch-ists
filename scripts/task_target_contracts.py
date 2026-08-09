@@ -101,27 +101,47 @@ def _binary_metric_availability(class_count: int) -> Dict[str, Dict[str, Any]]:
 
 
 def mask_imputation_inputs(
-    inputs: torch.Tensor,
-    supervision_mask: torch.Tensor,
-) -> torch.Tensor:
+    inputs: Any,
+    supervision_mask: Any,
+) -> Any:
     """Hide supervised imputation cells before preprocessing.
 
     Inputs use the dataset layout ``[N,D,L]`` while target masks use
     ``[N,L,D]``.
     """
-    if not torch.is_tensor(inputs) or inputs.ndim != 3:
-        raise ValueError("imputation inputs must be a tensor with shape [N,D,L]")
-    if not torch.is_floating_point(inputs):
+    if torch.is_tensor(inputs):
+        if inputs.ndim != 3:
+            raise ValueError("imputation inputs must have shape [N,D,L]")
+        if not torch.is_floating_point(inputs):
+            raise ValueError("imputation inputs must use a floating dtype")
+        mask = torch.as_tensor(supervision_mask, device=inputs.device)
+        expected_shape = (int(inputs.shape[0]), int(inputs.shape[2]), int(inputs.shape[1]))
+        if tuple(mask.shape) != expected_shape:
+            raise ValueError(
+                "imputation supervision mask/input shape mismatch: "
+                f"expected mask {expected_shape}, got {tuple(mask.shape)}"
+            )
+        hidden = inputs.clone()
+        hidden.masked_fill_(mask.permute(0, 2, 1) > 0.5, float("nan"))
+        return hidden
+
+    array = np.asarray(inputs)
+    if array.ndim != 3:
+        raise ValueError("imputation inputs must have shape [N,D,L]")
+    if not np.issubdtype(array.dtype, np.floating):
         raise ValueError("imputation inputs must use a floating dtype")
-    mask = torch.as_tensor(supervision_mask, device=inputs.device)
-    expected_shape = (int(inputs.shape[0]), int(inputs.shape[2]), int(inputs.shape[1]))
-    if tuple(mask.shape) != expected_shape:
+    if torch.is_tensor(supervision_mask):
+        mask_array = supervision_mask.detach().cpu().numpy()
+    else:
+        mask_array = np.asarray(supervision_mask)
+    expected_shape = (int(array.shape[0]), int(array.shape[2]), int(array.shape[1]))
+    if tuple(mask_array.shape) != expected_shape:
         raise ValueError(
             "imputation supervision mask/input shape mismatch: "
-            f"expected mask {expected_shape}, got {tuple(mask.shape)}"
+            f"expected mask {expected_shape}, got {tuple(mask_array.shape)}"
         )
-    hidden = inputs.clone()
-    hidden.masked_fill_(mask.permute(0, 2, 1) > 0.5, float("nan"))
+    hidden = array.copy()
+    hidden[np.transpose(mask_array > 0.5, (0, 2, 1))] = np.nan
     return hidden
 
 

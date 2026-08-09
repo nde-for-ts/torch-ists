@@ -1832,9 +1832,13 @@ def _compute_binary_detection_metrics(
     if not has_both_classes:
         availability["reason"] = "requires both binary classes"
     acc = float(np.mean(pred_label == true_label))
+    positive_count = int(np.count_nonzero(true_label))
+    negative_count = int(true_label.size - positive_count)
+    predicted_positive_count = int(np.count_nonzero(pred_label))
     return {
         "bce": bce,
         accuracy_key: acc,
+        "decision_threshold": 0.5,
         "balanced_accuracy": float(balanced_accuracy_score(true_label.ravel(), pred_label.ravel())),
         "f1": float(f1_score(true_label.ravel(), pred_label.ravel(), zero_division=0)),
         "auroc": (
@@ -1851,6 +1855,10 @@ def _compute_binary_detection_metrics(
             "auroc": dict(availability),
             "auprc": dict(availability),
         },
+        "positive_count": positive_count,
+        "negative_count": negative_count,
+        "positive_prevalence": float(positive_count / supervised_count),
+        "predicted_positive_count": predicted_positive_count,
         "supervised_element_count": supervised_count,
     }
 
@@ -2066,14 +2074,7 @@ def _build_evaluation_result(
             task_target,
             accuracy_key="outlier_acc",
         )
-        metrics = {
-            "bce": float(binary_metrics["bce"]),
-            "outlier_acc": float(binary_metrics["outlier_acc"]),
-            "balanced_accuracy": float(binary_metrics["balanced_accuracy"]),
-            "f1": float(binary_metrics["f1"]),
-            "auroc": float(binary_metrics["auroc"]),
-            "auprc": float(binary_metrics["auprc"]),
-        }
+        metrics = dict(binary_metrics)
         predictions = _build_task_predictions_payload(
             task_pred,
             task_target,
@@ -2089,15 +2090,7 @@ def _build_evaluation_result(
             target_mask=task_mask,
             task=task,
         )
-        metrics = {
-            "bce": float(binary_metrics["bce"]),
-            "change_acc": float(binary_metrics["change_acc"]),
-            "balanced_accuracy": float(binary_metrics["balanced_accuracy"]),
-            "f1": float(binary_metrics["f1"]),
-            "auroc": float(binary_metrics["auroc"]),
-            "auprc": float(binary_metrics["auprc"]),
-            "supervised_element_count": int(binary_metrics["supervised_element_count"]),
-        }
+        metrics = dict(binary_metrics)
         predictions = _build_task_predictions_payload(
             task_pred,
             task_target,
@@ -2734,6 +2727,32 @@ def run_model(
                 metrics["wf1"],
                 save_predictions,
             )
+        elif task == "outlier_detection":
+            LOGGER.info(
+                "Robustness run done dataset=%s model=%s task=%s evaluations=%d test_rates=%s test_types=%s bce=%.6f outlier_acc=%.6f save_predictions=%s",
+                data_name,
+                model_name,
+                task,
+                len(evaluations),
+                [r["test_missing_rate"] for r in evaluations],
+                sorted({r["test_missing_type"] for r in evaluations}),
+                metrics["bce"],
+                metrics["outlier_acc"],
+                save_predictions,
+            )
+        elif task == "change_detection":
+            LOGGER.info(
+                "Robustness run done dataset=%s model=%s task=%s evaluations=%d test_rates=%s test_types=%s bce=%.6f change_acc=%.6f save_predictions=%s",
+                data_name,
+                model_name,
+                task,
+                len(evaluations),
+                [r["test_missing_rate"] for r in evaluations],
+                sorted({r["test_missing_type"] for r in evaluations}),
+                metrics["bce"],
+                metrics["change_acc"],
+                save_predictions,
+            )
         else:
             LOGGER.info(
                 "Robustness run done dataset=%s model=%s task=%s evaluations=%d test_rates=%s test_types=%s mse=%.6f mae=%.6f save_predictions=%s",
@@ -3022,6 +3041,12 @@ def _evaluate_robustness(
     """
     model.eval()
     evaluations = []
+    task = str(task).strip().lower()
+    evaluation_inputs = (
+        mask_imputation_inputs(X, target_masks)
+        if task == "imputation"
+        else X
+    )
     use_raw_flow_input = _requires_flow_raw_input(model_name)
     test_missing_rates = _effective_robustness_test_rates(test_missing_rates)
     test_missing_mechanisms = _parse_robustness_mechanisms(test_missing_mechanisms)
@@ -3041,7 +3066,7 @@ def _evaluate_robustness(
         no_coeff_cache=no_coeff_cache,
         cache_events=coeff_cache_events,
         model_name=model_name,
-        X=X,
+        X=evaluation_inputs,
         missing_rate=0.0,
         interpolate=interpolate,
         use_intensity=use_intensity,
@@ -3050,7 +3075,7 @@ def _evaluate_robustness(
         channel_sync=False,
         timestamps=timestamps,
         timestamp_delta_scale=timestamp_delta_scale,
-        missingness_reference=X[train_idx],
+        missingness_reference=evaluation_inputs[train_idx],
     )
     train_stats, _normalization_summary = compute_train_normalization_stats(train_missing_ref, train_idx)
 
@@ -3086,16 +3111,16 @@ def _evaluate_robustness(
                     preprocess_mechanism = "MCAR" if _is_zero_missing_rate(test_rate) else test_mechanism
                     preprocess_channel_sync = False if test_channel_sync is None else bool(test_channel_sync)
                     stats_missing_np, stats_mask_np, floor_stats = apply_missingness(
-                        X,
+                        evaluation_inputs,
                         rate=float(test_rate),
                         mechanism=preprocess_mechanism,
                         seed=missing_seed,
                         channel_sync=preprocess_channel_sync,
-                        reference_X=X[train_idx],
+                        reference_X=evaluation_inputs[train_idx],
                         return_stats=True,
                     )
                     missingness_provenance = _build_missingness_provenance(
-                        X,
+                        evaluation_inputs,
                         stats_missing_np,
                         stats_mask_np,
                         requested_missing_rate=test_rate,
@@ -3107,7 +3132,7 @@ def _evaluate_robustness(
                         no_coeff_cache=no_coeff_cache,
                         cache_events=coeff_cache_events,
                         model_name=model_name,
-                        X=X,
+                        X=evaluation_inputs,
                         missing_rate=test_rate,
                         interpolate=interpolate,
                         use_intensity=use_intensity,
@@ -3116,7 +3141,7 @@ def _evaluate_robustness(
                         channel_sync=preprocess_channel_sync,
                         timestamps=timestamps,
                         timestamp_delta_scale=timestamp_delta_scale,
-                        missingness_reference=X[train_idx],
+                        missingness_reference=evaluation_inputs[train_idx],
                     )
 
                     # Reuse the training missing=0.0 statistics for all robustness test axes.
@@ -3175,7 +3200,7 @@ def _evaluate_robustness(
                             sample_indices=test_idx,
                         )
                     else:
-                        pred_list, target_list = [], []
+                        pred_list, target_list, target_mask_list = [], [], []
                         with torch.no_grad():
                             for batch in test_batch:
                                 mask = _expand_mask_or_delta(batch['x_mask'], batch['x_missing'])
@@ -3193,13 +3218,26 @@ def _evaluate_robustness(
                                 pred, target = _align_prediction_target(pred, target, task)
                                 pred_list.append(pred.detach().cpu().numpy())
                                 target_list.append(target.detach().cpu().numpy())
+                                if task in {"imputation", "change_detection"}:
+                                    target_mask = batch.get("target_mask")
+                                    if target_mask is None or tuple(target_mask.shape) != tuple(target.shape):
+                                        raise ValueError(
+                                            f"{task} evaluation requires a target_mask matching target"
+                                        )
+                                    target_mask_list.append(target_mask.detach().cpu().numpy())
 
                         task_pred = np.concatenate(pred_list, axis=0)
                         task_target = np.concatenate(target_list, axis=0)
+                        task_mask = (
+                            np.concatenate(target_mask_list, axis=0)
+                            if target_mask_list
+                            else None
+                        )
                         eval_result = _build_evaluation_result(
                             test_missing_rate=test_rate,
                             task_pred=task_pred,
                             task_target=task_target,
+                            task_mask=task_mask,
                             task=task,
                             test_missing_type=test_mechanism,
                             test_channel_sync=test_channel_sync,
@@ -3224,6 +3262,20 @@ def _evaluate_robustness(
                             metrics["f1"],
                             metrics["wf1"],
                             save_predictions,
+                        )
+                    elif task == "outlier_detection":
+                        LOGGER.info(
+                            "Robustness eval dataset=%s model=%s test_missing=%.1f type=%s channel_sync=%s missing_seed=%d task=%s bce=%.6f outlier_acc=%.6f save_predictions=%s",
+                            data_name, model_name, test_rate, test_mechanism,
+                            test_channel_sync, missing_seed, task, metrics["bce"],
+                            metrics["outlier_acc"], save_predictions,
+                        )
+                    elif task == "change_detection":
+                        LOGGER.info(
+                            "Robustness eval dataset=%s model=%s test_missing=%.1f type=%s channel_sync=%s missing_seed=%d task=%s bce=%.6f change_acc=%.6f save_predictions=%s",
+                            data_name, model_name, test_rate, test_mechanism,
+                            test_channel_sync, missing_seed, task, metrics["bce"],
+                            metrics["change_acc"], save_predictions,
                         )
                     else:
                         LOGGER.info(
