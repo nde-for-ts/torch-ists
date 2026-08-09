@@ -45,7 +45,6 @@ from _common import (
     CONSTRAINED_SEARCH_CONTRACT_NAME,
     CONSTRAINED_SEARCH_FAMILY,
     DEFAULT_SEARCH_PROFILE,
-    apply_model_scope_variant,
     build_param_artifact_identity,
     build_model_kwargs_from_config,
     configure_runtime_paths,
@@ -275,17 +274,6 @@ def _validate_existing_param_artifact_for_reuse(
     return existing_profile
 
 
-def _resolve_model_scope_variant(requested_variant: str) -> str:
-    normalized = str(requested_variant).strip().lower()
-    if normalized in {"", "active"}:
-        return "active"
-    raise ValueError("This package supports only the active model scope.")
-
-
-def _validate_requested_scope(model_names: list[str], *, scope_variant: str) -> None:
-    del model_names, scope_variant
-    return
-
 
 def _requires_flow_raw_input(model_name: str) -> bool:
     from torch_ists.config.alias_policy import is_flow_strict_raw_name
@@ -504,12 +492,6 @@ def parse_cli_args():
         type=str,
         default="targets",
         help="Root directory for dataset target bundles (<targets-root>/<dataset>.npz).",
-    )
-    parser.add_argument(
-        "--model-scope-variant",
-        choices=["active"],
-        default="active",
-        help=argparse.SUPPRESS,
     )
     args = parser.parse_args()
     if args.search_mode_alias is not None:
@@ -2402,8 +2384,6 @@ def main():
             "use --num-samples 1 --max-num-epochs 1 for a smoke run.",
             int(args.num_samples),
         )
-    scope_override = _resolve_model_scope_variant(args.model_scope_variant)
-    apply_model_scope_variant(scope_override)
     SEED = int(args.seed)
     seed_everything(SEED)
     run_id = args.run_id or generate_run_id("run")
@@ -2423,7 +2403,6 @@ def main():
         np.random.shuffle(model_name_list)
     else:
         model_name_list = args.models
-        _validate_requested_scope(model_name_list, scope_variant=scope_override)
 
     max_runs = args.max_runs if (args.max_runs is not None and args.max_runs > 0) else None
     run_count = 0

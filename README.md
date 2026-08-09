@@ -1,6 +1,6 @@
 # torch-ists
 
-[![Version](https://img.shields.io/badge/version-0.5.5-blue)](pyproject.toml) [![Python](https://img.shields.io/badge/python-%3E%3D3.10-blue)](pyproject.toml) [![PyTorch](https://img.shields.io/badge/PyTorch-%3E%3D2.0-ee4c2c)](pyproject.toml) [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![Package status](https://img.shields.io/badge/status-preview-orange)](#project-status)
+[![Version](https://img.shields.io/badge/version-0.5.6-blue)](pyproject.toml) [![Python](https://img.shields.io/badge/python-%3E%3D3.10-blue)](pyproject.toml) [![PyTorch](https://img.shields.io/badge/PyTorch-%3E%3D2.0-ee4c2c)](pyproject.toml) [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![Package status](https://img.shields.io/badge/status-preview-orange)](#project-status)
 
 **PyTorch toolkit for irregularly sampled multivariate time series with continuous-time methods (Neural ODE/CDE/SDE) and discrete-time baselines.**
 
@@ -58,7 +58,12 @@ The package-authored NeuralFlow operators are the default. To use the exact exte
 ```bash
 PYTHONNOUSERSITE=1 python -m pip install "stribor==0.1.0" "torchdiffeq==0.2.1"
 PYTHONNOUSERSITE=1 python -m pip install --no-deps "git+https://github.com/mbilos/neural-flows-experiments.git@bd19f7c92461e83521e268c1a235ef845a3dd963"
+PYTHONNOUSERSITE=1 python -c "from torch_ists.module.flow.nfe_reference import require_nfe_installation; print(require_nfe_installation()['valid'])"
 ```
+
+The final command validates the repository URL, commit, dependency versions, import location, and source files without importing the external model code. Activate this backend only in the Python API with `model_params={"flow_backend": "nfe"}`. The source-checkout benchmark scripts always use the package-authored native backend.
+
+**Source-checkout scripts require `torchcde`.** The `scripts/set_splits.py` -> `scripts/param_search.py` -> `scripts/model_run.py` pipeline shares one preprocessing path that builds interpolation coefficients with `torchcde`. This applies to sequence baselines too. Install `.[all]` (recommended) or at least `.[tune,cde]`.
 
 Neural RDE (`neuralrde-1/2/3`) additionally requires `signatory`. It is kept out of `.[all]` because the PyPI wheel is torch-version-pinned; install the source-build extra only when those models are needed:
 
@@ -92,36 +97,68 @@ See [Custom Data Guide](docs/custom_data_guide.md) for cache locations and user-
 
 ## Quick Start
 
+Install the `cde` extra before this preprocessing call (`PYTHONNOUSERSITE=1 python -m pip install -e ".[cde]"`). The example is self-contained and derives model dimensions from the raw array:
+
 ```python
+import numpy as np
 import torch
-from torch_ists import ists_classifier, set_global_seed
+from torch_ists import ists_classifier, preprocess, set_global_seed
 
 set_global_seed(0)  # optional - for reproducibility
+X = np.random.default_rng(0).normal(size=(40, 3, 24)).astype(np.float32)  # [N, D, L]
+input_dim = int(X.shape[1])
+seq_len = int(X.shape[2])
 
 model = ists_classifier(
     model_name="transformer",
     num_class=2,
-    input_dim=8,
-    seq_len=64,
+    input_dim=input_dim,
+    seq_len=seq_len,
     device="cpu",
 )
 
-seq = torch.randn(16, 3, 64, 8)
-logits = model(seq, coeffs=None)
-print(logits.shape)  # torch.Size([16, 2])
-```
-
-To go from a raw array to the forward call, build the sequence stack and continuous-time coefficients with `preprocess`:
-
-```python
-from torch_ists import preprocess
-# X: your raw array of shape [N, D, L]
-X_missing, X_mask, X_delta, coeffs = preprocess(X, model_name="neuralcde")
+X_missing, X_mask, X_delta, _ = preprocess(X, model_name="transformer")
 seq = torch.stack([X_missing, X_mask, X_delta], dim=1)  # [N, 3, L, D]
-logits = model(seq, coeffs=coeffs)
+logits = model(seq, coeffs=None)
+print(logits.shape)  # torch.Size([40, 2])
 ```
 
 Coefficient-driven CDE and SDE rows consume the `coeffs` returned by `preprocess(...)`. Direct sequence, attention, and event-driven rows, including ODE-LSTM, the direct ODE-RNN models, Neural Jump ODE (NJ-ODE), and LatentSDE, use the sequence stack and accept `coeffs=None`.
+
+The source-checkout pipeline shares a continuous-time preprocessing path that builds interpolation coefficients with `torchcde`. The following bounded classification workflow can be launched from any working directory after an editable source install. It keeps every generated artifact under `/tmp`:
+
+```bash
+TORCH_ISTS_ROOT="$(PYTHONNOUSERSITE=1 python -c 'import pathlib, torch_ists; print(pathlib.Path(torch_ists.__file__).resolve().parents[1])')"
+cd /tmp
+
+PYTHONNOUSERSITE=1 python -c "import numpy as np, pathlib; p=pathlib.Path('/tmp/torch_ists_demo'); p.mkdir(parents=True, exist_ok=True); rng=np.random.default_rng(0); np.savez(p/'toy.npz', X=rng.normal(size=(40, 3, 24)).astype('float32'), y=np.array([0, 1] * 20))"
+
+PYTHONNOUSERSITE=1 PYTHONPATH="$TORCH_ISTS_ROOT" python "$TORCH_ISTS_ROOT/scripts/set_splits.py" \
+    --dataset-name Demo --dataset-source npz --dataset-npz /tmp/torch_ists_demo/toy.npz \
+    --seed 42 --out-dir /tmp/torch_ists_demo/split \
+    --contract-dir /tmp/torch_ists_demo/evidence
+
+PYTHONNOUSERSITE=1 PYTHONPATH="$TORCH_ISTS_ROOT" python "$TORCH_ISTS_ROOT/scripts/param_search.py" \
+    --datasets Demo --dataset-source npz --dataset-npz /tmp/torch_ists_demo/toy.npz \
+    --models cnn --seed 42 --num-samples 1 --max-num-epochs 1 --max-runs 1 \
+    --split-root /tmp/torch_ists_demo/split --param-root /tmp/torch_ists_demo/params \
+    --contract-dir /tmp/torch_ists_demo/evidence --device cpu
+
+PYTHONNOUSERSITE=1 PYTHONPATH="$TORCH_ISTS_ROOT" python "$TORCH_ISTS_ROOT/scripts/set_splits.py" \
+    --dataset-name Demo --dataset-source npz --dataset-npz /tmp/torch_ists_demo/toy.npz \
+    --seed 0 --out-dir /tmp/torch_ists_demo/split \
+    --contract-dir /tmp/torch_ists_demo/evidence
+
+PYTHONNOUSERSITE=1 PYTHONPATH="$TORCH_ISTS_ROOT" python "$TORCH_ISTS_ROOT/scripts/model_run.py" \
+    --datasets Demo --dataset-source npz --dataset-npz /tmp/torch_ists_demo/toy.npz \
+    --models cnn --seed 0 --epochs 1 --max-runs 1 \
+    --split-root /tmp/torch_ists_demo/split --param-root /tmp/torch_ists_demo/params \
+    --out-root /tmp/torch_ists_demo/out --contract-dir /tmp/torch_ists_demo/evidence --device cpu
+
+PYTHONNOUSERSITE=1 PYTHONPATH="$TORCH_ISTS_ROOT" python "$TORCH_ISTS_ROOT/scripts/aggregate_results.py" \
+    --evidence-root /tmp/torch_ists_demo/evidence --out-root /tmp/torch_ists_demo/out \
+    --output-dir /tmp/torch_ists_demo/aggregate
+```
 
 See [Model Reference](docs/model_reference.md) for which models need `preprocess(X, model_name=...)` versus the direct sequence stack.
 

@@ -41,7 +41,6 @@ from _common import (
     CONSTRAINED_CAPACITY_POLICY_NAME,
     CONSTRAINED_MATCHED_CAPACITY_TARGET_NAME,
     DEFAULT_SEARCH_PROFILE,
-    apply_model_scope_variant,
     build_model_kwargs_from_config,
     configure_runtime_paths,
     default_method_for_model,
@@ -284,17 +283,6 @@ def _infer_cli_search_repeat(model_config: dict, artifact_name: str | None = Non
             return AGGREGATED_SEARCH_REPEAT
     return SINGLE_SEARCH_REPEAT
 
-
-def _resolve_model_scope_variant(requested_variant: str) -> str:
-    normalized = str(requested_variant).strip().lower()
-    if normalized in {"", "active"}:
-        return "active"
-    raise ValueError("This package supports only the active model scope.")
-
-
-def _validate_requested_scope(model_names: list[str], *, scope_variant: str) -> None:
-    del model_names, scope_variant
-    return
 
 
 def _requires_flow_raw_input(model_name: str) -> bool:
@@ -919,12 +907,6 @@ def parse_cli_args():
         type=str,
         default="targets",
         help="Root directory for dataset target bundles (<targets-root>/<dataset>.npz).",
-    )
-    parser.add_argument(
-        "--model-scope-variant",
-        choices=["active"],
-        default="active",
-        help=argparse.SUPPRESS,
     )
     args = parser.parse_args()
     if args.param_mode_alias is not None:
@@ -3212,8 +3194,6 @@ def main():
     global device, use_cuda
     device = _resolve_run_device(args.device)
     use_cuda = device.type == "cuda"
-    scope_override = _resolve_model_scope_variant(args.model_scope_variant)
-    apply_model_scope_variant(scope_override)
     seed = int(args.seed)
     seed_everything(seed)
     LOGGER.info("Run device resolved mode=%s device=%s", args.device, device)
@@ -3234,7 +3214,6 @@ def main():
         np.random.shuffle(model_name_list)
     else:
         model_name_list = args.models
-        _validate_requested_scope(model_name_list, scope_variant=scope_override)
 
     max_runs = args.max_runs if (args.max_runs is not None and args.max_runs > 0) else None
     run_count = 0

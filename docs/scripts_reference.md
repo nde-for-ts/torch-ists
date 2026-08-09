@@ -66,6 +66,26 @@ The split/search/run scripts also write JSON run logs under `evidence/`.
 - `--help` works from a repository checkout with `PYTHONPATH=.`.
 - Local dataset, split, parameter, target, and evidence paths are resolved to absolute paths before Ray workers start.
 
+### Preview-task target bundles
+
+For a non-classification task, pass `--target-source dataset --targets-root <targets-root>`. The scripts load `<targets-root>/<dataset>.npz`. The dataset NPZ and target bundle are separate files; in this release the dataset NPZ still contains `X [N,D,L]` and the split label `y [N]`.
+
+| Task | Required target-bundle entries | Shape | Value contract |
+|---|---|---|---|
+| regression | `regression_target` | `[N]` or `[N,1]` | finite numeric values, loaded as `float32` |
+| forecasting | `forecasting_target` | `[N,H,D]` | finite numeric values; `--forecast-horizon H` is required |
+| imputation | `imputation_target`, `imputation_loss_mask` | both `[N,L,D]` | finite target and binary `0/1` mask, loaded as `float32` |
+| outlier detection | `outlier_detection_target` | `[N]` or `[N,1]` | binary `0/1`, loaded as `float32` |
+| change detection | `change_detection_target`, `change_detection_loss_mask` | both `[N,L,1]` | binary `0/1` target and mask, loaded as `float32` |
+
+A bounded bundle matching the README toy data can be created with:
+
+```bash
+PYTHONNOUSERSITE=1 python -c "import numpy as np, pathlib; n,l,d,h=40,24,3,4; p=pathlib.Path('/tmp/torch_ists_demo/targets'); p.mkdir(parents=True,exist_ok=True); np.savez(p/'Demo.npz', regression_target=np.zeros((n,1),'float32'), forecasting_target=np.zeros((n,h,d),'float32'), imputation_target=np.zeros((n,l,d),'float32'), imputation_loss_mask=np.ones((n,l,d),'float32'), outlier_detection_target=(np.arange(n)%4==0).astype('float32')[:,None], change_detection_target=np.zeros((n,l,1),'float32'), change_detection_loss_mask=np.ones((n,l,1),'float32'))"
+```
+
+Non-classification artifacts append the task name. For the default single-search and standard run, the paths are `<param-root>/<dataset>/<dataset>_<model>__task_<task>` and `<out-root>/<dataset>/<missing_rate>/<dataset>_<missing_rate>_<model>_<seed>__task_<task>`.
+
 ---
 
 ## 2. `set_splits.py`
@@ -325,7 +345,9 @@ Path patterns produced by the scripts:
 | Split | `<split-root>/<dataset>/<dataset>_<seed>` |
 | Params (default single) | `<param-root>/<dataset>/<dataset>_<model>` |
 | Params (default aggregated) | `<param-root>/<dataset>/<dataset>_<model>_aggregated` |
+| Params (preview task) | `<param-root>/<dataset>/<dataset>_<model>__task_<task>` |
 | Predictions (standard/missingness) | `<out-root>/<dataset>/<missing_rate>/<dataset>_<missing_rate>_<model>_<seed>` |
+| Predictions (preview task) | `<out-root>/<dataset>/<missing_rate>/<dataset>_<missing_rate>_<model>_<seed>__task_<task>` |
 | Predictions (robustness) | `<out-root>/<dataset>/robustness/<dataset>_robustness_<model>_<seed>__rates_<...>__types_<...>__sync_<...>` |
 | Run log | `<contract-dir>/<run-id>/{split,search,run}.manifest.json` |
 | Aggregate tables | `<output-dir>/{runs,robustness_rows,search_cells,exclusions,fallbacks}.csv` |

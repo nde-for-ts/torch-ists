@@ -10,7 +10,6 @@ import os
 import sys
 from pathlib import Path
 
-MODEL_SCOPE_VARIANT_ENV = "TORCH_ISTS_MODEL_SCOPE_VARIANT"
 BATCH_SIZE_POLICY_NAME = "dataset-derived-fixed"
 LEARNING_RATE_POLICY_NAME = "fixed-lr-fallback"
 WEIGHT_DECAY_POLICY_NAME = "lr-proportional-weight-decay"
@@ -333,14 +332,6 @@ def configure_runtime_paths(caller_file: str | Path) -> Path:
         _clear_incompatible_runtime_submodules(runtime_roots)
 
     return repo_root
-
-
-def apply_model_scope_variant(variant: str | None) -> str:
-    normalized = "" if variant is None else str(variant).strip().lower()
-    if normalized in {"", "active"}:
-        os.environ.pop(MODEL_SCOPE_VARIANT_ENV, None)
-        return "active"
-    raise ValueError("This package supports only the active model scope.")
 
 
 def normalize_search_profile(raw: str | None) -> str:
