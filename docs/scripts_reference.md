@@ -205,7 +205,7 @@ PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/model_run.py \
     --epochs 1 --max-runs 1
 ```
 
-This is a bounded smoke run; the full default (`--epochs 100`) is the production setting documented in the flags table below.
+This is a bounded smoke run; the full default (`--epochs 100`) is the full-run setting documented in the flags table below.
 
 **Usage** (missingness evaluation, explicit missingness):
 
@@ -262,7 +262,7 @@ PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/model_run.py \
    "evaluations": [...], "meta": {...}}
   ```
 - **Missingness** — selected by a positive `--missing-rates` value. The default missingness mechanism is `MCAR`, `missing_seed` is the run seed, and `channel_sync=False`.
-- **Robustness** (`--robustness-mode`) — runs `(dataset × model)` and selects the canonical 100 conditions by default. This materializes one clean `STANDARD` anchor, 90 temporal-missingness evaluations (`9` positive rates × `5` mechanisms × `2` channel-sync settings), and 9 `CHANNEL_DROP` evaluations. It is classification-only and stores full prediction arrays. Callers may explicitly select `--robustness-profile custom` for configured axes. Training occurs once at `missing=0.0`; every evaluation reuses the **train-time normalization statistics**. Output schema:
+- **Robustness** (`--robustness-mode`) — runs `(dataset × model)` and selects the 100-condition robustness profile by default. This materializes one clean `STANDARD` anchor, 90 temporal-missingness evaluations (`9` positive rates × `5` mechanisms × `2` channel-sync settings), and 9 `CHANNEL_DROP` evaluations. It is classification-only and stores full prediction arrays. Callers may explicitly select `--robustness-profile custom` for configured axes. Training occurs once at `missing=0.0`; every evaluation reuses the **train-time normalization statistics**. Output schema:
   ```json
   {"mode": "robustness", "task": "classification",
    "train_missing_rate": 0.0, "train_missing_type": "STANDARD",
@@ -315,7 +315,7 @@ Requires:
 
 ## 5. `aggregate_results.py`
 
-**Purpose**: Build compact CSV tables from script run logs and output payloads. Public multi-condition robustness exports require the exact 100-condition structure and full predictions. Repeated references to the same canonical output path are counted once; a different artifact path for the same dataset/model/seed/task fails instead of being mixed.
+**Purpose**: Build compact CSV tables from script run logs and output payloads. Public multi-condition robustness exports require the exact 100-condition structure and full predictions. Repeated references to the same output path are counted once; a different artifact path for the same dataset/model/seed/task fails instead of being mixed.
 
 **Usage**:
 

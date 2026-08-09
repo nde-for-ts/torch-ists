@@ -58,7 +58,7 @@ class NeuralCDE_Learnable(torch.nn.Module):
         initial=True,
     ):
         
-        if isinstance(func_k, ContinuousRNNConverter):  # ugly hack
+        if isinstance(func_k, ContinuousRNNConverter):  # ContinuousRNNConverter carries state as concatenated hidden+input channels
             hidden_channels = hidden_channels + input_channels
 
         super(NeuralCDE_Learnable, self).__init__()

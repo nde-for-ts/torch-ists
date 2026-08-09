@@ -128,10 +128,10 @@ def _pad(channel, max_len, *, padding: str = "nan"):
 
     ``padding="nan"`` (default): downstream handlers can detect padded
     positions via the NaN sentinel. ``padding="zero"``: explicit 0 fill.
-    ``padding="last"``: legacy forward-fill of the last observed value;
-    callers using this mode get NO companion mask, so downstream models
-    cannot distinguish padded positions from real observations. Prefer
-    ``"nan"`` unless reproducing legacy preprocessing.
+    ``padding="last"``: final-value forward-fill of the last observed value
+    without a companion padding mask, so downstream models cannot distinguish
+    padded positions from real observations. Prefer ``"nan"`` unless matching
+    historical artifact compatibility.
     """
     channel = torch.as_tensor(channel, dtype=torch.float32)
     if padding == "nan":

@@ -158,7 +158,7 @@ class NeuralCDE_forecasting(torch.nn.Module):
                                                     "".format(batch_dims, final_index.shape)
 
         cubic_spline = controldiffeq.NaturalCubicSpline(times, coeffs) # interpolated values
-        # TODO z0
+
         if z0 is None:
             assert self.initial, "Was not expecting to be given no value of z0."
             if isinstance(self.func, ContinuousRNNConverter):  
@@ -169,7 +169,7 @@ class NeuralCDE_forecasting(torch.nn.Module):
                 z0 = self.initial_network(XX) 
         else:
             assert not self.initial, "Was expecting to be given a value of z0."
-            if isinstance(self.func, ContinuousRNNConverter):  # continuing adventures in ugly hacks
+            if isinstance(self.func, ContinuousRNNConverter):  # ContinuousRNNConverter prepends input-channel zeros to z0
                 z0_extra = torch.zeros(*batch_dims, self.input_channels, dtype=z0.dtype, device=z0.device)
                 z0 = torch.cat([z0_extra, z0], dim=-1)
             else:
@@ -430,7 +430,7 @@ class NeuralCDE_Learnable(torch.nn.Module):
         initial=True,
     ):
         
-        if isinstance(func_k, ContinuousRNNConverter):  # ugly hack
+        if isinstance(func_k, ContinuousRNNConverter):  # ContinuousRNNConverter carries state as concatenated hidden+input channels
             hidden_channels = hidden_channels + input_channels
 
         super(NeuralCDE_Learnable, self).__init__()

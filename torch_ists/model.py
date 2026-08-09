@@ -135,11 +135,11 @@ class ists_model(nn.Module):
 
     @staticmethod
     def _map_checkpoint_keys(state_dict):
-        """Remap legacy checkpoint keys to current layout.
+        """Remap checkpoint keys from historical layouts to the current layout.
 
-        Handles three legacy formats:
-        - fc.* / seq_layer.*  (historical classifier checkpoints)
-        - _model.head.* / _model.seq_layer.*  (historical wrapped classifier checkpoints)
+        Handles three checkpoint layouts:
+        - fc.* / seq_layer.*  (earlier classifier checkpoints)
+        - _model.head.* / _model.seq_layer.*  (earlier wrapped classifier checkpoints)
         - head.* / seq_layer.*  (current format, pass-through)
         """
         mapped = OrderedDict()

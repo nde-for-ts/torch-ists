@@ -63,7 +63,7 @@ def _natural_cubic_spline_coeffs_with_missing_values(t, path):
         b_pieces = []
         two_c_pieces = []
         three_d_pieces = []
-        for p in path.unbind(dim=0):  # TODO: parallelise over this
+        for p in path.unbind(dim=0):  # per-batch spline coefficient construction
             a, b, two_c, three_d = _natural_cubic_spline_coeffs_with_missing_values(t, p)
             a_pieces.append(a)
             b_pieces.append(b)

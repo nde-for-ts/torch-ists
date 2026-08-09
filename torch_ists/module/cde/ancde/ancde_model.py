@@ -86,7 +86,7 @@ class ANCDE(torch.nn.Module):
                 during forward()), or to use the one supplied during forward (in which case z0 must be passed during
                 forward()).
         """
-        if isinstance(func_f, ContinuousRNNConverter):  # ugly hack
+        if isinstance(func_f, ContinuousRNNConverter):  # ContinuousRNNConverter carries state as concatenated hidden+input channels
             hidden_channels = hidden_channels + input_channels
 
         super(ANCDE, self).__init__()
@@ -103,7 +103,7 @@ class ANCDE(torch.nn.Module):
         self.file = file 
         self.STE = Hardsigmoid()
         self.binarizer = RoundST 
-        if initial and not isinstance(func_f, ContinuousRNNConverter):  # very ugly hack
+        if initial and not isinstance(func_f, ContinuousRNNConverter):  # ContinuousRNNConverter has no separate initial network
             self.initial_network = torch.nn.Linear(input_channels, input_channels)
 
         self.feature_extractor = torch.nn.Linear(input_channels,hidden_channels)
@@ -151,7 +151,7 @@ class ANCDE(torch.nn.Module):
 
         if z0 is None:
             assert self.initial, "Was not expecting to be given no value of z0."
-            if isinstance(self.func_f, ContinuousRNNConverter):  # still an ugly hack
+            if isinstance(self.func_f, ContinuousRNNConverter):  # ContinuousRNNConverter initializes z0 as zeros
                 z0 = torch.zeros(*batch_dims, self.hidden_channels, dtype=coeff.dtype, device=coeff.device) # 32,32
             else:
                 XX = cubic_spline.evaluate(times[0]) # 32,4
@@ -159,7 +159,7 @@ class ANCDE(torch.nn.Module):
 
         else:
             assert not self.initial, "Was expecting to be given a value of z0."
-            if isinstance(self.func_f, ContinuousRNNConverter):  # continuing adventures in ugly hacks
+            if isinstance(self.func_f, ContinuousRNNConverter):  # ContinuousRNNConverter prepends input-channel zeros to z0
 
                 z0_extra = torch.zeros(*batch_dims, self.input_channels, dtype=z0.dtype, device=z0.device)
                 z0 = torch.cat([z0_extra, z0], dim=-1)

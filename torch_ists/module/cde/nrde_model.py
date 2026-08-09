@@ -19,7 +19,7 @@ from . import controldiffeq
 
 class NeuralRDE(torch.nn.Module):
     def __init__(self, func, input_channels, hidden_channels, output_channels, initial=True):
-        if isinstance(func, ContinuousRNNConverter):  # ugly hack
+        if isinstance(func, ContinuousRNNConverter):  # ContinuousRNNConverter carries state as concatenated hidden+input channels
             hidden_channels = hidden_channels + input_channels
 
         super(NeuralRDE, self).__init__()
@@ -29,7 +29,7 @@ class NeuralRDE(torch.nn.Module):
 
         self.func = func
         self.initial = initial
-        if initial and not isinstance(func, ContinuousRNNConverter):  # very ugly hack
+        if initial and not isinstance(func, ContinuousRNNConverter):  # ContinuousRNNConverter has no separate initial network
             self.initial_network = torch.nn.Linear(input_channels, hidden_channels)
         self.linear = torch.nn.Linear(hidden_channels, output_channels)
 
@@ -73,13 +73,13 @@ class NeuralRDE(torch.nn.Module):
 
         if z0 is None:
             assert self.initial, "Was not expecting to be given no value of z0."
-            if isinstance(self.func, ContinuousRNNConverter):  # still an ugly hack
+            if isinstance(self.func, ContinuousRNNConverter):  # ContinuousRNNConverter initializes z0 as zeros
                 z0 = torch.zeros(*batch_dims, self.hidden_channels, dtype=coeff.dtype, device=coeff.device)
             else:
                 z0 = self.initial_network(cubic_spline.evaluate(control_times[0]))
         else:
             assert not self.initial, "Was expecting to be given a value of z0."
-            if isinstance(self.func, ContinuousRNNConverter):  # continuing adventures in ugly hacks
+            if isinstance(self.func, ContinuousRNNConverter):  # ContinuousRNNConverter prepends input-channel zeros to z0
                 z0_extra = torch.zeros(*batch_dims, self.input_channels, dtype=z0.dtype, device=z0.device)
                 z0 = torch.cat([z0_extra, z0], dim=-1)
 

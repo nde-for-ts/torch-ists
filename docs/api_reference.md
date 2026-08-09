@@ -441,7 +441,7 @@ The preprocessing API provides synthetic missingness and model-aware interpolati
 
 ### 4.1 `preprocess()`
 
-Canonical preprocessing function (interpolation + intensity + delta).
+Primary preprocessing function (interpolation + intensity + delta).
 
 #### Signature
 
@@ -591,7 +591,7 @@ Missingness caveats:
 
 ### Overview
 
-The split utilities provide stratified split generation, split-file I/O, and canonical split paths.
+The split utilities provide stratified split generation, split-file I/O, and standard split paths.
 
 **Exported**: `make_stratified_splits`, `save_splits`, `load_splits`, `get_split_path`
 
@@ -661,7 +661,7 @@ train_idx, valid_idx, test_idx = load_splits(Path("split/BasicMotions/BasicMotio
 
 ### 5.3 `get_split_path()`
 
-Return canonical split path: `split_root/{dataset}/{dataset}_{seed}`.
+Return standard split path: `split_root/{dataset}/{dataset}_{seed}`.
 
 #### Signature
 
@@ -694,7 +694,7 @@ The model API has two Python entry points and an included benchmark workflow:
 2. `ists_model`
 3. `scripts/set_splits.py`, `scripts/param_search.py`, and `scripts/model_run.py`
 
-Canonical model construction lives in `torch_ists.model`.
+Standard model construction lives in `torch_ists.model`.
 
 Task support tiers:
 - `classification`: stable path

@@ -36,7 +36,7 @@ class NeuralCDE(torch.nn.Module):
                 during forward()), or to use the one supplied during forward (in which case z0 must be passed during
                 forward()).
         """
-        if isinstance(func, ContinuousRNNConverter):  # ugly hack
+        if isinstance(func, ContinuousRNNConverter):  # ContinuousRNNConverter carries state as concatenated hidden+input channels
             hidden_channels = hidden_channels + input_channels
 
         super(NeuralCDE, self).__init__()
@@ -46,7 +46,7 @@ class NeuralCDE(torch.nn.Module):
         
         self.func = func
         self.initial = initial
-        if initial and not isinstance(func, ContinuousRNNConverter):  # very ugly hack
+        if initial and not isinstance(func, ContinuousRNNConverter):  # ContinuousRNNConverter has no separate initial network
             self.initial_network = torch.nn.Linear(input_channels, hidden_channels)
         self.linear = torch.nn.Linear(hidden_channels, output_channels)
 
@@ -84,16 +84,16 @@ class NeuralCDE(torch.nn.Module):
                                                     "".format(batch_dims, final_index.shape)
 
         cubic_spline = controldiffeq.NaturalCubicSpline(times, coeffs) # interpolated values
-        # TODO z0
+
         if z0 is None:
             assert self.initial, "Was not expecting to be given no value of z0."
-            if isinstance(self.func, ContinuousRNNConverter):  # still an ugly hack
+            if isinstance(self.func, ContinuousRNNConverter):  # ContinuousRNNConverter initializes z0 as zeros
                 z0 = torch.zeros(*batch_dims, self.hidden_channels, dtype=coeff.dtype, device=coeff.device) # 32,32
             else:
                 z0 = self.initial_network(cubic_spline.evaluate(times[0]))
         else:
             assert not self.initial, "Was expecting to be given a value of z0."
-            if isinstance(self.func, ContinuousRNNConverter):  # continuing adventures in ugly hacks
+            if isinstance(self.func, ContinuousRNNConverter):  # ContinuousRNNConverter prepends input-channel zeros to z0
                 z0_extra = torch.zeros(*batch_dims, self.input_channels, dtype=z0.dtype, device=z0.device)
                 z0 = torch.cat([z0_extra, z0], dim=-1)
         if stream:
@@ -212,7 +212,7 @@ class ANCDE(torch.nn.Module):
                 during forward()), or to use the one supplied during forward (in which case z0 must be passed during
                 forward()).
         """
-        if isinstance(func, ContinuousRNNConverter):  # ugly hack
+        if isinstance(func, ContinuousRNNConverter):  # ContinuousRNNConverter carries state as concatenated hidden+input channels
             hidden_channels = hidden_channels + input_channels
 
         super(ANCDE, self).__init__()
@@ -229,7 +229,7 @@ class ANCDE(torch.nn.Module):
         self.file = file 
         self.STE = Hardsigmoid()
         self.binarizer = RoundST 
-        if initial and not isinstance(func, ContinuousRNNConverter):  # very ugly hack
+        if initial and not isinstance(func, ContinuousRNNConverter):  # ContinuousRNNConverter has no separate initial network
             self.initial_network = torch.nn.Linear(input_channels, input_channels)
 
         self.feature_extractor = torch.nn.Linear(input_channels,hidden_channels)
@@ -269,13 +269,13 @@ class ANCDE(torch.nn.Module):
             assert batch_dims == final_index.shape, "coeff.shape[:-2] must be the same as final_index.shape. " \
                                                     "coeff.shape[:-2]={}, final_index.shape={}" \
                                                     "".format(batch_dims, final_index.shape)
-        # TODO
+
         cubic_spline = controldiffeq.NaturalCubicSpline(times, coeffs) # interpolated values
         
 
         if z0 is None:
             assert self.initial, "Was not expecting to be given no value of z0."
-            if isinstance(self.func_f, ContinuousRNNConverter):  # still an ugly hack
+            if isinstance(self.func_f, ContinuousRNNConverter):  # ContinuousRNNConverter initializes z0 as zeros
                 z0 = torch.zeros(*batch_dims, self.hidden_channels, dtype=coeff.dtype, device=coeff.device) # 32,32
             else:
                 XX = cubic_spline.evaluate(times[0]) # 32,4
@@ -283,7 +283,7 @@ class ANCDE(torch.nn.Module):
 
         else:
             assert not self.initial, "Was expecting to be given a value of z0."
-            if isinstance(self.func_f, ContinuousRNNConverter):  # continuing adventures in ugly hacks
+            if isinstance(self.func_f, ContinuousRNNConverter):  # ContinuousRNNConverter prepends input-channel zeros to z0
 
                 z0_extra = torch.zeros(*batch_dims, self.input_channels, dtype=z0.dtype, device=z0.device)
                 z0 = torch.cat([z0_extra, z0], dim=-1)
@@ -402,7 +402,7 @@ class NeuralCDE_forecasting(torch.nn.Module):
                 during forward()), or to use the one supplied during forward (in which case z0 must be passed during
                 forward()).
         """
-        if isinstance(func, ContinuousRNNConverter):  # ugly hack
+        if isinstance(func, ContinuousRNNConverter):  # ContinuousRNNConverter carries state as concatenated hidden+input channels
             hidden_channels = hidden_channels + input_channels
 
         super(NeuralCDE_forecasting, self).__init__()
@@ -412,7 +412,7 @@ class NeuralCDE_forecasting(torch.nn.Module):
         self.output_time = output_time
         self.func = func
         self.initial = initial
-        if initial and not isinstance(func, ContinuousRNNConverter):  # very ugly hack
+        if initial and not isinstance(func, ContinuousRNNConverter):  # ContinuousRNNConverter has no separate initial network
             self.initial_network = torch.nn.Linear(input_channels, hidden_channels)
         self.linear = torch.nn.Linear(hidden_channels, input_channels)
 
@@ -450,10 +450,10 @@ class NeuralCDE_forecasting(torch.nn.Module):
                                                     "".format(batch_dims, final_index.shape)
 
         cubic_spline = controldiffeq.NaturalCubicSpline(times, coeffs) # interpolated values
-        # TODO z0
+
         if z0 is None:
             assert self.initial, "Was not expecting to be given no value of z0."
-            if isinstance(self.func, ContinuousRNNConverter):  # still an ugly hack
+            if isinstance(self.func, ContinuousRNNConverter):  # ContinuousRNNConverter initializes z0 as zeros
                 z0 = torch.zeros(*batch_dims, self.hidden_channels, dtype=coeff.dtype, device=coeff.device) # 32,32
             else:
                 # 32,32,4
@@ -461,7 +461,7 @@ class NeuralCDE_forecasting(torch.nn.Module):
                 z0 = self.initial_network(XX) # aa0 32,32
         else:
             assert not self.initial, "Was expecting to be given a value of z0."
-            if isinstance(self.func, ContinuousRNNConverter):  # continuing adventures in ugly hacks
+            if isinstance(self.func, ContinuousRNNConverter):  # ContinuousRNNConverter prepends input-channel zeros to z0
                 z0_extra = torch.zeros(*batch_dims, self.input_channels, dtype=z0.dtype, device=z0.device)
                 z0 = torch.cat([z0_extra, z0], dim=-1)
             else:
@@ -495,7 +495,7 @@ class NeuralCDE_forecasting(torch.nn.Module):
 
         # Actually solve the CDE
 
-        # TODO
+
         
 
         z_t = controldiffeq.cdeint(dX_dt=cubic_spline.derivative,
@@ -539,7 +539,7 @@ class ANCDE_forecasting(torch.nn.Module):
                 during forward()), or to use the one supplied during forward (in which case z0 must be passed during
                 forward()).
         """
-        if isinstance(func, ContinuousRNNConverter):  # ugly hack
+        if isinstance(func, ContinuousRNNConverter):  # ContinuousRNNConverter carries state as concatenated hidden+input channels
             hidden_channels = hidden_channels + input_channels
 
         super(ANCDE_forecasting, self).__init__()
@@ -556,7 +556,7 @@ class ANCDE_forecasting(torch.nn.Module):
         self.file =file
         self.STE = Hardsigmoid()
         self.binarizer = RoundST 
-        if initial and not isinstance(func, ContinuousRNNConverter):  # very ugly hack
+        if initial and not isinstance(func, ContinuousRNNConverter):  # ContinuousRNNConverter has no separate initial network
             self.initial_network = torch.nn.Linear(input_channels, input_channels)
 
         self.feature_extractor = torch.nn.Linear(input_channels,hidden_channels)
@@ -599,7 +599,7 @@ class ANCDE_forecasting(torch.nn.Module):
         
         if z0 is None:
             assert self.initial, "Was not expecting to be given no value of z0."
-            if isinstance(self.func_f, ContinuousRNNConverter):  # still an ugly hack
+            if isinstance(self.func_f, ContinuousRNNConverter):  # ContinuousRNNConverter initializes z0 as zeros
                 z0 = torch.zeros(*batch_dims, self.hidden_channels, dtype=coeff.dtype, device=coeff.device) # 32,32
             else:
                 XX = cubic_spline.evaluate(times[0]).float() # 32,4
@@ -608,7 +608,7 @@ class ANCDE_forecasting(torch.nn.Module):
 
         else:
             assert not self.initial, "Was expecting to be given a value of z0."
-            if isinstance(self.func_f, ContinuousRNNConverter):  # continuing adventures in ugly hacks
+            if isinstance(self.func_f, ContinuousRNNConverter):  # ContinuousRNNConverter prepends input-channel zeros to z0
 
                 z0_extra = torch.zeros(*batch_dims, self.input_channels, dtype=z0.dtype, device=z0.device)
                 z0 = torch.cat([z0_extra, z0], dim=-1)

@@ -36,7 +36,7 @@ class NeuralCDE(torch.nn.Module):
                 during forward()), or to use the one supplied during forward (in which case z0 must be passed during
                 forward()).
         """
-        if isinstance(func, ContinuousRNNConverter):  # ugly hack
+        if isinstance(func, ContinuousRNNConverter):  # ContinuousRNNConverter carries state as concatenated hidden+input channels
             hidden_channels = hidden_channels + input_channels
 
         super(NeuralCDE, self).__init__()
@@ -46,7 +46,7 @@ class NeuralCDE(torch.nn.Module):
 
         self.func = func
         self.initial = initial
-        if initial and not isinstance(func, ContinuousRNNConverter):  # very ugly hack
+        if initial and not isinstance(func, ContinuousRNNConverter):  # ContinuousRNNConverter has no separate initial network
             self.initial_network = torch.nn.Linear(input_channels, hidden_channels)
         self.linear = torch.nn.Linear(hidden_channels, output_channels)
 
@@ -85,13 +85,13 @@ class NeuralCDE(torch.nn.Module):
 
         if z0 is None:
             assert self.initial, "Was not expecting to be given no value of z0."
-            if isinstance(self.func, ContinuousRNNConverter):  # still an ugly hack
+            if isinstance(self.func, ContinuousRNNConverter):  # ContinuousRNNConverter initializes z0 as zeros
                 z0 = torch.zeros(*batch_dims, self.hidden_channels, dtype=coeff.dtype, device=coeff.device)
             else:
                 z0 = self.initial_network(cubic_spline.evaluate(times[0]))
         else:
             assert not self.initial, "Was expecting to be given a value of z0."
-            if isinstance(self.func, ContinuousRNNConverter):  # continuing adventures in ugly hacks
+            if isinstance(self.func, ContinuousRNNConverter):  # ContinuousRNNConverter prepends input-channel zeros to z0
                 z0_extra = torch.zeros(*batch_dims, self.input_channels, dtype=z0.dtype, device=z0.device)
                 z0 = torch.cat([z0_extra, z0], dim=-1)
 
@@ -146,7 +146,7 @@ class NeuralCDE(torch.nn.Module):
 
 class NeuralCDE_forecasting(torch.nn.Module):
     def __init__(self, func, input_channels,output_time, hidden_channels, output_channels, initial=True):
-        if isinstance(func, ContinuousRNNConverter):  # ugly hack
+        if isinstance(func, ContinuousRNNConverter):  # ContinuousRNNConverter carries state as concatenated hidden+input channels
             hidden_channels = hidden_channels + input_channels
 
         super(NeuralCDE_forecasting, self).__init__()
@@ -157,7 +157,7 @@ class NeuralCDE_forecasting(torch.nn.Module):
         
         self.func = func
         self.initial = initial
-        if initial and not isinstance(func, ContinuousRNNConverter):  # very ugly hack
+        if initial and not isinstance(func, ContinuousRNNConverter):  # ContinuousRNNConverter has no separate initial network
             self.initial_network = torch.nn.Linear(input_channels, hidden_channels)
         self.linear = torch.nn.Linear(hidden_channels, input_channels)
 
@@ -184,7 +184,7 @@ class NeuralCDE_forecasting(torch.nn.Module):
                 z0 = self.initial_network(XX) 
         else:
             assert not self.initial, "Was expecting to be given a value of z0."
-            if isinstance(self.func, ContinuousRNNConverter):  # continuing adventures in ugly hacks
+            if isinstance(self.func, ContinuousRNNConverter):  # ContinuousRNNConverter prepends input-channel zeros to z0
                 z0_extra = torch.zeros(*batch_dims, self.input_channels, dtype=z0.dtype, device=z0.device)
                 z0 = torch.cat([z0_extra, z0], dim=-1)
             else:
@@ -263,7 +263,7 @@ class NeuralCDE_IDEA4(torch.nn.Module):
                 during forward()), or to use the one supplied during forward (in which case z0 must be passed during
                 forward()).
         """
-        if isinstance(func, ContinuousRNNConverter):  # ugly hack
+        if isinstance(func, ContinuousRNNConverter):  # ContinuousRNNConverter carries state as concatenated hidden+input channels
             hidden_channels = hidden_channels + input_channels
 
         super(NeuralCDE_IDEA4, self).__init__()
@@ -282,7 +282,7 @@ class NeuralCDE_IDEA4(torch.nn.Module):
         self.div_samples =  div_samples
 
         self.fc = torch.nn.Linear(hidden_channels,hidden_channels)
-        if initial and not isinstance(func, ContinuousRNNConverter):  # very ugly hack
+        if initial and not isinstance(func, ContinuousRNNConverter):  # ContinuousRNNConverter has no separate initial network
             self.initial_network = torch.nn.Linear(input_channels, hidden_channels)
         self.linear = torch.nn.Linear(hidden_channels, output_channels)
 
@@ -324,13 +324,13 @@ class NeuralCDE_IDEA4(torch.nn.Module):
 
         if z0 is None:
             assert self.initial, "Was not expecting to be given no value of z0."
-            if isinstance(self.func, ContinuousRNNConverter):  # still an ugly hack
+            if isinstance(self.func, ContinuousRNNConverter):  # ContinuousRNNConverter initializes z0 as zeros
                 z0 = torch.zeros(*batch_dims, self.hidden_channels, dtype=coeff.dtype, device=coeff.device)
             else:
                 z0 = self.initial_network(cubic_spline.evaluate(times[0]))
         else:
             assert not self.initial, "Was expecting to be given a value of z0."
-            if isinstance(self.func, ContinuousRNNConverter):  # continuing adventures in ugly hacks
+            if isinstance(self.func, ContinuousRNNConverter):  # ContinuousRNNConverter prepends input-channel zeros to z0
                 z0_extra = torch.zeros(*batch_dims, self.input_channels, dtype=z0.dtype, device=z0.device)
                 z0 = torch.cat([z0_extra, z0], dim=-1)
 
@@ -424,7 +424,7 @@ class NeuralCDE_IDEA4_forecasting(torch.nn.Module):
                 during forward()), or to use the one supplied during forward (in which case z0 must be passed during
                 forward()).
         """
-        if isinstance(func, ContinuousRNNConverter):  # ugly hack
+        if isinstance(func, ContinuousRNNConverter):  # ContinuousRNNConverter carries state as concatenated hidden+input channels
             hidden_channels = hidden_channels + input_channels
 
         super(NeuralCDE_IDEA4_forecasting, self).__init__()
@@ -445,7 +445,7 @@ class NeuralCDE_IDEA4_forecasting(torch.nn.Module):
         self.output_time = output_time
 
         self.fc = torch.nn.Linear(hidden_channels,hidden_channels)
-        if initial and not isinstance(func, ContinuousRNNConverter):  # very ugly hack
+        if initial and not isinstance(func, ContinuousRNNConverter):  # ContinuousRNNConverter has no separate initial network
             self.initial_network = torch.nn.Linear(input_channels, hidden_channels)
         self.linear = torch.nn.Linear(hidden_channels, input_channels)
         # self.linear2 = torch.nn.Linear(2, output_time)
@@ -471,14 +471,14 @@ class NeuralCDE_IDEA4_forecasting(torch.nn.Module):
         
         if z0 is None:
             assert self.initial, "Was not expecting to be given no value of z0."
-            if isinstance(self.func, ContinuousRNNConverter):  # still an ugly hack
+            if isinstance(self.func, ContinuousRNNConverter):  # ContinuousRNNConverter initializes z0 as zeros
                 z0 = torch.zeros(*batch_dims, self.hidden_channels, dtype=coeff.dtype, device=coeff.device)
             else:
                 z0 = self.initial_network(cubic_spline.evaluate(times[0]))
                 
         else:
             assert not self.initial, "Was expecting to be given a value of z0."
-            if isinstance(self.func, ContinuousRNNConverter):  # continuing adventures in ugly hacks
+            if isinstance(self.func, ContinuousRNNConverter):  # ContinuousRNNConverter prepends input-channel zeros to z0
                 z0_extra = torch.zeros(*batch_dims, self.input_channels, dtype=z0.dtype, device=z0.device)
                 z0 = torch.cat([z0_extra, z0], dim=-1)
 
@@ -587,7 +587,7 @@ class NeuralCDE_IDEA4_forecasting2(torch.nn.Module):
                 during forward()), or to use the one supplied during forward (in which case z0 must be passed during
                 forward()).
         """
-        if isinstance(func, ContinuousRNNConverter):  # ugly hack
+        if isinstance(func, ContinuousRNNConverter):  # ContinuousRNNConverter carries state as concatenated hidden+input channels
             hidden_channels = hidden_channels + input_channels
 
         super(NeuralCDE_IDEA4_forecasting2, self).__init__()
@@ -608,7 +608,7 @@ class NeuralCDE_IDEA4_forecasting2(torch.nn.Module):
         self.output_time = output_time
 
         self.fc = torch.nn.Linear(hidden_channels,hidden_channels)
-        if initial and not isinstance(func, ContinuousRNNConverter):  # very ugly hack
+        if initial and not isinstance(func, ContinuousRNNConverter):  # ContinuousRNNConverter has no separate initial network
             self.initial_network = torch.nn.Linear(input_channels, hidden_channels)
         self.linear = torch.nn.Linear(hidden_channels, input_channels)
         # self.linear2 = torch.nn.Linear(2, output_time)
@@ -634,14 +634,14 @@ class NeuralCDE_IDEA4_forecasting2(torch.nn.Module):
         
         if z0 is None:
             assert self.initial, "Was not expecting to be given no value of z0."
-            if isinstance(self.func, ContinuousRNNConverter):  # still an ugly hack
+            if isinstance(self.func, ContinuousRNNConverter):  # ContinuousRNNConverter initializes z0 as zeros
                 z0 = torch.zeros(*batch_dims, self.hidden_channels, dtype=coeff.dtype, device=coeff.device)
             else:
                 z0 = self.initial_network(cubic_spline.evaluate(times[0]))
                 
         else:
             assert not self.initial, "Was expecting to be given a value of z0."
-            if isinstance(self.func, ContinuousRNNConverter):  # continuing adventures in ugly hacks
+            if isinstance(self.func, ContinuousRNNConverter):  # ContinuousRNNConverter prepends input-channel zeros to z0
                 z0_extra = torch.zeros(*batch_dims, self.input_channels, dtype=z0.dtype, device=z0.device)
                 z0 = torch.cat([z0_extra, z0], dim=-1)
 
