@@ -548,7 +548,15 @@ def _preprocess_cache_contract(
     timestamps,
     timestamp_delta_scale,
     missingness_reference,
+    control_value_transform="identity",
+    control_value_train_indices=None,
+    control_value_transform_state=None,
+    return_control_value_transform=False,
 ):
+    resolved_control_transform = normalize_control_value_transform(control_value_transform)
+    state_payload = None
+    if control_value_transform_state is not None:
+        state_payload = json.dumps(control_value_transform_state, sort_keys=True, separators=(",", ":"))
     return {
         "package_version": str(globals().get("TORCH_ISTS_PACKAGE_VERSION", "unknown")),
         "model_name": str(model_name),
@@ -562,11 +570,22 @@ def _preprocess_cache_contract(
         "timestamps_hash": _hash_array_for_cache(timestamps),
         "timestamp_delta_scale": None if timestamp_delta_scale is None else float(timestamp_delta_scale),
         "missingness_reference_hash": _hash_array_for_cache(missingness_reference),
+        "control_value_transform": resolved_control_transform,
+        "control_value_train_indices_hash": _hash_array_for_cache(control_value_train_indices),
+        "control_value_transform_state_hash": (
+            None
+            if state_payload is None
+            else hashlib.sha256(state_payload.encode("utf-8")).hexdigest()
+        ),
+        "return_control_value_transform": bool(return_control_value_transform),
     }
 
 
 def _preprocess_with_optional_cache(*, coeff_cache_dir=None, no_coeff_cache=False, cache_events=None, **kwargs):
     model_name = kwargs.pop("model_name", "")
+    kwargs["control_value_transform"] = normalize_control_value_transform(
+        kwargs.get("control_value_transform", "identity")
+    )
     cache_enabled = bool(coeff_cache_dir) and not bool(no_coeff_cache)
     if not cache_enabled:
         return preprocess(**kwargs)
@@ -868,6 +887,16 @@ def parse_cli_args():
         help="Disable preprocessing/coefficient cache even when --coeff-cache-dir is set.",
     )
     parser.add_argument(
+        "--control-value-transform",
+        type=normalize_control_value_transform,
+        choices=["identity", "standardize"],
+        default="identity",
+        help=(
+            "Value-channel transform used to construct interpolation coefficients. "
+            "standardize fits observed training values only; identity preserves prior behavior."
+        ),
+    )
+    parser.add_argument(
         "--cell-timeout-seconds",
         type=float,
         default=0.0,
@@ -998,7 +1027,13 @@ def _resolve_run_device(device_mode: str) -> torch.device:
     raise ValueError("device must be one of {'auto', 'cpu', 'cuda'}")
 
 # Import from the packaged torch_ists runtime.
-from torch_ists.preprocessing import apply_missingness, preprocess
+from torch_ists.preprocessing import (
+    apply_missingness,
+    control_value_transform_metadata,
+    normalize_control_value_transform,
+    preprocess,
+)
+from torch_ists.handlers import resolve_model_control_value_transform
 from torch_ists import __version__ as TORCH_ISTS_PACKAGE_VERSION, ists_classifier, ists_model
 from torch_ists.channel_drop import build_channel_drop_plan
 from _training_runtime import (
@@ -1120,6 +1155,7 @@ def _build_output_contract(
     timestamp_summary=None,
     robustness_axes=None,
     training_loop_policy=None,
+    control_value_transform="identity",
 ):
     task_name = str(task)
     task_target = None
@@ -1159,6 +1195,7 @@ def _build_output_contract(
         "timestamp_summary": timestamp_summary,
         "robustness_axes": robustness_axes,
         "training_loop_policy": training_loop_policy,
+        "control_value_transform": normalize_control_value_transform(control_value_transform),
     }
 
 
@@ -1604,9 +1641,20 @@ def _validate_existing_output_contract(
         "timestamp_summary",
         "robustness_axes",
         "training_loop_policy",
+        "control_value_transform",
     )
     mismatches = []
     for field in semantic_fields:
+        if field == "control_value_transform":
+            actual_transform = normalize_control_value_transform(
+                actual_contract.get(field, "identity")
+            )
+            expected_transform = normalize_control_value_transform(
+                expected_contract.get(field, "identity")
+            )
+            if actual_transform != expected_transform:
+                mismatches.append(field)
+            continue
         if field not in actual_contract:
             if task == "classification":
                 continue
@@ -2156,6 +2204,7 @@ def _build_result_payload(
     runtime_baseline_id=None,
     training_loop=None,
     coeff_cache=None,
+    control_value_transform=None,
 ):
     resolved_regime = str(evaluation_regime or mode)
     resolved_mode = resolved_regime if str(mode).strip().lower() == "standard" else str(mode)
@@ -2178,6 +2227,7 @@ def _build_result_payload(
         "runtime_baseline_id": runtime_baseline_id,
         "training_loop": training_loop,
         "coeff_cache": coeff_cache,
+        "control_value_transform": control_value_transform,
     }
     if output_contract is not None:
         meta["output_contract"] = output_contract
@@ -2229,9 +2279,32 @@ def run_model(
     no_coeff_cache=False,
     solver_budget_policy="allow",
     solver_budget_seq_len_threshold=0,
+    control_value_transform="identity",
 ):
     task = str(task).strip().lower()
     validate_model_task_capability(model_name, task)
+    effective_control_transform, consumes_coefficients = resolve_model_control_value_transform(
+        model_name,
+        control_value_transform,
+    )
+    configured_control_transform = normalize_control_value_transform(
+        model_config.get("control_value_transform", "identity")
+    )
+    if configured_control_transform != effective_control_transform:
+        raise ValueError(
+            "Parameter artifact control-value transform mismatch: "
+            f"stored={configured_control_transform!r}, requested={effective_control_transform!r}. "
+            "Run parameter search with the same --control-value-transform setting."
+        )
+    if effective_control_transform == "standardize":
+        configured_metadata = model_config.get("control_value_transform_metadata")
+        if not isinstance(configured_metadata, dict):
+            raise ValueError("standardize parameter artifacts require control-value transform metadata")
+        if (
+            normalize_control_value_transform(configured_metadata.get("method")) != "standardize"
+            or configured_metadata.get("fit_scope") != "train_observed"
+        ):
+            raise ValueError("standardize parameter artifact metadata is incomplete")
     if robustness_mode:
         robustness_test_rates = _parse_missing_rates(robustness_test_rates)
         robustness_test_mechanisms = _parse_robustness_mechanisms(robustness_test_mechanisms)
@@ -2412,6 +2485,7 @@ def run_model(
         timestamp_summary=timestamp_summary,
         robustness_axes=robustness_axes,
         training_loop_policy=training_loop_policy,
+        control_value_transform=effective_control_transform,
     )
     if CHECK and os.path.exists(out_path):
         _validate_existing_output_contract(
@@ -2456,7 +2530,7 @@ def run_model(
     else:
         os.makedirs(os.path.join(out_root, data_name, str(missing_rate)), exist_ok=True)
 
-    X_missing, X_mask, X_delta, coeffs = _preprocess_with_optional_cache(
+    X_missing, X_mask, X_delta, coeffs, control_transform_state = _preprocess_with_optional_cache(
         coeff_cache_dir=coeff_cache_dir,
         no_coeff_cache=no_coeff_cache,
         cache_events=coeff_cache_events,
@@ -2471,7 +2545,12 @@ def run_model(
         timestamps=timestamps,
         timestamp_delta_scale=timestamp_delta_scale,
         missingness_reference=preprocess_X[train_idx],
+        control_value_transform=effective_control_transform,
+        control_value_train_indices=train_idx,
+        return_control_value_transform=True,
     )
+    control_transform_metadata = control_value_transform_metadata(control_transform_state)
+    control_transform_metadata["consumes_coefficients"] = bool(consumes_coefficients)
     X_missing_norm, normalization_summary = normalize_with_train_stats(X_missing, train_idx)
     train_missing_summary = compute_train_missing_summary(X_missing, train_idx)
     train_missing_summary.update(normalization_summary)
@@ -2659,6 +2738,8 @@ def run_model(
             coeff_cache_dir=coeff_cache_dir,
             no_coeff_cache=no_coeff_cache,
             coeff_cache_events=coeff_cache_events,
+            control_value_transform=effective_control_transform,
+            control_value_transform_state=control_transform_state,
         )
         if len(evaluations) != int(robustness_axes["expected_evaluations"]):
             raise RuntimeError(
@@ -2693,6 +2774,7 @@ def run_model(
             runtime_baseline_id=runtime_baseline_id,
             training_loop=training_loop_metadata,
             coeff_cache=coeff_cache_summary,
+            control_value_transform=control_transform_metadata,
         )
         payload.update(param_search_contract)
 
@@ -2792,6 +2874,7 @@ def run_model(
             "runtime_baseline_id": runtime_baseline_id,
             "training_loop": training_loop_metadata,
             "coeff_cache": coeff_cache_summary,
+            "control_value_transform": control_transform_metadata,
         }
 
     # Normal mode: single test evaluation
@@ -2955,6 +3038,7 @@ def run_model(
         runtime_baseline_id=runtime_baseline_id,
         training_loop=training_loop_metadata,
         coeff_cache=coeff_cache_summary,
+        control_value_transform=control_transform_metadata,
     )
     payload.update(param_search_contract)
     atomic_pickle_dump(payload, output_path)
@@ -2984,6 +3068,7 @@ def run_model(
         "runtime_baseline_id": runtime_baseline_id,
         "training_loop": training_loop_metadata,
         "coeff_cache": coeff_cache_summary,
+        "control_value_transform": control_transform_metadata,
     }
 
 
@@ -3014,6 +3099,8 @@ def _evaluate_robustness(
     coeff_cache_dir=None,
     no_coeff_cache=False,
     coeff_cache_events=None,
+    control_value_transform="identity",
+    control_value_transform_state=None,
 ):
     """
     Evaluate trained model on multiple test missing rates.
@@ -3076,6 +3163,8 @@ def _evaluate_robustness(
         timestamps=timestamps,
         timestamp_delta_scale=timestamp_delta_scale,
         missingness_reference=evaluation_inputs[train_idx],
+        control_value_transform=control_value_transform,
+        control_value_transform_state=control_value_transform_state,
     )
     train_stats, _normalization_summary = compute_train_normalization_stats(train_missing_ref, train_idx)
 
@@ -3142,6 +3231,8 @@ def _evaluate_robustness(
                         timestamps=timestamps,
                         timestamp_delta_scale=timestamp_delta_scale,
                         missingness_reference=evaluation_inputs[train_idx],
+                        control_value_transform=control_value_transform,
+                        control_value_transform_state=control_value_transform_state,
                     )
 
                     # Reuse the training missing=0.0 statistics for all robustness test axes.
@@ -3427,6 +3518,7 @@ def main():
                             no_coeff_cache=args.no_coeff_cache,
                             solver_budget_policy=args.solver_budget_policy,
                             solver_budget_seq_len_threshold=args.solver_budget_seq_len_threshold,
+                            control_value_transform=args.control_value_transform,
                         )
                     cell_elapsed_s = time.monotonic() - cell_start
                     if run_result is None:
@@ -3627,6 +3719,7 @@ def main():
                                 no_coeff_cache=args.no_coeff_cache,
                                 solver_budget_policy=args.solver_budget_policy,
                                 solver_budget_seq_len_threshold=args.solver_budget_seq_len_threshold,
+                                control_value_transform=args.control_value_transform,
                             )
                         cell_elapsed_s = time.monotonic() - cell_start
                         if run_result is None:

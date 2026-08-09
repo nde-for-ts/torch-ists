@@ -62,48 +62,22 @@ def compute_train_missing_summary(
 
 def compute_train_normalization_stats(x_missing: torch.Tensor, train_idx):
     """Compute finite train-only per-channel normalization stats for [N,L,D]."""
-    train_values = x_missing[train_idx, ...]
-    stats = []
-    fallback_channels: list[int] = []
-    for channel_idx, train_channel in enumerate(train_values.unbind(dim=-1)):
-        observed = train_channel.masked_select(torch.isfinite(train_channel))
-        if observed.numel() == 0:
-            mean = torch.zeros((), dtype=x_missing.dtype, device=x_missing.device)
-            std = torch.ones((), dtype=x_missing.dtype, device=x_missing.device)
-            fallback_channels.append(int(channel_idx))
-        else:
-            mean = observed.mean()
-            if observed.numel() < 2:
-                std = torch.ones((), dtype=x_missing.dtype, device=x_missing.device)
-                fallback_channels.append(int(channel_idx))
-            else:
-                std = observed.std()
-                if (not bool(torch.isfinite(std).item())) or float(std.item()) <= 0.0:
-                    std = torch.ones((), dtype=x_missing.dtype, device=x_missing.device)
-                    fallback_channels.append(int(channel_idx))
-        stats.append((mean, std))
-    summary = {
-        "normalization_fallback_channel_count": int(len(fallback_channels)),
-        "normalization_fallback_channels": fallback_channels,
-    }
-    return stats, summary
+    from torch_ists.preprocessing import compute_train_normalization_stats as package_compute
+
+    return package_compute(x_missing, train_idx)
 
 
 def apply_train_normalization_stats(x_missing: torch.Tensor, stats):
     """Apply per-channel stats while preserving NaNs at missing positions."""
-    normalized_channels = []
-    for Xi, (mean, std) in zip(x_missing.unbind(dim=-1), stats):
-        normalized_channels.append((Xi - mean) / (std + 1e-5))
-    normalized = torch.stack(normalized_channels, dim=-1)
-    finite_observed = normalized[torch.isfinite(x_missing)]
-    if finite_observed.numel() > 0 and not bool(torch.isfinite(finite_observed).all().item()):
-        raise ValueError("normalization produced non-finite values at observed positions")
-    return normalized
+    from torch_ists.preprocessing import apply_train_normalization_stats as package_apply
+
+    return package_apply(x_missing, stats)
 
 
 def normalize_with_train_stats(x_missing: torch.Tensor, train_idx):
-    stats, summary = compute_train_normalization_stats(x_missing, train_idx)
-    return apply_train_normalization_stats(x_missing, stats), summary
+    from torch_ists.preprocessing import normalize_with_train_stats as package_normalize
+
+    return package_normalize(x_missing, train_idx)
 
 
 def enforce_train_missing_gate(

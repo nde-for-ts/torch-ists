@@ -15,6 +15,148 @@ SUPPORTED_MISSINGNESS_MECHANISMS = {
     "CHANNEL_DROP",
 }
 SUPPORTED_IMPUTATION_STRATEGIES = ("zero", "last_observed", "channel_mean")
+SUPPORTED_CONTROL_VALUE_TRANSFORMS = ("identity", "standardize")
+CONTROL_VALUE_STANDARDIZE_EPSILON = 1e-5
+
+
+def normalize_control_value_transform(method: Optional[str] = None) -> str:
+    """Return the canonical value transform used to construct controls."""
+    normalized = "identity" if method is None else str(method).strip().lower()
+    if normalized == "train_standardize":
+        normalized = "standardize"
+    if normalized not in SUPPORTED_CONTROL_VALUE_TRANSFORMS:
+        raise ValueError(
+            "control_value_transform must be one of "
+            f"{SUPPORTED_CONTROL_VALUE_TRANSFORMS}, got {method!r}"
+        )
+    return normalized
+
+
+def compute_train_normalization_stats(x_missing, train_indices):
+    """Compute finite train-only per-channel statistics for ``[N,L,D]`` values."""
+    import torch
+
+    values = torch.as_tensor(x_missing)
+    indices = torch.as_tensor(train_indices, dtype=torch.long, device=values.device).reshape(-1)
+    train_values = values.index_select(0, indices)
+    stats = []
+    fallback_channels: list[int] = []
+    observed_counts: list[int] = []
+    for channel_idx, train_channel in enumerate(train_values.unbind(dim=-1)):
+        observed = train_channel.masked_select(torch.isfinite(train_channel))
+        observed_counts.append(int(observed.numel()))
+        if observed.numel() == 0:
+            mean = torch.zeros((), dtype=values.dtype, device=values.device)
+            scale = torch.ones((), dtype=values.dtype, device=values.device)
+            fallback_channels.append(int(channel_idx))
+        else:
+            mean = observed.mean()
+            if observed.numel() < 2:
+                scale = torch.ones((), dtype=values.dtype, device=values.device)
+                fallback_channels.append(int(channel_idx))
+            else:
+                scale = observed.std()
+                if (not bool(torch.isfinite(scale).item())) or float(scale.item()) <= 0.0:
+                    scale = torch.ones((), dtype=values.dtype, device=values.device)
+                    fallback_channels.append(int(channel_idx))
+        stats.append((mean, scale))
+    summary = {
+        "normalization_fallback_channel_count": int(len(fallback_channels)),
+        "normalization_fallback_channels": fallback_channels,
+        "normalization_observed_counts": observed_counts,
+    }
+    return stats, summary
+
+
+def apply_train_normalization_stats(x_missing, stats):
+    """Apply channel statistics while preserving NaNs at missing positions."""
+    import torch
+
+    values = torch.as_tensor(x_missing)
+    if len(stats) != int(values.shape[-1]):
+        raise ValueError("normalization stats width does not match input channels")
+    channels = [
+        (channel - mean) / (scale + CONTROL_VALUE_STANDARDIZE_EPSILON)
+        for channel, (mean, scale) in zip(values.unbind(dim=-1), stats)
+    ]
+    normalized = torch.stack(channels, dim=-1)
+    observed = torch.isfinite(values)
+    if bool(observed.any().item()) and not bool(torch.isfinite(normalized[observed]).all().item()):
+        raise ValueError("normalization produced non-finite values at observed positions")
+    return normalized
+
+
+def normalize_with_train_stats(x_missing, train_indices):
+    stats, summary = compute_train_normalization_stats(x_missing, train_indices)
+    return apply_train_normalization_stats(x_missing, stats), summary
+
+
+def fit_control_value_transform(x_missing, train_indices, method: str = "identity") -> dict:
+    """Fit a channel-wise transform from finite training values in ``[N,L,D]``."""
+    import torch
+
+    resolved = normalize_control_value_transform(method)
+    values = torch.as_tensor(x_missing)
+    if values.ndim != 3 or not torch.is_floating_point(values):
+        raise ValueError("control values must be a floating tensor with shape [N,L,D]")
+    if resolved == "identity":
+        return {
+            "method": "identity",
+            "fit_scope": "none",
+            "mean": None,
+            "scale": None,
+            "fallback_channels": [],
+            "fallback_channel_count": 0,
+            "observed_counts": [],
+        }
+    if train_indices is None:
+        raise ValueError("standardize requires explicit training indices")
+    indices = torch.as_tensor(train_indices, dtype=torch.long, device=values.device).reshape(-1)
+    if indices.numel() <= 0:
+        raise ValueError("standardize requires non-empty training indices")
+    if int(indices.min().item()) < 0 or int(indices.max().item()) >= int(values.shape[0]):
+        raise ValueError("control-value training indices are out of bounds")
+
+    stats, summary = compute_train_normalization_stats(values, indices)
+    return {
+        "method": "standardize",
+        "fit_scope": "train_observed",
+        "mean": [float(mean.item()) for mean, _scale in stats],
+        "scale": [float(scale.item()) for _mean, scale in stats],
+        "fallback_channels": list(summary["normalization_fallback_channels"]),
+        "fallback_channel_count": int(summary["normalization_fallback_channel_count"]),
+        "observed_counts": list(summary["normalization_observed_counts"]),
+    }
+
+
+def apply_control_value_transform(x_missing, state: dict):
+    """Apply a fitted transform while preserving NaNs at missing positions."""
+    import torch
+
+    values = torch.as_tensor(x_missing)
+    method = normalize_control_value_transform(state.get("method"))
+    if method == "identity":
+        return values
+    mean_values = state.get("mean")
+    scale_values = state.get("scale")
+    if mean_values is None or scale_values is None:
+        raise ValueError("standardize control-value state is missing mean or scale")
+    mean = torch.as_tensor(mean_values, dtype=values.dtype, device=values.device)
+    scale = torch.as_tensor(scale_values, dtype=values.dtype, device=values.device)
+    if mean.ndim != 1 or scale.ndim != 1 or mean.numel() != values.shape[-1] or scale.numel() != values.shape[-1]:
+        raise ValueError("control-value state width does not match input channels")
+    return apply_train_normalization_stats(values, list(zip(mean.unbind(), scale.unbind())))
+
+
+def control_value_transform_metadata(state: dict) -> dict:
+    """Return artifact-safe semantic metadata without fitted statistics."""
+    method = normalize_control_value_transform(state.get("method"))
+    return {
+        "method": method,
+        "fit_scope": "none" if method == "identity" else "train_observed",
+        "fallback_channel_count": int(state.get("fallback_channel_count", 0)),
+        "fallback_channels": [int(value) for value in state.get("fallback_channels", [])],
+    }
 
 
 def _require_torchcde():
@@ -353,6 +495,10 @@ def _finalize_preprocess_outputs(
     interpolate: str,
     use_intensity: bool,
     time_grid_np: Optional[np.ndarray] = None,
+    control_value_transform: str = "identity",
+    control_value_train_indices: Optional[Any] = None,
+    control_value_transform_state: Optional[dict] = None,
+    return_control_value_transform: bool = False,
 ):
     import torch
 
@@ -374,8 +520,25 @@ def _finalize_preprocess_outputs(
     intensity = (~torch.isnan(X_missing)).to(X_missing.dtype).cumsum(dim=1)
     time_feat = times.view(1, seq_len, 1).expand(X_missing.shape[0], seq_len, 1)
 
-    values_t = torch.cat([time_feat, X_missing], dim=-1)
-    values_ti = torch.cat([time_feat, intensity, X_missing], dim=-1)
+    resolved_transform = normalize_control_value_transform(control_value_transform)
+    if control_value_transform_state is None:
+        transform_state = fit_control_value_transform(
+            X_missing,
+            control_value_train_indices,
+            method=resolved_transform,
+        )
+    else:
+        transform_state = dict(control_value_transform_state)
+        state_method = normalize_control_value_transform(transform_state.get("method"))
+        if state_method != resolved_transform:
+            raise ValueError(
+                "control-value transform state/method mismatch: "
+                f"state={state_method!r}, requested={resolved_transform!r}"
+            )
+    control_values = apply_control_value_transform(X_missing, transform_state)
+
+    values_t = torch.cat([time_feat, control_values], dim=-1)
+    values_ti = torch.cat([time_feat, intensity, control_values], dim=-1)
 
     target = values_ti if use_intensity else values_t
     if interpolate == "natural":
@@ -396,7 +559,10 @@ def _finalize_preprocess_outputs(
             "Supported values are {'natural', 'linear', 'rectilinear', 'cubic', 'hermite'}."
         )
 
-    return X_missing, X_mask, X_delta, coeffs
+    outputs = (X_missing, X_mask, X_delta, coeffs)
+    if return_control_value_transform:
+        return (*outputs, transform_state)
+    return outputs
 
 
 def apply_missingness_compat(
@@ -556,6 +722,10 @@ def preprocess(
     timestamps: Optional[Any] = None,
     timestamp_delta_scale: Optional[float] = None,
     missingness_reference: Optional[Any] = None,
+    control_value_transform: str = "identity",
+    control_value_train_indices: Optional[Any] = None,
+    control_value_transform_state: Optional[dict] = None,
+    return_control_value_transform: bool = False,
 ):
     """Preprocess data and build interpolation features.
 
@@ -583,6 +753,15 @@ def preprocess(
         missingness_reference: Optional [N_ref, D, L] array used as the reference
             distribution for MAR/MNAR synthetic masks. Script entrypoints pass the
             training split here to avoid test-to-train mask-stat leakage.
+        control_value_transform: ``identity`` (default) or train-observed
+            ``standardize`` for value channels before coefficient construction.
+            ``train_standardize`` is accepted as an input alias.
+        control_value_train_indices: Training sample indices used to fit
+            ``standardize`` after missingness is applied.
+        control_value_transform_state: Optional previously fitted state. Robustness
+            evaluation uses this to keep training statistics frozen.
+        return_control_value_transform: If true, append the fitted state to the
+            usual four return values.
 
     Returns:
         X_missing: torch.Tensor [N, L, D]
@@ -647,6 +826,10 @@ def preprocess(
         interpolate=resolved_interpolate,
         use_intensity=resolved_use_intensity,
         time_grid_np=None,
+        control_value_transform=control_value_transform,
+        control_value_train_indices=control_value_train_indices,
+        control_value_transform_state=control_value_transform_state,
+        return_control_value_transform=return_control_value_transform,
     )
 
 

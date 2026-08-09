@@ -43,7 +43,24 @@ __all__ = [
     "FlowHandler",
     "VariationalSDEHandler",
     "SDEHandler",
+    "model_consumes_coefficients",
+    "resolve_model_control_value_transform",
 ]
+
+
+def model_consumes_coefficients(model_name: str) -> bool:
+    """Return whether the routed model uses interpolation coefficients."""
+    handler = HandlerRegistry.get_handler(str(model_name))
+    return bool(handler.consumes_coefficients(str(model_name)))
+
+
+def resolve_model_control_value_transform(model_name: str, requested: str | None):
+    """Apply control scaling only to models that consume the generated control."""
+    from torch_ists.preprocessing import normalize_control_value_transform
+
+    normalized = normalize_control_value_transform(requested)
+    consumes = model_consumes_coefficients(model_name)
+    return (normalized if consumes else "identity"), consumes
 
 
 def __getattr__(name: str):

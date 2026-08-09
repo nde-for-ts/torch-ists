@@ -113,6 +113,11 @@ class BaseHandler(ABC):
         """
         return False
 
+    def consumes_coefficients(self, model_name: str) -> bool:
+        """Whether ``model_name`` uses interpolation coefficients at forward time."""
+        del model_name
+        return False
+
     # ══════════════════════════════════════════════════════════════════
     # Common Utility Methods
     # ══════════════════════════════════════════════════════════════════

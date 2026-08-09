@@ -50,11 +50,13 @@ class _LazyHandlerProxy(BaseHandler):
         module_name: str,
         class_name: str,
         supported_models: Iterable[str] = (),
+        coefficient_models: Iterable[str] = (),
     ):
         self.name = name
         self._module_name = module_name
         self._class_name = class_name
         self._supported_models = frozenset(str(model) for model in supported_models)
+        self._coefficient_models = frozenset(str(model) for model in coefficient_models)
         self._handler: BaseHandler | None = None
 
     def _load_handler(self) -> BaseHandler:
@@ -70,6 +72,11 @@ class _LazyHandlerProxy(BaseHandler):
 
     def can_handle(self, model_name: str) -> bool:
         return model_name in self._supported_models
+
+    def consumes_coefficients(self, model_name: str) -> bool:
+        if model_name not in self._supported_models:
+            raise ValueError(f"{self.name} handler does not support model {model_name!r}")
+        return model_name in self._coefficient_models
 
     def _call_handler(self, method_name: str, *args, **kwargs):
         try:
@@ -132,6 +139,11 @@ def bootstrap_handler_registry() -> None:
                 for name, cfg in ODE_MODELS.items()
                 if cfg.get("handler") == "ODEHandler" and name != "ode-lstm"
             ],
+            coefficient_models=[
+                name
+                for name, cfg in ODE_MODELS.items()
+                if cfg.get("handler") == "ODEHandler" and name != "ode-lstm"
+            ],
         )
     )
     HandlerRegistry.register(
@@ -148,6 +160,7 @@ def bootstrap_handler_registry() -> None:
             module_name=".cde_handler",
             class_name="CDEHandler",
             supported_models=CDE_MODELS.keys(),
+            coefficient_models=CDE_MODELS.keys(),
         )
     )
     HandlerRegistry.register(
@@ -164,6 +177,14 @@ def bootstrap_handler_registry() -> None:
             module_name=".flow_handler",
             class_name="FlowHandler",
             supported_models=FLOW_MODELS.keys(),
+            coefficient_models=(
+                name
+                for name in FLOW_MODELS
+                if name == "flowpath"
+                or name.startswith("flowpath-")
+                or name == "dualdynamics"
+                or name.startswith("dualdynamics-")
+            ),
         )
     )
     if VARIATIONAL_SDE_MODELS:
@@ -181,6 +202,7 @@ def bootstrap_handler_registry() -> None:
             module_name=".sde_handler",
             class_name="SDEHandler",
             supported_models=tuple(SDE_BASELINE_MODELS.keys()) + tuple(STABLE_SDE_MODELS),
+            coefficient_models=tuple(SDE_BASELINE_MODELS.keys()) + tuple(STABLE_SDE_MODELS),
         )
     )
 

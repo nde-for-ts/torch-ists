@@ -458,7 +458,11 @@ def preprocess(
     timestamps: Optional[Any] = None,
     timestamp_delta_scale: Optional[float] = None,
     missingness_reference: Optional[Any] = None,
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    control_value_transform: str = "identity",
+    control_value_train_indices: Optional[Any] = None,
+    control_value_transform_state: Optional[dict] = None,
+    return_control_value_transform: bool = False,
+):
 ```
 
 #### Parameters
@@ -476,6 +480,10 @@ def preprocess(
 | `timestamps` | `Optional[Any]` | `None` | Optional timestamp grid `[N, L]` used for delta-channel construction. Continuous-time solver grids remain normalized-index unless a model documents otherwise. |
 | `timestamp_delta_scale` | `Optional[float]` | `None` | Positive scale for timestamp-based deltas. The scripts use the train split median positive timestamp step. |
 | `missingness_reference` | `Optional[Any]` | `None` | Optional reference array used by non-MCAR missingness mechanisms such as MAR/MNAR; script workflows pass train-split reference statistics. |
+| `control_value_transform` | `str` | `"identity"` | Value-channel transform used before interpolation-coefficient construction. `"standardize"` fits finite observed values from `control_value_train_indices`; `"train_standardize"` is accepted as an input alias. |
+| `control_value_train_indices` | `Optional[Any]` | `None` | Required training sample indices when fitting `"standardize"`. Validation and test samples do not contribute statistics. |
+| `control_value_transform_state` | `Optional[dict]` | `None` | Previously fitted state to reuse without refitting, for example across robustness conditions. |
+| `return_control_value_transform` | `bool` | `False` | Append the fitted state as a fifth return value. The default four-value return is unchanged. |
 
 #### Returns
 
@@ -484,6 +492,8 @@ def preprocess(
 2. `X_mask`: `[N, L, D]` - Observation mask (1.0=observed, 0.0=missing)
 3. `X_delta`: `[N, L, D]` - Time-since-last-observation (index-based)
 4. `coeffs`: `torch.Tensor` interpolation coefficients. The trailing channel dimension depends on the interpolation mode and whether intensity channels are included.
+
+If `return_control_value_transform=True`, a fifth item contains the fitted transform state. Standardization applies only to value channels used to construct coefficients; time and intensity channels are unchanged, and missing entries remain missing. The default `identity` path is numerically identical to the prior four-output behavior.
 
 Keep native missing entries as `NaN` before calling `preprocess(...)`; the mask and interpolation coefficients are derived from those positions. Strict raw-missing rows such as `neuralflow-*` and `flowpath-*` require the value channel to keep `NaN` at `X_mask=0` positions.
 
@@ -505,6 +515,8 @@ X_missing, X_mask, X_delta, coeffs = preprocess(
 When `model_name` is set, `interpolate` and `use_intensity` default to `get_data_config(model_name)` (explicit kwargs override). When omitted, defaults are `interpolate="cubic"` and `use_intensity=True`.
 
 Timestamp kwargs affect the returned `X_delta` channel and metadata-aligned preprocessing. They do not by themselves change the solver time grid used by continuous-time backbones.
+
+The package scripts expose the same transform through `--control-value-transform`. It is effective only for models whose handlers consume interpolation coefficients; direct sequence, attention, event-driven, and direct-flow models retain identity behavior. Parameter search and model evaluation must use the same setting, and robustness evaluation reuses the fitted training state.
 
 #### Interpolation Modes
 

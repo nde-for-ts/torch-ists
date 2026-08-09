@@ -161,6 +161,7 @@ This is a bounded smoke run; the full defaults (`--num-samples 50 --max-num-epoc
 | `--ray-cpu` | `float` | `16.0` | CPU per Ray trial. |
 | `--ray-gpu` | `float` | `0.5` | GPU per Ray trial (`0` for CPU-only). |
 | `--device` | `{auto, cpu, cuda}` | `auto` | Per-trial device selection. |
+| `--control-value-transform` | `{identity, standardize}` | `identity` | Value-channel transform for coefficient-driven models. `standardize` fits finite observed training values only; direct-input models keep identity behavior. |
 | `--split-root` | `str` | `split` | Input split artifact root. |
 | `--param-root` | `str` | `params` | Output parameter artifact root. |
 | `--contract-dir` | `str` | `evidence` | Directory for JSON run logs (stage = `search`). |
@@ -181,6 +182,8 @@ This is a bounded smoke run; the full defaults (`--num-samples 50 --max-num-epoc
 The default search uses model-specific axes where relevant, such as attention `n_heads`, flow `flow_depth`, and fixed Neural RDE depth by model name. Batch size and learning rate are resolved outside architecture search.
 
 Parameter search runs the standard search without synthetic missingness injection (`missing_rate=0.0`). Provided datasets may still contain existing `NaN` values. Missing-rate sweeps are evaluation axes handled by `model_run.py --missing-rates` or `model_run.py --robustness-mode`, not by parameter search.
+
+Use the same `--control-value-transform` setting for parameter search and evaluation. Existing parameter artifacts without this field are treated as `identity`; a standardization run rejects them instead of silently reusing incompatible parameters. Use a fresh parameter root when comparing both settings side by side.
 
 ### Output
 
@@ -241,6 +244,7 @@ PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/model_run.py \
 | `--robustness-test-mechanisms` | `str` | `MCAR` | Test missingness mechanisms for robustness mode: `MCAR`, `MAR`, `MNAR`, `BLOCK`, `BURST`, `CHANNEL_DROP`. |
 | `--robustness-channel-sync-options` | `str` | `false` | Test channel synchronization options. `false` masks channels independently; `true` shares missing time indices across channels. |
 | `--save-predictions` | `{full, summary}` | `full` | `full` stores prediction arrays; `summary` stores only shape and dtype. |
+| `--control-value-transform` | `{identity, standardize}` | `identity` | Value-channel transform for coefficient-driven models. `standardize` reuses train-only statistics and keeps them frozen across robustness conditions; direct-input models keep identity behavior. |
 | `--split-root` | `str` | `split` | Input split artifact root. |
 | `--param-root` | `str` | `params` | Input parameter artifact root. |
 | `--out-root` | `str` | `out` | Output prediction artifact root. |
@@ -271,6 +275,8 @@ PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/model_run.py \
   ```
 
   The robustness output records the clean anchor, missingness mechanism, `channel_sync`, and `missing_seed`. `CHANNEL_DROP` rows also record the channel count, requested and realized drop counts, dropped channel indices, applicability, exclusion reason, and the number of samples with no remaining observations. A univariate input emits unchanged placeholders marked as excluded because channel outage is not interpretable for one channel. `missing_seed` is the run `--seed`; run multiple seeds to average over split/model/mask variation.
+
+Output reuse validates the effective control-value transform. Artifacts without the field remain compatible with `identity`, while `standardize` requires a matching parameter artifact and output contract. Use a fresh output root for side-by-side comparisons.
 
 ### Task Support Tiers
 

@@ -509,6 +509,16 @@ def parse_cli_args():
         default="targets",
         help="Root directory for dataset target bundles (<targets-root>/<dataset>.npz).",
     )
+    parser.add_argument(
+        "--control-value-transform",
+        type=normalize_control_value_transform,
+        choices=["identity", "standardize"],
+        default="identity",
+        help=(
+            "Value-channel transform used to construct interpolation coefficients. "
+            "standardize fits observed training values only; identity preserves prior behavior."
+        ),
+    )
     args = parser.parse_args()
     if args.search_mode_alias is not None:
         if args.search_policy is not None or args.search_repeat is not None:
@@ -580,7 +590,12 @@ def _current_tune_trial_token(model_config: dict) -> str:
     return stable_hash(model_config)
 
 # Import from the packaged torch_ists runtime.
-from torch_ists.preprocessing import preprocess
+from torch_ists.preprocessing import (
+    control_value_transform_metadata,
+    normalize_control_value_transform,
+    preprocess,
+)
+from torch_ists.handlers import resolve_model_control_value_transform
 from torch_ists import ists_classifier, ists_model
 from _training_runtime import (
     compute_train_missing_summary,
@@ -682,6 +697,8 @@ def _collect_task_metadata(
     targets_root: str,
     dataset_source: str,
     dataset_npz: str | None,
+    control_value_transform: str = "identity",
+    consumes_coefficients: bool = False,
 ) -> dict:
     dataset_payload = load_dataset_payload(
         dataset_name=data_name,
@@ -737,7 +754,7 @@ def _collect_task_metadata(
         _build_task_targets(task, None, None, forecast_horizon)
 
     data_config = get_data_config(model_name)
-    X_missing, _, _, _ = preprocess(
+    X_missing, _, _, _, control_transform_state = preprocess(
         preprocess_X,
         missing_rate=missing_rate,
         interpolate=data_config["interpolation"],
@@ -748,7 +765,12 @@ def _collect_task_metadata(
         timestamps=timestamps,
         timestamp_delta_scale=timestamp_delta_scale,
         missingness_reference=preprocess_X[train_idx],
+        control_value_transform=control_value_transform,
+        control_value_train_indices=train_idx,
+        return_control_value_transform=True,
     )
+    control_transform_metadata = control_value_transform_metadata(control_transform_state)
+    control_transform_metadata["consumes_coefficients"] = bool(consumes_coefficients)
     X_missing_norm, normalization_summary = normalize_with_train_stats(X_missing, train_idx)
     train_missing_summary = compute_train_missing_summary(X_missing, train_idx)
     train_missing_summary.update(normalization_summary)
@@ -785,6 +807,7 @@ def _collect_task_metadata(
         "target_spec": target_spec,
         "target_source": str(target_source if task != "classification" else "label"),
         "timestamp_summary": timestamp_summary,
+        "control_value_transform": control_transform_metadata,
     }
 
 
@@ -1600,6 +1623,9 @@ def _train_single_seed(
     )
 
     # Preprocess data
+    effective_control_transform = normalize_control_value_transform(
+        model_config.get("control_value_transform", "identity")
+    )
     X_missing, X_mask, X_delta, coeffs = preprocess(
         preprocess_X,
         missing_rate=missing_rate,
@@ -1611,6 +1637,8 @@ def _train_single_seed(
         timestamps=timestamps,
         timestamp_delta_scale=timestamp_delta_scale,
         missingness_reference=preprocess_X[train_idx],
+        control_value_transform=effective_control_transform,
+        control_value_train_indices=train_idx,
     )
     X_missing_norm, normalization_summary = normalize_with_train_stats(X_missing, train_idx)
     train_missing_summary = compute_train_missing_summary(X_missing, train_idx)
@@ -1894,6 +1922,7 @@ def optimize(
     dataset_source="default",
     dataset_npz=None,
     runtime_baseline_id=None,
+    control_value_transform="identity",
 ):
     split_root = os.path.abspath(os.path.expanduser(str(split_root)))
     param_root = os.path.abspath(os.path.expanduser(str(param_root)))
@@ -1929,6 +1958,10 @@ def optimize(
             input_dim=int(dataset_payload.X.shape[1]),
         )
     validate_model_task_capability(model_name, task)
+    effective_control_transform, consumes_coefficients = resolve_model_control_value_transform(
+        model_name,
+        control_value_transform,
+    )
     constrained_capacity_config = None
     if search_policy == CONSTRAINED_SEARCH_POLICY:
         X_capacity = dataset_payload.X
@@ -2004,6 +2037,7 @@ def optimize(
             "lr": 1e-3,
             "hidden_dim": int(search_space["default_hidden_dim"]),
             "depth_level": int(search_space["default_depth_level"]),
+            "control_value_transform": effective_control_transform,
         }
         model_config.update(search_space.get("default_extra_params", {}))
         model_config = _attach_constrained_capacity_metadata(
@@ -2078,6 +2112,8 @@ def optimize(
             targets_root=targets_root,
             dataset_source=dataset_source,
             dataset_npz=dataset_npz,
+            control_value_transform=effective_control_transform,
+            consumes_coefficients=consumes_coefficients,
         )
         saved_model_config = _normalize_param_config_for_save(
             model_name,
@@ -2103,6 +2139,10 @@ def optimize(
             ),
         )
         saved_model_config["timestamp_summary"] = metadata["timestamp_summary"]
+        saved_model_config["control_value_transform"] = effective_control_transform
+        saved_model_config["control_value_transform_metadata"] = metadata[
+            "control_value_transform"
+        ]
         if runtime_baseline_id is not None:
             saved_model_config["runtime_baseline_id"] = runtime_baseline_id
         os.makedirs(os.path.join(param_root, data_name), exist_ok=True)
@@ -2166,6 +2206,9 @@ def optimize(
             "dataset_source": str(dataset_source),
             "dataset_npz": portable_artifact_reference(dataset_npz, root=True),
             "runtime_baseline_id": runtime_baseline_id,
+            "control_value_transform": saved_model_config[
+                "control_value_transform_metadata"
+            ],
         }
 
     if device_mode == "cuda" and not torch.cuda.is_available():
@@ -2212,6 +2255,7 @@ def optimize(
         "search_algorithm_policy": search_space["policy"],
         # "batch_size": None, # determine by the number of the data
         "lr": tune.loguniform(*search_space["lr_bounds"]),
+        "control_value_transform": effective_control_transform,
     }
     if constrained_capacity_config is None:
         model_config["hidden_dim"] = tune.choice(search_space["hidden_dim_values"])
@@ -2327,6 +2371,8 @@ def optimize(
         targets_root=targets_root,
         dataset_source=dataset_source,
         dataset_npz=dataset_npz,
+        control_value_transform=effective_control_transform,
+        consumes_coefficients=consumes_coefficients,
     )
     saved_param_config = _normalize_param_config_for_save(
         model_name,
@@ -2357,6 +2403,10 @@ def optimize(
         ),
     )
     saved_param_config["timestamp_summary"] = metadata["timestamp_summary"]
+    saved_param_config["control_value_transform"] = effective_control_transform
+    saved_param_config["control_value_transform_metadata"] = metadata[
+        "control_value_transform"
+    ]
     if runtime_baseline_id is not None:
         saved_param_config["runtime_baseline_id"] = runtime_baseline_id
     atomic_pickle_dump(
@@ -2419,6 +2469,9 @@ def optimize(
         "dataset_source": str(dataset_source),
         "dataset_npz": portable_artifact_reference(dataset_npz, root=True),
         "runtime_baseline_id": runtime_baseline_id,
+        "control_value_transform": saved_param_config[
+            "control_value_transform_metadata"
+        ],
     }
 
 
@@ -2482,6 +2535,10 @@ def main():
             )
             split_seeds = _fixed_search_seed_set(args.search_repeat, SEED)
             validate_model_task_capability(model_name, args.task)
+            effective_control_transform, consumes_coefficients = resolve_model_control_value_transform(
+                model_name,
+                args.control_value_transform,
+            )
             split_paths = [
                 str(resolve_task_split_path(args.split_root, data_name, seed, task=args.task))
                 for seed in split_seeds
@@ -2546,6 +2603,34 @@ def main():
                     existing_contract = describe_search_profile(existing_profile)
                     existing_search_policy = _infer_cli_search_policy(existing_cfg)
                     existing_search_repeat = _infer_cli_search_repeat(existing_cfg, out_name)
+                    existing_control_transform = normalize_control_value_transform(
+                        existing_cfg.get("control_value_transform", "identity")
+                    )
+                    if existing_control_transform != effective_control_transform:
+                        reason = (
+                            "param artifact control-value transform mismatch "
+                            f"(found={existing_control_transform!r}, "
+                            f"expected={effective_control_transform!r})"
+                        )
+                        LOGGER.error("[FAIL] %s/%s: %s", data_name, model_name, reason)
+                        skipped.append({"dataset": data_name, "model": model_name, "task": args.task, "reason": reason})
+                        policy_violations.append(f"{data_name}/{model_name}: {reason}")
+                        continue
+                    existing_control_metadata = existing_cfg.get(
+                        "control_value_transform_metadata"
+                    )
+                    if effective_control_transform == "standardize" and (
+                        not isinstance(existing_control_metadata, dict)
+                        or normalize_control_value_transform(
+                            existing_control_metadata.get("method")
+                        ) != "standardize"
+                        or existing_control_metadata.get("fit_scope") != "train_observed"
+                    ):
+                        reason = "standardize parameter artifact metadata is incomplete"
+                        LOGGER.error("[FAIL] %s/%s: %s", data_name, model_name, reason)
+                        skipped.append({"dataset": data_name, "model": model_name, "task": args.task, "reason": reason})
+                        policy_violations.append(f"{data_name}/{model_name}: {reason}")
+                        continue
                     if existing_profile != args.search_profile:
                         reason = (
                             "param artifact search_profile mismatch "
@@ -2630,6 +2715,17 @@ def main():
                             "param_path": portable_artifact_reference(existing_param_path),
                             "runtime_baseline_id": existing_cfg.get("runtime_baseline_id", runtime_baseline_id),
                             "reason": "param artifact already exists",
+                            "control_value_transform": (
+                                existing_control_metadata
+                                if isinstance(existing_control_metadata, dict)
+                                else {
+                                    "method": "identity",
+                                    "fit_scope": "none",
+                                    "fallback_channel_count": 0,
+                                    "fallback_channels": [],
+                                    "consumes_coefficients": bool(consumes_coefficients),
+                                }
+                            ),
                         }
                     )
                 continue
@@ -2662,6 +2758,7 @@ def main():
                     dataset_source=args.dataset_source,
                     dataset_npz=args.dataset_npz,
                     runtime_baseline_id=runtime_baseline_id,
+                    control_value_transform=args.control_value_transform,
                 )
                 if search_result is None:
                     LOGGER.warning(
