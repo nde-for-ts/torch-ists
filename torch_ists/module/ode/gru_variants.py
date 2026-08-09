@@ -184,6 +184,8 @@ class ODERNN(_GRU):
         dt_value = self.solver_kwargs.get("dt")
         if dt_value is not None and "step_size" not in options:
             options["step_size"] = dt_value
+        if self.solver_method == "dopri5" and "max_num_steps" not in options:
+            options["max_num_steps"] = 10_000
         if options:
             call_kwargs["options"] = options
         for key in ("rtol", "atol"):

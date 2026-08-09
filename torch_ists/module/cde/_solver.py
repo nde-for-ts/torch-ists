@@ -6,6 +6,7 @@ import torch
 
 
 _FIXED_GRID_METHODS = {"euler", "midpoint", "rk4"}
+_DEFAULT_ADAPTIVE_MAX_NUM_STEPS = 10_000
 
 
 def _control_knot_grid_constructor(control_knots: torch.Tensor):
@@ -65,6 +66,10 @@ def apply_control_aware_cde_solver_defaults(
             options["grid_constructor"] = _control_knot_grid_constructor(control_knots)
             kwargs["options"] = options
         return kwargs
+
+    if method == "dopri5" and "max_num_steps" not in options:
+        options["max_num_steps"] = _DEFAULT_ADAPTIVE_MAX_NUM_STEPS
+        kwargs["options"] = options
 
     if piecewise_linear and "jump_t" not in options:
         interior = control_knots[1:-1]

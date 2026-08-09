@@ -137,7 +137,7 @@ ANCDE, EXIT, LEAP, DualDynamics, and FlowPath also use CDE-style control paths a
 
 `ancde`, `exit`, and `leap` are Neural CDE methods that consume interpolation coefficients and use CDE control paths. The default solver is `rk4` with a fixed-grid step size derived from the input times.
 
-Fixed CDE grids contain the instantiated control knots in both forward and reverse adjoint directions.
+Fixed CDE grids contain the instantiated control knots in both forward and reverse adjoint directions. Adaptive CDE and ODE integrations have a finite default step budget while preserving an explicit caller override.
 
 | Model | Paper | Behavior |
 |---|---|---|

@@ -114,6 +114,7 @@ class SourceODEHandler(BaseHandler):
                 observation_noise_std=float(config.get("observation_noise_std", 0.01)),
                 mixing=float(config.get("mixing", 1.0)),
                 auxiliary_weight=float(config.get("auxiliary_weight", 1e-3)),
+                max_substeps=int(config.get("max_substeps", 10_000)),
             )
         elif family == "njode":
             configured_step_size = config.get("step_size")

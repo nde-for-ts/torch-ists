@@ -279,6 +279,45 @@ def test_ode_rnn_uses_batched_fixed_grid_evolution(monkeypatch):
     assert torch.isfinite(summary).all()
 
 
+def test_source_adaptive_direct_paths_install_step_budget(monkeypatch):
+    pytest.importorskip("torchdiffeq")
+    from torch_ists.module.ode import source_variants
+
+    received = []
+
+    def fake_odeint(_func, y0, times, **kwargs):
+        received.append(kwargs)
+        return y0.unsqueeze(0).expand(times.numel(), *y0.shape).clone()
+
+    monkeypatch.setattr(source_variants.torchdiffeq, "odeint", fake_odeint)
+    source_variants._integrate_batch_durations(
+        torch.nn.Identity(),
+        torch.zeros(1, 2),
+        torch.ones(1),
+        method="dopri5",
+        options={},
+        rtol=None,
+        atol=None,
+        adjoint=False,
+    )
+
+    model = source_variants.SourceLatentODEBackbone(2, 3, 3, 1)
+    decoded = model._decode(
+        torch.zeros(2, 3),
+        torch.tensor([[0.0, 0.5, 1.0], [0.0, 0.5, 1.0]]),
+        torch.tensor([2, 2]),
+        method="dopri5",
+        options={},
+        rtol=None,
+        atol=None,
+        adjoint=False,
+    )
+
+    assert decoded.shape == (2, 3, 3)
+    assert len(received) == 2
+    assert all(call["options"]["max_num_steps"] == 10_000 for call in received)
+
+
 def test_latent_ode_ignores_padding_only_timestamps():
     pytest.importorskip("torchdiffeq")
     from torch_ists.module.ode.source_variants import SourceLatentODEBackbone

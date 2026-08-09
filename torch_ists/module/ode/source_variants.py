@@ -124,7 +124,11 @@ def _integrate_batch_durations(
     if durations.numel() != y0.size(0):
         raise ValueError("Expected one integration duration per batch row.")
     if method in {"euler", "midpoint", "rk4"}:
-        configured_step = float(dict(options or {}).get("step_size", 0.0) or 0.0)
+        resolved_options = dict(options or {})
+        configured_step = float(resolved_options.get("step_size", 0.0) or 0.0)
+        max_num_steps = int(resolved_options.get("max_num_steps", 10_000))
+        if max_num_steps <= 0:
+            raise ValueError("fixed-step max_num_steps must be positive")
         max_duration = float(durations.detach().abs().max().item()) if durations.numel() else 0.0
         if configured_step > 0:
             num_steps = max(1, int(math.ceil(max_duration / configured_step)))
@@ -132,6 +136,11 @@ def _integrate_batch_durations(
         else:
             num_steps = 1
             max_step = max_duration
+        if num_steps > max_num_steps:
+            raise ValueError(
+                "fixed-step integration requires "
+                f"{num_steps} steps but the max_num_steps budget is {max_num_steps}"
+            )
         current = y0
         remaining = durations
         for _ in range(num_steps):
@@ -157,6 +166,7 @@ def _integrate_batch_durations(
         adaptive_options = {
             key: value for key, value in dict(options or {}).items() if key != "step_size"
         }
+        adaptive_options.setdefault("max_num_steps", 10_000)
         if adaptive_options:
             call_kwargs["options"] = adaptive_options
         if rtol is not None:
@@ -413,6 +423,7 @@ class SourceLatentODEBackbone(nn.Module):
             adaptive_options = {
                 key: value for key, value in dict(options or {}).items() if key != "step_size"
             }
+            adaptive_options.setdefault("max_num_steps", 10_000)
             if adaptive_options:
                 call_kwargs["options"] = adaptive_options
             if rtol is not None:
@@ -611,6 +622,7 @@ class SourceGRUODEBayesBackbone(nn.Module):
         observation_noise_std: float = 0.01,
         mixing: float = 1.0,
         auxiliary_weight: float = 1e-3,
+        max_substeps: int = 10_000,
     ):
         super().__init__()
         self.hidden_dim = int(hidden_dim)
@@ -618,6 +630,9 @@ class SourceGRUODEBayesBackbone(nn.Module):
         self.observation_noise_std = float(observation_noise_std)
         self.mixing = float(mixing)
         self.auxiliary_weight = float(auxiliary_weight)
+        self.max_substeps = int(max_substeps)
+        if self.max_substeps <= 0:
+            raise ValueError("GRU-ODE-Bayes max_substeps must be positive.")
         prediction_hidden = max(1, int(p_hidden or hidden_dim))
 
         self.initial_hidden = nn.Parameter(torch.zeros(1, hidden_dim))
@@ -645,11 +660,20 @@ class SourceGRUODEBayesBackbone(nn.Module):
         if method != "euler":
             raise ValueError("GRU-ODE-Bayes currently supports only Euler integration.")
         durations = torch.nan_to_num(dt, nan=0.0, posinf=0.0, neginf=0.0).clamp_min(0.0)
-        step_size = float(dict(options or {}).get("step_size", self.step_size))
+        resolved_options = dict(options or {})
+        step_size = float(resolved_options.get("step_size", self.step_size))
         if not math.isfinite(step_size) or step_size <= 0:
             raise ValueError("GRU-ODE-Bayes step_size must be finite and positive.")
         max_duration = float(durations.detach().max().item()) if durations.numel() else 0.0
         num_steps = max(1, int(math.ceil(max_duration / step_size))) if max_duration > 0 else 0
+        max_num_steps = int(resolved_options.get("max_num_steps", self.max_substeps))
+        if max_num_steps <= 0:
+            raise ValueError("GRU-ODE-Bayes max_num_steps must be positive.")
+        if num_steps > max_num_steps:
+            raise ValueError(
+                "GRU-ODE-Bayes integration requires "
+                f"{num_steps} steps but the max_num_steps budget is {max_num_steps}."
+            )
         remaining = durations
         p = self.p_model(h)
         for _ in range(num_steps):
