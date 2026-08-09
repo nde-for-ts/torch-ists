@@ -60,6 +60,5 @@ STABLE_SDE_CONFIGS: Dict[str, Dict] = {
 
 # Numeric SDE encodings are implementation details, not public API names.
 STABLE_SDE_ALIASES: Dict[str, str] = {}
-STABLE_SDE_LEGACY_ALIASES = STABLE_SDE_ALIASES
 
-__all__ = ["STABLE_SDE_CONFIGS", "STABLE_SDE_ALIASES", "STABLE_SDE_LEGACY_ALIASES"]
+__all__ = ["STABLE_SDE_CONFIGS", "STABLE_SDE_ALIASES"]

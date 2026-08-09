@@ -57,8 +57,7 @@ class VectorFieldLearnable(torch.nn.Module):
 
         h_0 = self.func_map(f)
 
-        # Save trajectory only at integer time steps (matching legacy behavior).
-        # Legacy uses `self.time%1 == 0` which saves at t=0,1,2,...
+        # Save trajectory only at integer time steps (t=0,1,2,...).
         is_integer_time = abs(current_t - round(current_t)) < 1e-6
         if is_integer_time and current_t not in self._saved_times:
             self._saved_times.append(current_t)

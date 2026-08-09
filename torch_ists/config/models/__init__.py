@@ -52,7 +52,6 @@ except Exception:  # pragma: no cover - subset payload
 def _select_active_models(model_group: Dict[str, Dict], active_set: Set[str]) -> Dict[str, Dict]:
     return {name: cfg for name, cfg in model_group.items() if name in active_set}
 
-
 active_set = set(ACTIVE_MODELS)
 
 BASIC_MODELS = _select_active_models(_ALL_BASIC_MODELS, active_set)
@@ -65,11 +64,9 @@ STABLE_SDE_CONFIGS = _select_active_models(_ALL_STABLE_SDE_CONFIGS, active_set)
 FLOW_MODELS = _select_active_models(_ALL_FLOW_MODELS, active_set)
 VARIATIONAL_SDE_MODELS = _select_active_models(_ALL_VARIATIONAL_SDE_MODELS, active_set)
 TSDE_METHOD_CONFIGS: Dict[str, Dict] = {}
-# Numeric SDE encodings are implementation details in the public package.
-STABLE_SDE_LEGACY_ALIASES: Dict[str, str] = {}
-STABLE_SDE_ALIASES: Dict[str, str] = STABLE_SDE_LEGACY_ALIASES
+# Numeric SDE encodings are implementation details and are not public aliases.
+STABLE_SDE_ALIASES: Dict[str, str] = {}
 SDE_MODEL_ALIASES: Dict[str, str] = {}
-SDE_LEGACY_MODEL_ALIASES: Dict[str, str] = SDE_MODEL_ALIASES
 STABLE_SDE_MODELS: List[str] = list(STABLE_SDE_CONFIGS.keys())
 
 MODEL_REGISTRY: Dict[str, Dict] = {
@@ -101,9 +98,7 @@ __all__ = [
     "STABLE_SDE_CONFIGS",
     "TSDE_METHOD_CONFIGS",
     "STABLE_SDE_ALIASES",
-    "STABLE_SDE_LEGACY_ALIASES",
     "SDE_MODEL_ALIASES",
-    "SDE_LEGACY_MODEL_ALIASES",
     "STABLE_SDE_MODELS",
     "BASIC_MODELS",
     "ODE_MODELS",

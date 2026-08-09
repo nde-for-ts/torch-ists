@@ -93,7 +93,7 @@ Package implementations informed by the original papers and repositories. They a
 
 `ode-rnn` and `latentode` come from the same NeurIPS 2019 paper but expose different package architectures: `ode-rnn` evolves a recurrent state directly between observations, while `latentode` learns a variational initial state and decodes a generative latent trajectory. Sample-level task heads use the inferred initial latent representation; sequence-level heads use the decoded trajectory. GRU-ODE-Bayes, Latent ODE, and NJ-ODE expose their method-specific objectives through `return_aux_loss=True`.
 
-The API keys in this section are the registry entries. Names such as `SourceLatentODEBackbone` and `SourceGRUODEBayesBackbone` are implementation class names, not additional models or aliases. The separate registry entries `gru-ode`/`gru-ode-bayes` and `ode-rnn-spline`/`ode-rnn` denote different packaged architectures and are counted independently. Historical or pre-patch implementation snapshots remain internal and do not create additional public names such as `*-legacy` or `*-patched`.
+The API keys in this section are the registry entries. Names such as `SourceLatentODEBackbone` and `SourceGRUODEBayesBackbone` are implementation class names, not additional models or aliases. The separate registry entries `gru-ode`/`gru-ode-bayes` and `ode-rnn-spline`/`ode-rnn` denote different packaged architectures and are counted independently. Historical or pre-patch implementation snapshots remain internal and do not create additional lineage-suffixed public names.
 
 The packaged defaults are Euler for `ode-rnn`, GRU-ODE-Bayes, and NJ-ODE, and adaptive Dopri5 for Latent ODE.
 

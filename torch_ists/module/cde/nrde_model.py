@@ -15,6 +15,7 @@ import torch
 import torchcde
 
 from . import controldiffeq
+from ._solver import apply_control_aware_cde_solver_defaults
 
 
 class NeuralRDE(torch.nn.Module):
@@ -83,25 +84,12 @@ class NeuralRDE(torch.nn.Module):
                 z0_extra = torch.zeros(*batch_dims, self.input_channels, dtype=z0.dtype, device=z0.device)
                 z0 = torch.cat([z0_extra, z0], dim=-1)
 
-        # Switch default solver
-        if 'method' not in kwargs:
-            kwargs['method'] = 'rk4'
-        if kwargs['method'] == 'rk4':
-            if 'options' not in kwargs:
-                kwargs['options'] = {}
-            options = kwargs['options']
-            if 'step_size' not in options and 'grid_constructor' not in options:
-                time_diffs = solution_times[1:] - solution_times[:-1]
-                options['step_size'] = time_diffs.min().item()
-
-        # approximation
-        if kwargs['method'] == 'euler':
-            if 'options' not in kwargs:
-                kwargs['options'] = {}
-            options = kwargs['options']
-            if 'step_size' not in options and 'grid_constructor' not in options:
-                time_diffs = solution_times[1:] - solution_times[:-1]
-                options['step_size'] = max(time_diffs.min().item(), 1e-3)
+        kwargs = apply_control_aware_cde_solver_defaults(
+            solution_times,
+            control_times,
+            kwargs,
+            piecewise_linear=False,
+        )
 
         # Actually solve the CDE
         z_t = controldiffeq.cdeint(dX_dt=cubic_spline.derivative,

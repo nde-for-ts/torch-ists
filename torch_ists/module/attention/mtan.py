@@ -43,8 +43,12 @@ class MultiTimeAttention(nn.Module):
         scores = torch.matmul(query, key.transpose(-2, -1)) / math.sqrt(d_k)
         scores = scores.unsqueeze(-1).repeat_interleave(dim, dim=-1)
         if mask is not None:
-            scores = scores.masked_fill(mask.unsqueeze(-3) == 0, -1e9)
+            valid = mask.unsqueeze(-3) != 0
+            scores = scores.masked_fill(~valid, torch.finfo(scores.dtype).min)
         p_attn = F.softmax(scores, dim=-2)
+        if mask is not None:
+            has_observation = valid.any(dim=-2, keepdim=True)
+            p_attn = torch.where(has_observation, p_attn, torch.zeros_like(p_attn))
         if dropout is not None:
             p_attn = dropout(p_attn)
         return torch.sum(p_attn * value.unsqueeze(-3), -2), p_attn

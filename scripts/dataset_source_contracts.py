@@ -110,7 +110,7 @@ def compute_timestamp_delta_scale(
 ) -> float | None:
     if timestamps is None:
         return None
-    timestamps = np.asarray(timestamps, dtype=np.float32)
+    timestamps = np.asarray(timestamps, dtype=np.float64)
     if indices is not None:
         timestamps = timestamps[np.asarray(indices)]
     if timestamps.ndim != 2 or timestamps.shape[1] < 2:
@@ -128,7 +128,7 @@ def compute_timestamp_delta_scale(
 def _timestamp_delta_scale_fallback(timestamps: np.ndarray | None, indices: Any | None = None) -> bool:
     if timestamps is None:
         return False
-    timestamps = np.asarray(timestamps, dtype=np.float32)
+    timestamps = np.asarray(timestamps, dtype=np.float64)
     if indices is not None:
         timestamps = timestamps[np.asarray(indices)]
     if timestamps.ndim != 2 or timestamps.shape[1] < 2:
@@ -227,7 +227,7 @@ def _timestamp_summary(timestamps: np.ndarray | None, *, source: str) -> dict[st
 def _validate_timestamps(timestamps: np.ndarray | None, X: np.ndarray) -> np.ndarray | None:
     if timestamps is None:
         return None
-    timestamps = np.asarray(timestamps, dtype=np.float32)
+    timestamps = np.asarray(timestamps, dtype=np.float64)
     expected_shape = (int(X.shape[0]), int(X.shape[2]))
     if timestamps.ndim != 2:
         raise ValueError(f"timestamps must be 2D [N, L], got shape {timestamps.shape}")

@@ -181,11 +181,6 @@ class ists_model(nn.Module):
         gather_index = final_index.view(-1, 1, 1).expand(-1, 1, out.size(-1))
         return out[:, :time_steps, :].gather(dim=1, index=gather_index).squeeze(1)
 
-    @staticmethod
-    def _map_legacy_checkpoint_keys(state_dict):
-        """Compatibility alias for older checkpoint layouts."""
-        return ists_model._map_checkpoint_keys(state_dict)
-
     def load_state_dict(self, state_dict, strict: bool = True):
         remapped = self._map_checkpoint_keys(state_dict)
         return super().load_state_dict(remapped, strict=strict)
@@ -196,9 +191,10 @@ class ists_model(nn.Module):
         coeffs: Optional[torch.Tensor],
         *,
         return_aux_loss: bool = False,
+        sample_times: Optional[torch.Tensor] = None,
     ):
         # Inline backbone unpacking (was _run_backbone)
-        result = self.seq_layer(seq, coeffs)
+        result = self.seq_layer(seq, coeffs, sample_times=sample_times)
         if isinstance(result, tuple) and len(result) == 3:
             out, _hn, aux_loss = result
         elif isinstance(result, tuple) and len(result) == 2:

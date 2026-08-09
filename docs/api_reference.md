@@ -128,7 +128,7 @@ def set_global_seed(
     seed: int,
     deterministic_mode: Optional[str] = None,
     include_cuda: bool = True,
-    deterministic: Optional[str] = None,  # Legacy alias
+    deterministic: Optional[str] = None,  # Compatibility alias
     warn_only: bool = True,
     set_torch: bool = True,
     set_np: bool = True,
@@ -143,7 +143,7 @@ def set_global_seed(
 | `seed` | `int` | (required) | Random seed value (0-based integer) |
 | `deterministic_mode` | `Optional[str]` | `None` | Deterministic mode: `"off"`, `"warn"`, `"strict"` |
 | `include_cuda` | `bool` | `True` | Apply seed to CUDA devices (if available) |
-| `deterministic` | `Optional[str]` | `None` | **Legacy alias** for `deterministic_mode` |
+| `deterministic` | `Optional[str]` | `None` | **Compatibility alias** for `deterministic_mode` |
 | `warn_only` | `bool` | `True` | If True, only warn on non-deterministic ops |
 | `set_torch` | `bool` | `True` | Set PyTorch seeds |
 | `set_np` | `bool` | `True` | Set NumPy seed |
@@ -284,9 +284,9 @@ Install `.[data]` for the optional `pandas` and `sktime` dependencies. The loade
 
 Benchmark loader behavior: the included scripts pool the original UCR/UEA train and test partitions before creating split files. Variable-length series are padded to the pooled train+test maximum length with `NaN` by default, and labels default to pooled train+test encoding. Use `get_data(..., label_policy="train", padding="last")` only to reproduce older benchmark preprocessing.
 
-#### Legacy-mode caveats
+#### Compatibility-mode caveats
 
-`label_policy="train"` raises `ValueError` when `y_test` contains a class not seen in `y_train`. `padding="last"` uses the legacy equal-length interpolation path and forward-fills the last observed value when padding remains, returning no companion mask; downstream models cannot distinguish padded positions from real observations. Use both only for legacy reproducibility.
+`label_policy="train"` raises `ValueError` when `y_test` contains a class not seen in `y_train`. `padding="last"` uses the equal-length interpolation path and forward-fills the last observed value when padding remains, returning no companion mask; downstream models cannot distinguish padded positions from real observations. Use both only for historical reproducibility.
 
 #### Train/test split behavior
 
@@ -462,6 +462,10 @@ def preprocess(
     control_value_train_indices: Optional[Any] = None,
     control_value_transform_state: Optional[dict] = None,
     return_control_value_transform: bool = False,
+    control_time_source: str = "auto",
+    control_time_train_indices: Optional[Any] = None,
+    control_time_transform_state: Optional[dict] = None,
+    return_control_time_transform: bool = False,
 ):
 ```
 
@@ -477,13 +481,17 @@ def preprocess(
 | `channel_sync` | `bool` | `False` | If `True`, synchronize injected missing positions across channels. |
 | `mechanism` | `str` | `"MCAR"` | Missingness mechanism (`MCAR`, `MAR`, `MNAR`, `BLOCK`, `BURST`). `MAR`, `MNAR`, `BLOCK`, and `BURST` are experimental. |
 | `model_name` | `Optional[str]` | `None` | Optional model key. When set, `interpolate` and `use_intensity` default to `get_data_config(model_name)`. Explicit kwargs still override. |
-| `timestamps` | `Optional[Any]` | `None` | Optional timestamp grid `[N, L]` used for delta-channel construction. Continuous-time solver grids remain normalized-index unless a model documents otherwise. |
+| `timestamps` | `Optional[Any]` | `None` | Optional timestamp grid `[N, L]`. It supplies timestamp deltas and, with `control_time_source="auto"`, an elapsed physical-time control channel. |
 | `timestamp_delta_scale` | `Optional[float]` | `None` | Positive scale for timestamp-based deltas. The scripts use the train split median positive timestamp step. |
 | `missingness_reference` | `Optional[Any]` | `None` | Optional reference array used by non-MCAR missingness mechanisms such as MAR/MNAR; script workflows pass train-split reference statistics. |
 | `control_value_transform` | `str` | `"identity"` | Value-channel transform used before interpolation-coefficient construction. `"standardize"` fits finite observed values from `control_value_train_indices`; `"train_standardize"` is accepted as an input alias. |
 | `control_value_train_indices` | `Optional[Any]` | `None` | Required training sample indices when fitting `"standardize"`. Validation and test samples do not contribute statistics. |
 | `control_value_transform_state` | `Optional[dict]` | `None` | Previously fitted state to reuse without refitting, for example across robustness conditions. |
 | `return_control_value_transform` | `bool` | `False` | Append the fitted state as a fifth return value. The default four-value return is unchanged. |
+| `control_time_source` | `str` | `"auto"` | `"physical"` uses elapsed timestamps, `"index"` uses normalized event order, and `"auto"` selects physical time when timestamps are supplied. |
+| `control_time_train_indices` | `Optional[Any]` | `None` | Training indices used to fit the physical-time unit from positive timestamp gaps. Required when fitting physical time. |
+| `control_time_transform_state` | `Optional[dict]` | `None` | Previously fitted control-time state to reuse without refitting. |
+| `return_control_time_transform` | `bool` | `False` | Append the fitted control-time state after any requested value-transform state. |
 
 #### Returns
 
@@ -494,6 +502,8 @@ def preprocess(
 4. `coeffs`: `torch.Tensor` interpolation coefficients. The trailing channel dimension depends on the interpolation mode and whether intensity channels are included.
 
 If `return_control_value_transform=True`, a fifth item contains the fitted transform state. Standardization applies only to value channels used to construct coefficients; time and intensity channels are unchanged, and missing entries remain missing. The default `identity` path is numerically identical to the prior four-output behavior.
+
+If `return_control_time_transform=True`, the control-time state is appended after the usual outputs and after the value-transform state when both are requested. Timestamp validation and origin subtraction occur in float64 before conversion to model dtype; the physical-time unit is fitted from training-split positive gaps only.
 
 Keep native missing entries as `NaN` before calling `preprocess(...)`; the mask and interpolation coefficients are derived from those positions. Strict raw-missing rows such as `neuralflow-*` and `flowpath-*` require the value channel to keep `NaN` at `X_mask=0` positions.
 
@@ -514,9 +524,9 @@ X_missing, X_mask, X_delta, coeffs = preprocess(
 
 When `model_name` is set, `interpolate` and `use_intensity` default to `get_data_config(model_name)` (explicit kwargs override). When omitted, defaults are `interpolate="cubic"` and `use_intensity=True`.
 
-Timestamp kwargs affect the returned `X_delta` channel and metadata-aligned preprocessing. They do not by themselves change the solver time grid used by continuous-time backbones.
+The interpolation parameter remains a shared normalized grid even when physical timestamps are supplied. Per-sample elapsed physical time is a separate control channel, so irregular gaps are preserved without introducing an `[N,L]` solver grid. CDE fixed-step schedules contain the instantiated control knots, and adaptive linear or rectilinear paths receive control-derived kink locations.
 
-The package scripts expose the same transform through `--control-value-transform`. It is effective only for models whose handlers consume interpolation coefficients; direct sequence, attention, event-driven, and direct-flow models retain identity behavior. Parameter search and model evaluation must use the same setting, and robustness evaluation reuses the fitted training state.
+The package scripts expose the same value transform through `--control-value-transform` and request `standardize` by default. It is effective only for models whose handlers consume interpolation coefficients; direct sequence, attention, event-driven, and direct-flow models resolve to identity behavior. Parameter search and model evaluation must use the same setting, and robustness evaluation reuses the fitted training state. Pass `--control-value-transform identity` when reproducing earlier coefficient scales.
 
 #### Interpolation Modes
 
@@ -911,8 +921,8 @@ Current defaults:
 - Model names use residual-flow defaults: `neuralflow`, `dualdynamics`, and `flowpath`. Explicit `-r/-g/-c` variants remain accepted variants.
 
 Compatibility mapping:
-- legacy `num_hidden_layers` is interpreted as `head_depth`.
-- legacy `flow_num_layers` is interpreted as `flow_depth`.
+- The older `num_hidden_layers` spelling is interpreted as `head_depth`.
+- The older `flow_num_layers` spelling is interpreted as `flow_depth`.
 
 ### 6.6 Command-Line Scripts
 

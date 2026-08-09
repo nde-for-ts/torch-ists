@@ -237,7 +237,9 @@ class BaseHandler(ABC):
     def preprocess_input(
         self,
         seq: torch.Tensor,
-        times: torch.Tensor
+        times: torch.Tensor,
+        *,
+        sample_times: Optional[torch.Tensor] = None,
     ) -> Dict[str, torch.Tensor]:
         """Preprocess input data for forward pass.
 
@@ -251,14 +253,16 @@ class BaseHandler(ABC):
                  - seq[:, 0, :, :]: Observed data
                  - seq[:, 1, :, :]: Mask (1=observed, 0=missing)
                  - seq[:, 2, :, :]: Time delta since last observation
-            times: [L] Time vector
+            times: [L] Shared normalized parameter grid.
+            sample_times: Optional [N,L] elapsed/physical clock.
 
         Returns:
             dict: Preprocessed data with keys:
                 - x: [N, L, D] Data tensor
                 - seq_mask: [N, L] Observation mask
                 - seq_delta: [N, L] Time deltas
-                - seq_ts: [N, L] Timestamps (repeated times)
+                - seq_ts: [N, L] Per-sample clock when supplied, otherwise
+                  repeated normalized parameter times
                 - final_index: [N] Last valid index for each sample
         """
         N = seq.shape[0]
@@ -276,8 +280,14 @@ class BaseHandler(ABC):
         seq_mask = (mask_nld > 0).any(dim=-1).to(seq.dtype)
         seq_delta = self.reduce_sequence_delta(delta_nld)
 
-        # Create timestamps: [L] -> [N, L]
-        seq_ts = times.unsqueeze(0).repeat(N, 1)
+        if sample_times is None:
+            seq_ts = times.unsqueeze(0).repeat(N, 1)
+        else:
+            seq_ts = torch.as_tensor(sample_times, dtype=seq.dtype, device=seq.device)
+            if tuple(seq_ts.shape) != (int(N), int(L)):
+                raise ValueError(
+                    f"sample_times must have shape {(int(N), int(L))}, got {tuple(seq_ts.shape)}"
+                )
 
         # Use the last observed timestep. This preserves ragged NaN-padding
         # boundaries while avoiding the old count-1 compression bug under

@@ -97,7 +97,7 @@ def _enforce_active_scope_or_raise(model_name: str, *, allow_flow_extension: boo
 def _normalize_model_name_or_raise(model_name: str) -> str:
     # Alias normalization mapping:
     # - flow aliases: config.alias_policy.normalize_flow_alias
-    # - SDE numeric codes are implementation selectors and not public aliases
+    # - SDE numeric-code aliases: config.models.SDE_MODEL_ALIASES
     if model_name == "latentsde-kl":
         raise ValueError(
             "Model latentsde-kl is not supported. "
@@ -111,9 +111,8 @@ def _normalize_model_name_or_raise(model_name: str) -> str:
         return alias
     if SDE_CODE_PATTERN.fullmatch(model_name):
         raise ValueError(
-            "Numeric SDE codes are implementation details and are not accepted "
-            "as public model names. Use public names such as 'neural_lsde', "
-            "'neural_lnsde', or 'neural_gsde'."
+            f"Numeric SDE code {model_name} is not available in this package. "
+            f"Accepted compatibility codes: {sorted(SDE_MODEL_ALIASES)}"
         )
     return model_name
 
@@ -286,6 +285,20 @@ class ists_layer(nn.Module):
         seq = seq.permute(0, 1, 3, 2)
         L = seq.shape[3]
         times = torch.linspace(0, 1, L).to(seq.device)
+
+        sample_times = kwargs.get("sample_times")
+        if sample_times is not None:
+            sample_times = torch.as_tensor(sample_times, dtype=seq.dtype, device=seq.device)
+            expected_shape = (int(seq.shape[0]), int(L))
+            if tuple(sample_times.shape) != expected_shape:
+                raise ValueError(
+                    f"sample_times must have shape {expected_shape}, got {tuple(sample_times.shape)}"
+                )
+            if not bool(torch.isfinite(sample_times).all()):
+                raise ValueError("sample_times must be finite")
+            if L > 1 and not bool((sample_times[:, 1:] > sample_times[:, :-1]).all()):
+                raise ValueError("sample_times must be strictly increasing within each sample")
+            kwargs["sample_times"] = sample_times
 
         handler = HandlerRegistry.get_handler(self.model_name)
         forward_kwargs = dict(kwargs)

@@ -1,6 +1,6 @@
 # torch-ists
 
-[![Version](https://img.shields.io/badge/version-0.5.9-blue)](pyproject.toml) [![Python](https://img.shields.io/badge/python-%3E%3D3.10-blue)](pyproject.toml) [![PyTorch](https://img.shields.io/badge/PyTorch-%3E%3D2.0-ee4c2c)](pyproject.toml) [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![Package status](https://img.shields.io/badge/status-preview-orange)](#project-status)
+[![Version](https://img.shields.io/badge/version-0.6.0-blue)](pyproject.toml) [![Python](https://img.shields.io/badge/python-%3E%3D3.10-blue)](pyproject.toml) [![PyTorch](https://img.shields.io/badge/PyTorch-%3E%3D2.0-ee4c2c)](pyproject.toml) [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![Package status](https://img.shields.io/badge/status-preview-orange)](#project-status)
 
 **PyTorch toolkit for irregularly sampled multivariate time series with continuous-time methods (Neural ODE/CDE/SDE) and discrete-time baselines.**
 
@@ -124,6 +124,8 @@ print(logits.shape)  # torch.Size([40, 2])
 ```
 
 Coefficient-driven CDE and SDE rows consume the `coeffs` returned by `preprocess(...)`. Direct sequence, attention, and event-driven rows, including ODE-LSTM, the direct ODE-RNN models, Neural Jump ODE (NJ-ODE), and LatentSDE, use the sequence stack and accept `coeffs=None`.
+
+The source-checkout search and evaluation scripts request train-observed value standardization by default for coefficient-driven models; pass `--control-value-transform identity` for earlier coefficient-scale parity. The direct `preprocess(...)` API keeps `identity` as its low-level default because fitting standardization requires explicit training indices. When verified timestamps are supplied, preprocessing uses an elapsed physical-time control channel while retaining a separate shared normalized interpolation parameter.
 
 The source-checkout pipeline shares a continuous-time preprocessing path that builds interpolation coefficients with `torchcde`. The following bounded classification workflow can be launched from any working directory after an editable source install. It keeps every generated artifact under `/tmp`:
 

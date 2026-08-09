@@ -90,7 +90,7 @@ def _normalize_dataset_source_arg(raw: str) -> str:
 
 def _normalize_param_mode(raw: str) -> str:
     normalized = str(raw).strip().lower()
-    if normalized in {"default", "legacy"}:
+    if normalized == "default":
         return "default"
     if normalized in {"cv", "improved"}:
         return "cv"
@@ -154,7 +154,7 @@ def _normalize_param_repeat_arg(raw: str) -> str:
 
 def _normalize_param_mode_alias(raw: str) -> tuple[str, str]:
     normalized = str(raw).strip().lower()
-    if normalized in {"default", "legacy"}:
+    if normalized == "default":
         return STANDARD_SEARCH_POLICY, SINGLE_SEARCH_REPEAT
     if normalized in {"cv", "improved"}:
         return STANDARD_SEARCH_POLICY, AGGREGATED_SEARCH_REPEAT
@@ -189,7 +189,7 @@ def _artifact_repeat_suffix_stem(artifact_name: str) -> str:
     return str(artifact_name).split("__task_", 1)[0]
 
 
-def _legacy_aggregated_param_artifact_names(data_name: str, model_name: str, *, task: str) -> list[str]:
+def _stored_aggregated_param_artifact_names(data_name: str, model_name: str, *, task: str) -> list[str]:
     task_name = str(task).strip().lower()
     names = []
     for suffix in ("cv", "improved"):
@@ -223,10 +223,10 @@ def _resolve_param_artifact_path(
         return param_name, param_path
 
     if param_policy == STANDARD_SEARCH_POLICY and param_repeat == AGGREGATED_SEARCH_REPEAT:
-        for legacy_name in _legacy_aggregated_param_artifact_names(data_name, model_name, task=task):
-            legacy_path = os.path.join(param_root, data_name, legacy_name)
-            if os.path.exists(legacy_path):
-                return legacy_name, legacy_path
+        for stored_name in _stored_aggregated_param_artifact_names(data_name, model_name, task=task):
+            stored_path = os.path.join(param_root, data_name, stored_name)
+            if os.path.exists(stored_path):
+                return stored_name, stored_path
 
     return param_name, param_path
 
@@ -321,12 +321,12 @@ def _validate_param_search_profile(
     expected_dataset_source: str,
     expected_split_seeds,
     param_path: str,
-    allow_legacy_search_profile: bool = False,
+    allow_compatibility_search_profile: bool = False,
 ) -> str:
     actual = validate_param_artifact_metadata(
         model_config,
         context=f"Param artifact {param_path}",
-        allow_legacy_search_profile=allow_legacy_search_profile,
+        allow_compatibility_search_profile=allow_compatibility_search_profile,
         require_lr=True,
     )
     expected = normalize_search_profile(expected_search_profile)
@@ -353,8 +353,8 @@ def _validate_param_search_profile(
                 f"{param_path} has capacity_policy={capacity_policy!r}. "
                 "Regenerate params with scripts/param_search.py --search-policy constrained."
             )
-    legacy_integrity_shape = is_pre_integrity_param_artifact(model_config)
-    if not (allow_legacy_search_profile and legacy_integrity_shape):
+    pre_integrity_shape = is_pre_integrity_param_artifact(model_config)
+    if not (allow_compatibility_search_profile and pre_integrity_shape):
         validate_param_artifact_identity(
             model_config,
             data_name=expected_data_name,
@@ -552,11 +552,22 @@ def _preprocess_cache_contract(
     control_value_train_indices=None,
     control_value_transform_state=None,
     return_control_value_transform=False,
+    control_time_source="auto",
+    control_time_train_indices=None,
+    control_time_transform_state=None,
+    return_control_time_transform=False,
 ):
     resolved_control_transform = normalize_control_value_transform(control_value_transform)
     state_payload = None
     if control_value_transform_state is not None:
         state_payload = json.dumps(control_value_transform_state, sort_keys=True, separators=(",", ":"))
+    time_state_payload = None
+    if control_time_transform_state is not None:
+        time_state_payload = json.dumps(
+            control_time_transform_state,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
     return {
         "package_version": str(globals().get("TORCH_ISTS_PACKAGE_VERSION", "unknown")),
         "model_name": str(model_name),
@@ -578,6 +589,14 @@ def _preprocess_cache_contract(
             else hashlib.sha256(state_payload.encode("utf-8")).hexdigest()
         ),
         "return_control_value_transform": bool(return_control_value_transform),
+        "control_time_source": str(control_time_source),
+        "control_time_train_indices_hash": _hash_array_for_cache(control_time_train_indices),
+        "control_time_transform_state_hash": (
+            None
+            if time_state_payload is None
+            else hashlib.sha256(time_state_payload.encode("utf-8")).hexdigest()
+        ),
+        "return_control_time_transform": bool(return_control_time_transform),
     }
 
 
@@ -781,7 +800,8 @@ def parse_cli_args():
         help=argparse.SUPPRESS,
     )
     parser.add_argument(
-        "--allow-legacy-search-profile",
+        "--allow-compatibility-search-profile",
+        dest="allow_compatibility_search_profile",
         action="store_true",
         help=argparse.SUPPRESS,
     )
@@ -890,10 +910,11 @@ def parse_cli_args():
         "--control-value-transform",
         type=normalize_control_value_transform,
         choices=["identity", "standardize"],
-        default="identity",
+        default="standardize",
         help=(
             "Value-channel transform used to construct interpolation coefficients. "
-            "standardize fits observed training values only; identity preserves prior behavior."
+            "standardize (default) fits observed training values only; use identity "
+            "explicitly to preserve the pre-0.6.0 numerical behavior."
         ),
     )
     parser.add_argument(
@@ -1028,8 +1049,11 @@ def _resolve_run_device(device_mode: str) -> torch.device:
 
 # Import from the packaged torch_ists runtime.
 from torch_ists.preprocessing import (
+    apply_control_time_transform,
     apply_missingness,
+    control_time_transform_metadata,
     control_value_transform_metadata,
+    fit_control_time_transform,
     normalize_control_value_transform,
     preprocess,
 )
@@ -1155,7 +1179,9 @@ def _build_output_contract(
     timestamp_summary=None,
     robustness_axes=None,
     training_loop_policy=None,
-    control_value_transform="identity",
+    control_value_transform="standardize",
+    requested_control_value_transform=None,
+    control_time_source="auto",
 ):
     task_name = str(task)
     task_target = None
@@ -1196,6 +1222,12 @@ def _build_output_contract(
         "robustness_axes": robustness_axes,
         "training_loop_policy": training_loop_policy,
         "control_value_transform": normalize_control_value_transform(control_value_transform),
+        "requested_control_value_transform": normalize_control_value_transform(
+            requested_control_value_transform
+            if requested_control_value_transform is not None
+            else control_value_transform
+        ),
+        "control_time_source": str(control_time_source),
     }
 
 
@@ -2205,6 +2237,7 @@ def _build_result_payload(
     training_loop=None,
     coeff_cache=None,
     control_value_transform=None,
+    control_time_transform=None,
 ):
     resolved_regime = str(evaluation_regime or mode)
     resolved_mode = resolved_regime if str(mode).strip().lower() == "standard" else str(mode)
@@ -2228,6 +2261,7 @@ def _build_result_payload(
         "training_loop": training_loop,
         "coeff_cache": coeff_cache,
         "control_value_transform": control_value_transform,
+        "control_time_transform": control_time_transform,
     }
     if output_contract is not None:
         meta["output_contract"] = output_contract
@@ -2279,7 +2313,7 @@ def run_model(
     no_coeff_cache=False,
     solver_budget_policy="allow",
     solver_budget_seq_len_threshold=0,
-    control_value_transform="identity",
+    control_value_transform="standardize",
 ):
     task = str(task).strip().lower()
     validate_model_task_capability(model_name, task)
@@ -2486,6 +2520,8 @@ def run_model(
         robustness_axes=robustness_axes,
         training_loop_policy=training_loop_policy,
         control_value_transform=effective_control_transform,
+        requested_control_value_transform=control_value_transform,
+        control_time_source="auto",
     )
     if CHECK and os.path.exists(out_path):
         _validate_existing_output_contract(
@@ -2530,7 +2566,14 @@ def run_model(
     else:
         os.makedirs(os.path.join(out_root, data_name, str(missing_rate)), exist_ok=True)
 
-    X_missing, X_mask, X_delta, coeffs, control_transform_state = _preprocess_with_optional_cache(
+    (
+        X_missing,
+        X_mask,
+        X_delta,
+        coeffs,
+        control_transform_state,
+        control_time_state,
+    ) = _preprocess_with_optional_cache(
         coeff_cache_dir=coeff_cache_dir,
         no_coeff_cache=no_coeff_cache,
         cache_events=coeff_cache_events,
@@ -2548,9 +2591,22 @@ def run_model(
         control_value_transform=effective_control_transform,
         control_value_train_indices=train_idx,
         return_control_value_transform=True,
+        control_time_source="auto",
+        control_time_train_indices=train_idx,
+        return_control_time_transform=True,
     )
     control_transform_metadata = control_value_transform_metadata(control_transform_state)
+    control_transform_metadata["requested_transform"] = normalize_control_value_transform(
+        control_value_transform
+    )
+    control_transform_metadata["effective_transform"] = effective_control_transform
     control_transform_metadata["consumes_coefficients"] = bool(consumes_coefficients)
+    control_time_metadata = control_time_transform_metadata(control_time_state)
+    sample_times = apply_control_time_transform(
+        timestamps,
+        control_time_state,
+        sequence_length=int(X.shape[2]),
+    )
     X_missing_norm, normalization_summary = normalize_with_train_stats(X_missing, train_idx)
     train_missing_summary = compute_train_missing_summary(X_missing, train_idx)
     train_missing_summary.update(normalization_summary)
@@ -2596,6 +2652,7 @@ def run_model(
         task=task,
         targets=task_targets,
         target_masks=target_masks,
+        sample_times=sample_times,
     )
     valid_dataset = ists_dataset(
         Y,
@@ -2607,6 +2664,7 @@ def run_model(
         task=task,
         targets=task_targets,
         target_masks=target_masks,
+        sample_times=sample_times,
     )
     test_dataset = ists_dataset(
         Y,
@@ -2618,6 +2676,7 @@ def run_model(
         task=task,
         targets=task_targets,
         target_masks=target_masks,
+        sample_times=sample_times,
     )
 
     train_batch = DataLoader(
@@ -2740,6 +2799,8 @@ def run_model(
             coeff_cache_events=coeff_cache_events,
             control_value_transform=effective_control_transform,
             control_value_transform_state=control_transform_state,
+            control_time_source="auto",
+            control_time_transform_state=control_time_state,
         )
         if len(evaluations) != int(robustness_axes["expected_evaluations"]):
             raise RuntimeError(
@@ -2775,6 +2836,7 @@ def run_model(
             training_loop=training_loop_metadata,
             coeff_cache=coeff_cache_summary,
             control_value_transform=control_transform_metadata,
+            control_time_transform=control_time_metadata,
         )
         payload.update(param_search_contract)
 
@@ -2893,7 +2955,11 @@ def run_model(
                     delta,
                 ], dim=1).to(device)
 
-                output = model(seq, batch['coeffs'].to(device))
+                output = model(
+                    seq,
+                    batch['coeffs'].to(device),
+                    sample_times=batch["sample_times"].to(device),
+                )
                 logit = output[0] if isinstance(output, tuple) else output
                 y_true.append(y.cpu().numpy())
                 y_pred.append(logit.max(1)[1].cpu().numpy())
@@ -2938,7 +3004,11 @@ def run_model(
                     mask,
                     delta,
                 ], dim=1).to(device)
-                output = model(seq, batch['coeffs'].to(device))
+                output = model(
+                    seq,
+                    batch['coeffs'].to(device),
+                    sample_times=batch["sample_times"].to(device),
+                )
                 pred = output[0] if isinstance(output, tuple) else output
                 target = batch["target"].to(device).float()
                 pred, target = _align_prediction_target(pred, target, task)
@@ -3039,6 +3109,7 @@ def run_model(
         training_loop=training_loop_metadata,
         coeff_cache=coeff_cache_summary,
         control_value_transform=control_transform_metadata,
+        control_time_transform=control_time_metadata,
     )
     payload.update(param_search_contract)
     atomic_pickle_dump(payload, output_path)
@@ -3069,6 +3140,7 @@ def run_model(
         "training_loop": training_loop_metadata,
         "coeff_cache": coeff_cache_summary,
         "control_value_transform": control_transform_metadata,
+        "control_time_transform": control_time_metadata,
     }
 
 
@@ -3101,6 +3173,8 @@ def _evaluate_robustness(
     coeff_cache_events=None,
     control_value_transform="identity",
     control_value_transform_state=None,
+    control_time_source="auto",
+    control_time_transform_state=None,
 ):
     """
     Evaluate trained model on multiple test missing rates.
@@ -3148,6 +3222,17 @@ def _evaluate_robustness(
         channel_sync_options,
         use_raw_flow_input,
     )
+    resolved_control_time_state = (
+        dict(control_time_transform_state)
+        if control_time_transform_state is not None
+        else fit_control_time_transform(
+            timestamps,
+            train_idx,
+            source=control_time_source,
+            sequence_length=int(evaluation_inputs.shape[2]),
+        )
+    )
+    resolved_control_time_state["sample_count"] = int(evaluation_inputs.shape[0])
     train_missing_ref, _, _, _ = _preprocess_with_optional_cache(
         coeff_cache_dir=coeff_cache_dir,
         no_coeff_cache=no_coeff_cache,
@@ -3165,6 +3250,14 @@ def _evaluate_robustness(
         missingness_reference=evaluation_inputs[train_idx],
         control_value_transform=control_value_transform,
         control_value_transform_state=control_value_transform_state,
+        control_time_source=control_time_source,
+        control_time_train_indices=train_idx,
+        control_time_transform_state=resolved_control_time_state,
+    )
+    sample_times = apply_control_time_transform(
+        timestamps,
+        resolved_control_time_state,
+        sequence_length=int(evaluation_inputs.shape[2]),
     )
     train_stats, _normalization_summary = compute_train_normalization_stats(train_missing_ref, train_idx)
 
@@ -3233,6 +3326,9 @@ def _evaluate_robustness(
                         missingness_reference=evaluation_inputs[train_idx],
                         control_value_transform=control_value_transform,
                         control_value_transform_state=control_value_transform_state,
+                        control_time_source=control_time_source,
+                        control_time_train_indices=train_idx,
+                        control_time_transform_state=resolved_control_time_state,
                     )
 
                     # Reuse the training missing=0.0 statistics for all robustness test axes.
@@ -3249,6 +3345,7 @@ def _evaluate_robustness(
                         task=task,
                         targets=task_targets,
                         target_masks=target_masks,
+                        sample_times=sample_times,
                     )
                     test_batch = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, drop_last=False)
 
@@ -3266,7 +3363,11 @@ def _evaluate_robustness(
                                     delta,
                                 ], dim=1).to(device)
 
-                                output = model(seq, batch['coeffs'].to(device))
+                                output = model(
+                                    seq,
+                                    batch['coeffs'].to(device),
+                                    sample_times=batch["sample_times"].to(device),
+                                )
                                 logit = output[0] if isinstance(output, tuple) else output
 
                                 y_true.append(y.cpu().numpy())
@@ -3303,7 +3404,11 @@ def _evaluate_robustness(
                                     delta,
                                 ], dim=1).to(device)
 
-                                output = model(seq, batch['coeffs'].to(device))
+                                output = model(
+                                    seq,
+                                    batch['coeffs'].to(device),
+                                    sample_times=batch["sample_times"].to(device),
+                                )
                                 pred = output[0] if isinstance(output, tuple) else output
                                 target = batch["target"].to(device).float()
                                 pred, target = _align_prediction_target(pred, target, task)
@@ -3481,7 +3586,7 @@ def main():
                         expected_dataset_source=expected_target_identity["dataset_source"],
                         expected_split_seeds=expected_target_identity["split_seeds"],
                         param_path=str(param_path),
-                        allow_legacy_search_profile=args.allow_legacy_search_profile,
+                        allow_compatibility_search_profile=args.allow_compatibility_search_profile,
                     )
                     param_search_contract = _param_search_contract_metadata(
                         model_config,
@@ -3687,7 +3792,7 @@ def main():
                             expected_dataset_source=expected_target_identity["dataset_source"],
                             expected_split_seeds=expected_target_identity["split_seeds"],
                             param_path=str(param_path),
-                            allow_legacy_search_profile=args.allow_legacy_search_profile,
+                            allow_compatibility_search_profile=args.allow_compatibility_search_profile,
                         )
                         param_search_contract = _param_search_contract_metadata(
                             model_config,

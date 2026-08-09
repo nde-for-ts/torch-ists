@@ -13,8 +13,8 @@ from pathlib import Path
 BATCH_SIZE_POLICY_NAME = "dataset-derived-fixed"
 LEARNING_RATE_POLICY_NAME = "fixed-lr-fallback"
 WEIGHT_DECAY_POLICY_NAME = "lr-proportional-weight-decay"
-LEGACY_ICLR2024_SEARCH_PROFILE = "legacy-iclr2024"
-LEGACY_EXPANDED_SEARCH_PROFILE = "legacy-expanded"
+REPRODUCTION_SEARCH_PROFILE = "reproduction"
+EXPANDED_SEARCH_PROFILE = "expanded"
 MODEL_NATIVE_SEARCH_PROFILE = "model-native"
 DEFAULT_SEARCH_PROFILE = MODEL_NATIVE_SEARCH_PROFILE
 MODEL_SPECIFIC_SEARCH_POLICY_NAME = "model-native-effective-params"
@@ -43,7 +43,6 @@ INTERNAL_SEARCH_ARTIFACT_KEYS = frozenset(
         "search_profile_visibility",
         "search_algorithm_policy",
         "search_grid_version",
-        "legacy_grid_version",
         "architecture_axes",
     }
 )
@@ -53,13 +52,9 @@ _SEARCH_POLICY_ALIASES = {
     "model-native": MODEL_NATIVE_SEARCH_PROFILE,
     "model-specific": MODEL_NATIVE_SEARCH_PROFILE,
     MODEL_NATIVE_SEARCH_PROFILE: MODEL_NATIVE_SEARCH_PROFILE,
-    "legacy": LEGACY_EXPANDED_SEARCH_PROFILE,
-    "expanded": LEGACY_EXPANDED_SEARCH_PROFILE,
-    "legacy-expanded": LEGACY_EXPANDED_SEARCH_PROFILE,
-    LEGACY_EXPANDED_SEARCH_PROFILE: LEGACY_EXPANDED_SEARCH_PROFILE,
-    "iclr2024": LEGACY_ICLR2024_SEARCH_PROFILE,
-    "legacy-iclr2024": LEGACY_ICLR2024_SEARCH_PROFILE,
-    LEGACY_ICLR2024_SEARCH_PROFILE: LEGACY_ICLR2024_SEARCH_PROFILE,
+    "expanded": EXPANDED_SEARCH_PROFILE,
+    EXPANDED_SEARCH_PROFILE: EXPANDED_SEARCH_PROFILE,
+    REPRODUCTION_SEARCH_PROFILE: REPRODUCTION_SEARCH_PROFILE,
 }
 
 _SEARCH_POLICY_GRIDS = {
@@ -71,14 +66,14 @@ _SEARCH_POLICY_GRIDS = {
         "default_depth_level": 1,
         "lr_bounds": [1e-4, 1e-2],
     },
-    LEGACY_ICLR2024_SEARCH_PROFILE: {
+    REPRODUCTION_SEARCH_PROFILE: {
         "hidden_dim_values": [16, 32, 64, 128],
         "depth_level_values": [1, 2, 3, 4],
         "default_hidden_dim": 32,
         "default_depth_level": 1,
         "lr_bounds": [1e-4, 1e-2],
     },
-    LEGACY_EXPANDED_SEARCH_PROFILE: {
+    EXPANDED_SEARCH_PROFILE: {
         "hidden_dim_values": [32, 64, 96, 128, 192, 256],
         "depth_level_values": [1, 2, 3, 4, 5],
         "default_hidden_dim": 32,
@@ -336,9 +331,6 @@ def configure_runtime_paths(caller_file: str | Path) -> Path:
 
 def normalize_search_profile(raw: str | None) -> str:
     normalized = DEFAULT_SEARCH_PROFILE if raw is None else str(raw).strip().lower()
-    stem, separator, generation = normalized.rpartition("-v")
-    if separator and stem and generation.isdecimal():
-        normalized = stem
     try:
         return _SEARCH_POLICY_ALIASES[normalized]
     except KeyError as exc:
@@ -348,14 +340,14 @@ def normalize_search_profile(raw: str | None) -> str:
 def describe_search_profile(raw: str | None) -> dict:
     """Return compatibility metadata for a search configuration."""
     profile = normalize_search_profile(raw)
-    if profile == LEGACY_ICLR2024_SEARCH_PROFILE:
+    if profile == REPRODUCTION_SEARCH_PROFILE:
         return {
             "search_contract": HISTORICAL_SEARCH_CONTRACT_NAME,
             "search_family": "historical_reproducibility",
             "search_profile_visibility": COMPATIBILITY_SEARCH_PROFILE_VISIBILITY,
             "public_search_name": "historical reproducibility",
         }
-    if profile == LEGACY_EXPANDED_SEARCH_PROFILE:
+    if profile == EXPANDED_SEARCH_PROFILE:
         return {
             "search_contract": DEFAULT_SEARCH_CONTRACT_NAME,
             "search_family": "historical_reproducibility",
@@ -384,7 +376,7 @@ def infer_param_search_profile(model_config: dict | None) -> str:
         raise ValueError(
             "Param artifact is missing required field 'search_profile'. "
             "Regenerate params with the current default search, or pass the hidden "
-            "compatibility flag only for intentional legacy artifact audits."
+            "compatibility flag only for intentional older-artifact audits."
         )
     return normalize_search_profile(raw)
 
@@ -429,12 +421,12 @@ def _normalize_split_seeds(value) -> list[int]:
     return normalized
 
 
-def _legacy_split_seeds(identity: dict) -> list[int]:
-    legacy = identity.get("split_sha256s")
-    if not isinstance(legacy, (list, tuple)):
+def _stored_split_seeds(identity: dict) -> list[int]:
+    stored_split_hashes = identity.get("split_sha256s")
+    if not isinstance(stored_split_hashes, (list, tuple)):
         return []
     seeds = []
-    for item in legacy:
+    for item in stored_split_hashes:
         if not isinstance(item, dict) or "seed" not in item:
             return []
         seeds.append(int(item["seed"]))
@@ -519,7 +511,7 @@ def validate_param_artifact_identity(
     actual_split_seeds = (
         _normalize_split_seeds(identity.get("split_seeds"))
         if explicit_split_seeds
-        else _legacy_split_seeds(identity)
+        else _stored_split_seeds(identity)
     )
     actual = {
         "data_name": str(identity.get("data_name", "")),
@@ -569,7 +561,7 @@ def validate_param_artifact_metadata(
     model_config: dict | None,
     *,
     context: str = "param artifact",
-    allow_legacy_search_profile: bool = False,
+    allow_compatibility_search_profile: bool = False,
     require_lr: bool = True,
 ) -> str:
     """Validate saved parameter artifacts before reuse or evaluation."""
@@ -577,18 +569,18 @@ def validate_param_artifact_metadata(
         raise ValueError(f"{context} is empty or not a metadata dictionary.")
 
     raw_profile = model_config.get("search_profile")
-    legacy_profile_missing = _metadata_value_missing(raw_profile)
-    semantic_artifact = legacy_profile_missing and _is_semantic_param_artifact(model_config)
+    compatibility_profile_missing = _metadata_value_missing(raw_profile)
+    semantic_artifact = compatibility_profile_missing and _is_semantic_param_artifact(model_config)
     if semantic_artifact:
         profile = DEFAULT_SEARCH_PROFILE
-    elif legacy_profile_missing:
-        if not allow_legacy_search_profile:
+    elif compatibility_profile_missing:
+        if not allow_compatibility_search_profile:
             raise ValueError(
                 f"{context} is missing required field 'search_profile'. "
-                "Regenerate params with scripts/param_search.py. Hidden legacy "
+                "Regenerate params with scripts/param_search.py. Hidden compatibility "
                 "profile compatibility must be explicitly opted in for audits."
             )
-        profile = LEGACY_ICLR2024_SEARCH_PROFILE
+        profile = REPRODUCTION_SEARCH_PROFILE
     else:
         profile = normalize_search_profile(raw_profile)
 
@@ -608,8 +600,10 @@ def validate_param_artifact_metadata(
         for field in required_fields
         if _metadata_value_missing(model_config.get(field))
     ]
-    legacy_integrity_shape = is_pre_integrity_param_artifact(model_config)
-    if missing_fields and not (allow_legacy_search_profile and legacy_integrity_shape):
+    pre_integrity_shape = is_pre_integrity_param_artifact(model_config)
+    if missing_fields and not (
+        allow_compatibility_search_profile and pre_integrity_shape
+    ):
         missing = ", ".join(missing_fields)
         raise ValueError(
             f"{context} is missing required search detail field(s): {missing}. "
@@ -631,7 +625,7 @@ def _resolve_config_search_profile(config: dict, search_profile: str | None) -> 
         return normalize_search_profile(raw)
     if search_profile is not None:
         return normalize_search_profile(search_profile)
-    return LEGACY_ICLR2024_SEARCH_PROFILE
+    return REPRODUCTION_SEARCH_PROFILE
 
 
 def _canonical_model_name(model_name: str) -> str:
@@ -906,9 +900,6 @@ def resolve_effective_param_config(
     saved["search_repeat"] = str(config.get("search_repeat", SINGLE_SEARCH_REPEAT))
     saved["search_algorithm_policy"] = MODEL_SPECIFIC_SEARCH_POLICY_NAME
     saved["search_grid_version"] = profile
-    saved["legacy_grid_version"] = (
-        profile if profile in {LEGACY_ICLR2024_SEARCH_PROFILE, LEGACY_EXPANDED_SEARCH_PROFILE} else None
-    )
     saved["hidden_dim"] = int(hidden_dim)
     saved["depth_level"] = int(depth_level)
     saved["num_layers"] = int(num_layers)
@@ -924,7 +915,6 @@ def resolve_effective_param_config(
         "policy": MODEL_SPECIFIC_SEARCH_POLICY_NAME,
         "search_algorithm_policy": MODEL_SPECIFIC_SEARCH_POLICY_NAME,
         "search_grid_version": profile,
-        "legacy_grid_version": saved["legacy_grid_version"],
         "width_axis": space["width_axis"],
         "depth_axis": space["depth_axis"],
         "hidden_dim_values": list(space["hidden_dim_values"]),

@@ -260,7 +260,11 @@ class FlowHandler(BaseHandler):
         times: torch.Tensor,
         **kwargs: Any,
     ):
-        data = self.preprocess_input(seq, times)
+        data = self.preprocess_input(
+            seq,
+            times,
+            sample_times=kwargs.get("sample_times"),
+        )
         runtime_model_name = str(getattr(model, "model_name", kwargs.get("model_name", "")))
         strict_raw_models = self._NEURALFLOW_MODELS | self._FLOWPATH_MODELS
         seq_mask = data["seq_mask"]

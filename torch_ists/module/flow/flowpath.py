@@ -6,6 +6,8 @@ import torch
 import torch.nn as nn
 import torchcde
 
+from ..cde._solver import apply_control_aware_cde_solver_defaults
+
 from .operators import build_flow_operator, resolve_flow_backend
 
 
@@ -114,19 +116,20 @@ class FlowPath(nn.Module):
         self,
         kwargs: dict[str, object],
         times: torch.Tensor,
+        control_knots: torch.Tensor | None = None,
     ) -> dict[str, object]:
         method = str(kwargs.get("method", "rk4")).strip().lower() or "rk4"
         options = kwargs.get("options")
         solver_options = dict(options) if isinstance(options, dict) else {}
-        dt_min = (times[1:] - times[:-1]).min().item()
-        if method == "rk4" and "step_size" not in solver_options:
-            solver_options["step_size"] = dt_min
-        elif method in {"euler", "midpoint"} and "step_size" not in solver_options:
-            solver_options["step_size"] = max(dt_min, 1e-3)
-
         solver_kwargs: dict[str, object] = {"method": method}
         if solver_options:
             solver_kwargs["options"] = solver_options
+        solver_kwargs = apply_control_aware_cde_solver_defaults(
+            times,
+            times if control_knots is None else control_knots,
+            solver_kwargs,
+            piecewise_linear=False,
+        )
         for key in ("rtol", "atol", "adjoint"):
             if kwargs.get(key) is not None:
                 solver_kwargs[key] = kwargs[key]
@@ -206,7 +209,11 @@ class FlowPath(nn.Module):
 
         z = self._build_flow_latent(x, seq_mask, seq_ts, control)
         control_coeffs, control_spline, z0 = self._build_control_path(z, times)
-        solver_kwargs = self._resolve_solver_kwargs(kwargs, times)
+        solver_kwargs = self._resolve_solver_kwargs(
+            kwargs,
+            times,
+            control_spline.grid_points,
+        )
         if solver_kwargs.get("adjoint", True) is not False:
             solver_kwargs["adjoint_params"] = self._resolve_adjoint_params(kwargs, control_coeffs)
 

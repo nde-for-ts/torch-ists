@@ -182,13 +182,23 @@ def _resolve_raw_missing_policy(model_name: str, model) -> bool:
     return _is_flow_strict_raw_name(str(model_name)) or _is_flow_strict_raw_name(str(runtime_model_name))
 
 
-def _forward_with_optional_aux(model, seq: torch.Tensor, coeffs: torch.Tensor, *, request_aux: bool):
+def _forward_with_optional_aux(
+    model,
+    seq: torch.Tensor,
+    coeffs: torch.Tensor,
+    *,
+    request_aux: bool,
+    sample_times: Optional[torch.Tensor] = None,
+):
+    runtime_kwargs = {}
+    if sample_times is not None:
+        runtime_kwargs["sample_times"] = sample_times
     if request_aux:
         try:
-            return model(seq, coeffs, return_aux_loss=True)
+            return model(seq, coeffs, return_aux_loss=True, **runtime_kwargs)
         except TypeError:
-            return model(seq, coeffs)
-    return model(seq, coeffs)
+            return model(seq, coeffs, **runtime_kwargs)
+    return model(seq, coeffs, **runtime_kwargs)
 
 
 def _split_prediction_and_aux_loss(output):
@@ -239,6 +249,7 @@ class ists_dataset(Dataset):
         task: str = "classification",
         targets=None,
         target_masks=None,
+        sample_times=None,
     ):
         self.task = _resolve_task(task)
         self.Y = None if y is None else y[split]
@@ -246,6 +257,7 @@ class ists_dataset(Dataset):
         self.X_mask = x_mask[split, ...]
         self.X_delta = x_delta[split, ...]
         self.Coeffs = coeffs[split, ...]
+        self.SampleTimes = None if sample_times is None else sample_times[split, ...]
         if targets is None:
             if self.Y is None:
                 raise ValueError("classification labels are required when task targets are absent")
@@ -269,6 +281,8 @@ class ists_dataset(Dataset):
             sample["label"] = self.Y[idx]
         if self.TargetMasks is not None:
             sample["target_mask"] = self.TargetMasks[idx]
+        if self.SampleTimes is not None:
+            sample["sample_times"] = self.SampleTimes[idx]
         return sample
 
 
@@ -324,6 +338,9 @@ def train(
             seq,
             batch["coeffs"].to(device),
             request_aux=True,
+            sample_times=(
+                None if "sample_times" not in batch else batch["sample_times"].to(device)
+            ),
         )
 
         if task == "classification":
@@ -414,6 +431,9 @@ def evaluate(
                 seq,
                 batch["coeffs"].to(device),
                 request_aux=True,
+                sample_times=(
+                    None if "sample_times" not in batch else batch["sample_times"].to(device)
+                ),
             )
             if task == "classification":
                 assert y is not None

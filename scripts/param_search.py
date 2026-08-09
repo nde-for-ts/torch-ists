@@ -104,7 +104,7 @@ def _normalize_dataset_source_arg(raw: str) -> str:
 
 def _normalize_search_mode(raw: str) -> str:
     normalized = str(raw).strip().lower()
-    if normalized in {"default", "legacy"}:
+    if normalized == "default":
         return "default"
     if normalized in {"cv", "improved"}:
         return "cv"
@@ -157,7 +157,7 @@ def _normalize_search_repeat_arg(raw: str) -> str:
 
 def _normalize_search_mode_alias(raw: str) -> tuple[str, str]:
     normalized = str(raw).strip().lower()
-    if normalized in {"default", "legacy"}:
+    if normalized == "default":
         return STANDARD_SEARCH_POLICY, SINGLE_SEARCH_REPEAT
     if normalized in {"cv", "improved"}:
         return STANDARD_SEARCH_POLICY, AGGREGATED_SEARCH_REPEAT
@@ -266,16 +266,16 @@ def _validate_existing_param_artifact_for_reuse(
     forecast_horizon,
     dataset_source: str,
     split_seeds,
-    allow_legacy_search_profile: bool,
+    allow_compatibility_search_profile: bool,
 ) -> str:
     existing_profile = validate_param_artifact_metadata(
         model_config,
         context=f"Param artifact {existing_param_path}",
-        allow_legacy_search_profile=allow_legacy_search_profile,
+        allow_compatibility_search_profile=allow_compatibility_search_profile,
         require_lr=True,
     )
-    legacy_integrity_shape = is_pre_integrity_param_artifact(model_config)
-    if not (allow_legacy_search_profile and legacy_integrity_shape):
+    pre_integrity_shape = is_pre_integrity_param_artifact(model_config)
+    if not (allow_compatibility_search_profile and pre_integrity_shape):
         validate_param_artifact_identity(
             model_config,
             data_name=data_name,
@@ -437,7 +437,8 @@ def parse_cli_args():
         help=argparse.SUPPRESS,
     )
     parser.add_argument(
-        "--allow-legacy-search-profile",
+        "--allow-compatibility-search-profile",
+        dest="allow_compatibility_search_profile",
         action="store_true",
         help=argparse.SUPPRESS,
     )
@@ -513,10 +514,11 @@ def parse_cli_args():
         "--control-value-transform",
         type=normalize_control_value_transform,
         choices=["identity", "standardize"],
-        default="identity",
+        default="standardize",
         help=(
             "Value-channel transform used to construct interpolation coefficients. "
-            "standardize fits observed training values only; identity preserves prior behavior."
+            "standardize (default) fits observed training values only; use identity "
+            "explicitly to preserve the pre-0.6.0 numerical behavior."
         ),
     )
     args = parser.parse_args()
@@ -591,6 +593,8 @@ def _current_tune_trial_token(model_config: dict) -> str:
 
 # Import from the packaged torch_ists runtime.
 from torch_ists.preprocessing import (
+    apply_control_time_transform,
+    control_time_transform_metadata,
     control_value_transform_metadata,
     normalize_control_value_transform,
     preprocess,
@@ -697,7 +701,8 @@ def _collect_task_metadata(
     targets_root: str,
     dataset_source: str,
     dataset_npz: str | None,
-    control_value_transform: str = "identity",
+    control_value_transform: str = "standardize",
+    requested_control_value_transform: str | None = None,
     consumes_coefficients: bool = False,
 ) -> dict:
     dataset_payload = load_dataset_payload(
@@ -754,7 +759,7 @@ def _collect_task_metadata(
         _build_task_targets(task, None, None, forecast_horizon)
 
     data_config = get_data_config(model_name)
-    X_missing, _, _, _, control_transform_state = preprocess(
+    X_missing, _, _, _, control_transform_state, control_time_state = preprocess(
         preprocess_X,
         missing_rate=missing_rate,
         interpolate=data_config["interpolation"],
@@ -768,9 +773,21 @@ def _collect_task_metadata(
         control_value_transform=control_value_transform,
         control_value_train_indices=train_idx,
         return_control_value_transform=True,
+        control_time_source="auto",
+        control_time_train_indices=train_idx,
+        return_control_time_transform=True,
     )
     control_transform_metadata = control_value_transform_metadata(control_transform_state)
+    control_transform_metadata["requested_transform"] = normalize_control_value_transform(
+        requested_control_value_transform
+        if requested_control_value_transform is not None
+        else control_value_transform
+    )
+    control_transform_metadata["effective_transform"] = normalize_control_value_transform(
+        control_value_transform
+    )
     control_transform_metadata["consumes_coefficients"] = bool(consumes_coefficients)
+    control_time_metadata = control_time_transform_metadata(control_time_state)
     X_missing_norm, normalization_summary = normalize_with_train_stats(X_missing, train_idx)
     train_missing_summary = compute_train_missing_summary(X_missing, train_idx)
     train_missing_summary.update(normalization_summary)
@@ -808,6 +825,7 @@ def _collect_task_metadata(
         "target_source": str(target_source if task != "classification" else "label"),
         "timestamp_summary": timestamp_summary,
         "control_value_transform": control_transform_metadata,
+        "control_time_transform": control_time_metadata,
     }
 
 
@@ -1626,7 +1644,7 @@ def _train_single_seed(
     effective_control_transform = normalize_control_value_transform(
         model_config.get("control_value_transform", "identity")
     )
-    X_missing, X_mask, X_delta, coeffs = preprocess(
+    X_missing, X_mask, X_delta, coeffs, control_time_state = preprocess(
         preprocess_X,
         missing_rate=missing_rate,
         interpolate=interpolate,
@@ -1639,6 +1657,14 @@ def _train_single_seed(
         missingness_reference=preprocess_X[train_idx],
         control_value_transform=effective_control_transform,
         control_value_train_indices=train_idx,
+        control_time_source="auto",
+        control_time_train_indices=train_idx,
+        return_control_time_transform=True,
+    )
+    sample_times = apply_control_time_transform(
+        timestamps,
+        control_time_state,
+        sequence_length=int(preprocess_X.shape[2]),
     )
     X_missing_norm, normalization_summary = normalize_with_train_stats(X_missing, train_idx)
     train_missing_summary = compute_train_missing_summary(X_missing, train_idx)
@@ -1681,6 +1707,7 @@ def _train_single_seed(
         task=task,
         targets=task_targets,
         target_masks=target_masks,
+        sample_times=sample_times,
     )
     valid_dataset = ists_dataset(
         Y,
@@ -1692,6 +1719,7 @@ def _train_single_seed(
         task=task,
         targets=task_targets,
         target_masks=target_masks,
+        sample_times=sample_times,
     )
     train_batch = DataLoader(
         train_dataset,
@@ -1922,7 +1950,7 @@ def optimize(
     dataset_source="default",
     dataset_npz=None,
     runtime_baseline_id=None,
-    control_value_transform="identity",
+    control_value_transform="standardize",
 ):
     split_root = os.path.abspath(os.path.expanduser(str(split_root)))
     param_root = os.path.abspath(os.path.expanduser(str(param_root)))
@@ -2038,6 +2066,9 @@ def optimize(
             "hidden_dim": int(search_space["default_hidden_dim"]),
             "depth_level": int(search_space["default_depth_level"]),
             "control_value_transform": effective_control_transform,
+            "requested_control_value_transform": normalize_control_value_transform(
+                control_value_transform
+            ),
         }
         model_config.update(search_space.get("default_extra_params", {}))
         model_config = _attach_constrained_capacity_metadata(
@@ -2113,6 +2144,7 @@ def optimize(
             dataset_source=dataset_source,
             dataset_npz=dataset_npz,
             control_value_transform=effective_control_transform,
+            requested_control_value_transform=control_value_transform,
             consumes_coefficients=consumes_coefficients,
         )
         saved_model_config = _normalize_param_config_for_save(
@@ -2142,6 +2174,9 @@ def optimize(
         saved_model_config["control_value_transform"] = effective_control_transform
         saved_model_config["control_value_transform_metadata"] = metadata[
             "control_value_transform"
+        ]
+        saved_model_config["control_time_transform"] = metadata[
+            "control_time_transform"
         ]
         if runtime_baseline_id is not None:
             saved_model_config["runtime_baseline_id"] = runtime_baseline_id
@@ -2195,7 +2230,7 @@ def optimize(
             "search_best_loss_tie_count": saved_model_config.get("search_best_loss_tie_count"),
             "search_execution_backend": saved_model_config["search_execution_backend"],
             "search_budget_class": saved_model_config["search_budget_class"],
-            "legacy_grid_version": saved_model_config["legacy_grid_version"],
+            "search_grid_version": saved_model_config["search_grid_version"],
             "architecture_axes": saved_model_config["architecture_axes"],
             "effective_params": saved_model_config["effective_params"],
             "capacity_metadata": _capacity_metadata_from_config(saved_model_config),
@@ -2208,6 +2243,9 @@ def optimize(
             "runtime_baseline_id": runtime_baseline_id,
             "control_value_transform": saved_model_config[
                 "control_value_transform_metadata"
+            ],
+            "control_time_transform": saved_model_config[
+                "control_time_transform"
             ],
         }
 
@@ -2256,6 +2294,9 @@ def optimize(
         # "batch_size": None, # determine by the number of the data
         "lr": tune.loguniform(*search_space["lr_bounds"]),
         "control_value_transform": effective_control_transform,
+        "requested_control_value_transform": normalize_control_value_transform(
+            control_value_transform
+        ),
     }
     if constrained_capacity_config is None:
         model_config["hidden_dim"] = tune.choice(search_space["hidden_dim_values"])
@@ -2372,6 +2413,7 @@ def optimize(
         dataset_source=dataset_source,
         dataset_npz=dataset_npz,
         control_value_transform=effective_control_transform,
+        requested_control_value_transform=control_value_transform,
         consumes_coefficients=consumes_coefficients,
     )
     saved_param_config = _normalize_param_config_for_save(
@@ -2406,6 +2448,9 @@ def optimize(
     saved_param_config["control_value_transform"] = effective_control_transform
     saved_param_config["control_value_transform_metadata"] = metadata[
         "control_value_transform"
+    ]
+    saved_param_config["control_time_transform"] = metadata[
+        "control_time_transform"
     ]
     if runtime_baseline_id is not None:
         saved_param_config["runtime_baseline_id"] = runtime_baseline_id
@@ -2458,7 +2503,7 @@ def optimize(
         "search_partial_trial_failure": saved_param_config.get("search_partial_trial_failure"),
         "search_execution_backend": saved_param_config["search_execution_backend"],
         "search_budget_class": saved_param_config["search_budget_class"],
-        "legacy_grid_version": saved_param_config["legacy_grid_version"],
+        "search_grid_version": saved_param_config["search_grid_version"],
         "architecture_axes": saved_param_config["architecture_axes"],
         "effective_params": saved_param_config["effective_params"],
         "capacity_metadata": _capacity_metadata_from_config(saved_param_config),
@@ -2471,6 +2516,9 @@ def optimize(
         "runtime_baseline_id": runtime_baseline_id,
         "control_value_transform": saved_param_config[
             "control_value_transform_metadata"
+        ],
+        "control_time_transform": saved_param_config[
+            "control_time_transform"
         ],
     }
 
@@ -2592,7 +2640,7 @@ def main():
                             forecast_horizon=expected_artifact_identity["forecast_horizon"],
                             dataset_source=expected_artifact_identity["dataset_source"],
                             split_seeds=expected_artifact_identity["split_seeds"],
-                            allow_legacy_search_profile=args.allow_legacy_search_profile,
+                            allow_compatibility_search_profile=args.allow_compatibility_search_profile,
                         )
                     except (FileNotFoundError, ValueError) as exc:
                         reason = f"param artifact reuse check failed: {exc}"
@@ -2707,7 +2755,10 @@ def main():
                             "search_partial_trial_failure": existing_cfg.get("search_partial_trial_failure"),
                             "search_execution_backend": existing_cfg.get("search_execution_backend"),
                             "search_budget_class": existing_cfg.get("search_budget_class"),
-                            "legacy_grid_version": existing_cfg.get("legacy_grid_version", existing_profile),
+                            "search_grid_version": existing_cfg.get(
+                                "search_grid_version",
+                                existing_profile,
+                            ),
                             "architecture_axes": existing_cfg.get("architecture_axes"),
                             "effective_params": existing_cfg.get("effective_params"),
                             "capacity_metadata": _capacity_metadata_from_config(existing_cfg),
@@ -2828,7 +2879,7 @@ def main():
                         "search_partial_trial_failure": search_result.get("search_partial_trial_failure"),
                         "search_execution_backend": search_result["search_execution_backend"],
                         "search_budget_class": search_result["search_budget_class"],
-                        "legacy_grid_version": search_result["legacy_grid_version"],
+                        "search_grid_version": search_result["search_grid_version"],
                         "architecture_axes": search_result["architecture_axes"],
                         "effective_params": search_result["effective_params"],
                         "capacity_metadata": search_result["capacity_metadata"],

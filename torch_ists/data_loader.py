@@ -49,7 +49,7 @@ class DataLoader:
             raise ValueError(f"X and y sample count mismatch: {X.shape[0]} != {y.shape[0]}")
 
         if timestamps is not None:
-            timestamps = np.asarray(timestamps)
+            timestamps = np.asarray(timestamps, dtype=np.float64)
             if timestamps.ndim != 2:
                 raise ValueError(f"timestamps must be 2D [N, L], got shape {timestamps.shape}")
             if timestamps.shape[0] != X.shape[0] or timestamps.shape[1] != X.shape[2]:
@@ -107,14 +107,14 @@ class DataLoader:
         num_features = len(feature_cols)
 
         X = np.full((num_samples, num_features, max_len), np.nan, dtype=np.float32)
-        ts = np.full((num_samples, max_len), np.nan, dtype=np.float32)
+        ts = np.full((num_samples, max_len), np.nan, dtype=np.float64)
         y = np.empty((num_samples,), dtype=np.int64)
 
         for i, (_, g) in enumerate(groups):
             values = g[list(feature_cols)].to_numpy(dtype=np.float32)
             cur_len = values.shape[0]
             X[i, :, :cur_len] = values.T
-            ts[i, :cur_len] = g[time_col].to_numpy(dtype=np.float32)
+            ts[i, :cur_len] = g[time_col].to_numpy(dtype=np.float64)
             y[i] = int(g[label_col].to_numpy()[0])
 
         return DatasetBundle(

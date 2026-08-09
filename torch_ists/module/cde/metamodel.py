@@ -4,6 +4,7 @@ import torch
 import torchcde
 
 from . import controldiffeq
+from ._solver import apply_control_aware_cde_solver_defaults
 
 
 class NeuralCDE(torch.nn.Module):
@@ -71,17 +72,13 @@ class NeuralCDE(torch.nn.Module):
                 z0_extra = torch.zeros(*batch_dims, self.input_channels, dtype=z0.dtype, device=z0.device)
                 z0 = torch.cat([z0_extra, z0], dim=-1)
 
-        if "method" not in kwargs:
-            kwargs["method"] = "rk4"
-        if kwargs["method"] in {"rk4", "euler"}:
-            kwargs.setdefault("options", {})
-            options = kwargs["options"]
-            if "step_size" not in options and "grid_constructor" not in options:
-                time_diffs = times[1:] - times[:-1]
-                step = time_diffs.min().item()
-                if kwargs["method"] == "euler":
-                    step = max(step, 1e-3)
-                options["step_size"] = step
+        control_knots = getattr(control_path, "grid_points", times)
+        kwargs = apply_control_aware_cde_solver_defaults(
+            times,
+            control_knots,
+            kwargs,
+            piecewise_linear=self.control in {"linear", "rectilinear"},
+        )
 
         if self.control == "natural":
             z_t = controldiffeq.cdeint(

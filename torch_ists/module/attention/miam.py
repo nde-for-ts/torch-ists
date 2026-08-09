@@ -63,8 +63,11 @@ class MIAMMultiHeadAttention(nn.Module):
 
         scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(self.d_k)
         if mask is not None:
-            scores = scores.masked_fill(mask, -1e9)
+            scores = scores.masked_fill(mask, torch.finfo(scores.dtype).min)
         scores = F.softmax(scores, dim=-1)
+        if mask is not None:
+            has_unmasked_key = (~mask).any(dim=-1, keepdim=True)
+            scores = torch.where(has_unmasked_key, scores, torch.zeros_like(scores))
         scores = self.dropout(scores)
 
         output = torch.matmul(scores, v)

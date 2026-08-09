@@ -6,6 +6,8 @@ import torch
 import torch.nn as nn
 import torchcde
 
+from ..cde._solver import apply_control_aware_cde_solver_defaults
+
 from .operators import build_flow_operator, resolve_flow_backend
 
 
@@ -133,15 +135,15 @@ class DualDynamics(nn.Module):
         method = str(kwargs.get("method", "rk4")).strip().lower() or "rk4"
         options = kwargs.get("options")
         solver_options = dict(options) if isinstance(options, dict) else {}
-        dt_min = (times[1:] - times[:-1]).min().item()
-        if method == "rk4" and "step_size" not in solver_options:
-            solver_options["step_size"] = dt_min
-        elif method in {"euler", "midpoint"} and "step_size" not in solver_options:
-            solver_options["step_size"] = max(dt_min, 1e-3)
-
         solver_kwargs: dict[str, object] = {"method": method}
         if solver_options:
             solver_kwargs["options"] = solver_options
+        solver_kwargs = apply_control_aware_cde_solver_defaults(
+            times,
+            control_spline.grid_points,
+            solver_kwargs,
+            piecewise_linear=False,
+        )
         for key in ("rtol", "atol", "adjoint"):
             if kwargs.get(key) is not None:
                 solver_kwargs[key] = kwargs[key]

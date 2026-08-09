@@ -17,6 +17,7 @@ SUPPORTED_MISSINGNESS_MECHANISMS = {
 SUPPORTED_IMPUTATION_STRATEGIES = ("zero", "last_observed", "channel_mean")
 SUPPORTED_CONTROL_VALUE_TRANSFORMS = ("identity", "standardize")
 CONTROL_VALUE_STANDARDIZE_EPSILON = 1e-5
+SUPPORTED_CONTROL_TIME_SOURCES = ("auto", "index", "physical")
 
 
 def normalize_control_value_transform(method: Optional[str] = None) -> str:
@@ -30,6 +31,116 @@ def normalize_control_value_transform(method: Optional[str] = None) -> str:
             f"{SUPPORTED_CONTROL_VALUE_TRANSFORMS}, got {method!r}"
         )
     return normalized
+
+
+def normalize_control_time_source(source: Optional[str] = None) -> str:
+    """Return the canonical source used for the control time channel."""
+    normalized = "auto" if source is None else str(source).strip().lower()
+    if normalized not in SUPPORTED_CONTROL_TIME_SOURCES:
+        raise ValueError(
+            "control_time_source must be one of "
+            f"{SUPPORTED_CONTROL_TIME_SOURCES}, got {source!r}"
+        )
+    return normalized
+
+
+def fit_control_time_transform(
+    timestamps,
+    train_indices,
+    *,
+    source: str = "auto",
+    sequence_length: Optional[int] = None,
+) -> dict:
+    """Fit the train-only unit used by the physical control time channel."""
+    resolved = normalize_control_time_source(source)
+    if resolved == "auto":
+        effective = "physical" if timestamps is not None else "index"
+    else:
+        effective = resolved
+
+    if effective == "index":
+        return {
+            "requested_source": resolved,
+            "effective_source": "index",
+            "fit_scope": "none",
+            "scale": 1.0,
+        }
+    if timestamps is None:
+        raise ValueError("physical control time requires timestamps")
+
+    timestamps_np = np.asarray(timestamps, dtype=np.float64)
+    if timestamps_np.ndim != 2:
+        raise ValueError("physical control timestamps must have shape [N,L]")
+    if sequence_length is not None and int(timestamps_np.shape[1]) != int(sequence_length):
+        raise ValueError("physical control timestamps do not match the sequence length")
+    if not np.isfinite(timestamps_np).all():
+        raise ValueError("physical control timestamps must be finite")
+    if train_indices is None:
+        raise ValueError("physical control time requires explicit training indices")
+    indices = np.asarray(train_indices, dtype=np.int64).reshape(-1)
+    if indices.size == 0:
+        raise ValueError("physical control time requires non-empty training indices")
+    if int(indices.min()) < 0 or int(indices.max()) >= int(timestamps_np.shape[0]):
+        raise ValueError("control-time training indices are out of bounds")
+
+    train_times = timestamps_np[indices]
+    positive_gaps = np.diff(train_times, axis=1)
+    positive_gaps = positive_gaps[np.isfinite(positive_gaps) & (positive_gaps > 0.0)]
+    if positive_gaps.size == 0:
+        raise ValueError("physical control time requires a positive training timestamp gap")
+    scale = float(np.median(positive_gaps))
+    if not np.isfinite(scale) or scale <= 0.0:
+        raise ValueError("physical control-time scale must be finite and positive")
+    return {
+        "requested_source": resolved,
+        "effective_source": "physical",
+        "fit_scope": "train_positive_gaps",
+        "scale": scale,
+    }
+
+
+def apply_control_time_transform(timestamps, state: dict, *, sequence_length: int):
+    """Construct a finite ``[N,L]`` control-time feature from a fitted state."""
+    import torch
+
+    effective = str(state.get("effective_source", "index")).strip().lower()
+    if effective == "index":
+        if timestamps is not None:
+            sample_count = int(np.asarray(timestamps).shape[0])
+        else:
+            sample_count = int(state.get("sample_count", 1))
+        index_grid = torch.linspace(0.0, 1.0, int(sequence_length), dtype=torch.float32)
+        return index_grid.view(1, -1).expand(sample_count, -1).clone()
+    if effective != "physical":
+        raise ValueError(f"unsupported effective control-time source: {effective!r}")
+    if timestamps is None:
+        raise ValueError("physical control time requires timestamps")
+
+    timestamps_np = np.asarray(timestamps, dtype=np.float64)
+    if timestamps_np.ndim != 2 or int(timestamps_np.shape[1]) != int(sequence_length):
+        raise ValueError(f"physical control timestamps must have shape [N,{sequence_length}]")
+    if not np.isfinite(timestamps_np).all():
+        raise ValueError("physical control timestamps must be finite")
+    scale = float(state.get("scale", 0.0))
+    if not np.isfinite(scale) or scale <= 0.0:
+        raise ValueError("physical control-time state has an invalid scale")
+
+    # Subtract in float64 before the float32 cast so large absolute origins do
+    # not collapse small, valid gaps.
+    elapsed = (timestamps_np - timestamps_np[:, :1]) / scale
+    if not np.isfinite(elapsed).all() or np.any(np.diff(elapsed, axis=1) <= 0.0):
+        raise ValueError("physical control timestamps must be strictly increasing")
+    return torch.from_numpy(elapsed.astype(np.float32, copy=False))
+
+
+def control_time_transform_metadata(state: dict) -> dict:
+    """Return artifact-safe control-time semantics without fitted units."""
+    effective = str(state.get("effective_source", "index")).strip().lower()
+    return {
+        "requested_source": normalize_control_time_source(state.get("requested_source", effective)),
+        "effective_source": effective,
+        "fit_scope": "train_positive_gaps" if effective == "physical" else "none",
+    }
 
 
 def compute_train_normalization_stats(x_missing, train_indices):
@@ -403,7 +514,7 @@ def _compute_delta(mask_observed_ndl: np.ndarray) -> np.ndarray:
 
 
 def _validate_timestamps_for_preprocess(timestamps: Any, X_np: np.ndarray) -> np.ndarray:
-    timestamps_np = np.asarray(timestamps, dtype=np.float32)
+    timestamps_np = np.asarray(timestamps, dtype=np.float64)
     expected_shape = (int(X_np.shape[0]), int(X_np.shape[2]))
     if timestamps_np.ndim != 2:
         raise ValueError(f"timestamps must be 2D [N, L], got shape {timestamps_np.shape}")
@@ -445,7 +556,7 @@ def _compute_timestamp_delta(
     ) -> np.ndarray:
     """Compute elapsed time since the last observation, or sequence start."""
     observed = mask_observed_ndl.astype(bool)
-    timestamps = np.asarray(timestamps_nl, dtype=np.float32)
+    timestamps = np.asarray(timestamps_nl, dtype=np.float64)
     n, d, l = observed.shape
     delta = np.zeros((n, d, l), dtype=np.float32)
 
@@ -495,6 +606,9 @@ def _finalize_preprocess_outputs(
     interpolate: str,
     use_intensity: bool,
     time_grid_np: Optional[np.ndarray] = None,
+    control_time_feature=None,
+    control_time_transform_state: Optional[dict] = None,
+    return_control_time_transform: bool = False,
     control_value_transform: str = "identity",
     control_value_train_indices: Optional[Any] = None,
     control_value_transform_state: Optional[dict] = None,
@@ -518,7 +632,16 @@ def _finalize_preprocess_outputs(
             raise ValueError(f"time grid must have shape [{seq_len}], got {tuple(times.shape)}")
 
     intensity = (~torch.isnan(X_missing)).to(X_missing.dtype).cumsum(dim=1)
-    time_feat = times.view(1, seq_len, 1).expand(X_missing.shape[0], seq_len, 1)
+    if control_time_feature is None:
+        time_feat = times.view(1, seq_len, 1).expand(X_missing.shape[0], seq_len, 1)
+    else:
+        time_feat = torch.as_tensor(control_time_feature, dtype=X_missing.dtype)
+        if tuple(time_feat.shape) != (int(X_missing.shape[0]), int(seq_len)):
+            raise ValueError(
+                "control-time feature must have shape "
+                f"[{int(X_missing.shape[0])},{int(seq_len)}], got {tuple(time_feat.shape)}"
+            )
+        time_feat = time_feat.unsqueeze(-1)
 
     resolved_transform = normalize_control_value_transform(control_value_transform)
     if control_value_transform_state is None:
@@ -561,7 +684,11 @@ def _finalize_preprocess_outputs(
 
     outputs = (X_missing, X_mask, X_delta, coeffs)
     if return_control_value_transform:
-        return (*outputs, transform_state)
+        outputs = (*outputs, transform_state)
+    if return_control_time_transform:
+        if control_time_transform_state is None:
+            raise ValueError("control-time transform state is required when returning it")
+        outputs = (*outputs, dict(control_time_transform_state))
     return outputs
 
 
@@ -726,6 +853,10 @@ def preprocess(
     control_value_train_indices: Optional[Any] = None,
     control_value_transform_state: Optional[dict] = None,
     return_control_value_transform: bool = False,
+    control_time_source: str = "auto",
+    control_time_train_indices: Optional[Any] = None,
+    control_time_transform_state: Optional[dict] = None,
+    return_control_time_transform: bool = False,
 ):
     """Preprocess data and build interpolation features.
 
@@ -762,6 +893,13 @@ def preprocess(
             evaluation uses this to keep training statistics frozen.
         return_control_value_transform: If true, append the fitted state to the
             usual four return values.
+        control_time_source: ``auto`` (physical when timestamps are supplied),
+            ``physical``, or ``index``. Physical time is made relative to each
+            sample origin and expressed in a train-fitted median-gap unit.
+        control_time_train_indices: Training sample indices used to fit the
+            physical time unit.
+        control_time_transform_state: Optional previously fitted state to reuse.
+        return_control_time_transform: If true, append the control-time state.
 
     Returns:
         X_missing: torch.Tensor [N, L, D]
@@ -796,6 +934,37 @@ def preprocess(
     rate = 0.0 if missing_rate is None else float(missing_rate)
     _validate_inputs(X_np, rate)
     timestamps_np = None if timestamps is None else _validate_timestamps_for_preprocess(timestamps, X_np)
+    requested_time_source = normalize_control_time_source(control_time_source)
+    if control_time_transform_state is None:
+        control_time_state = fit_control_time_transform(
+            timestamps_np,
+            control_time_train_indices,
+            source=requested_time_source,
+            sequence_length=int(X_np.shape[2]),
+        )
+    else:
+        control_time_state = dict(control_time_transform_state)
+        state_requested = normalize_control_time_source(
+            control_time_state.get("requested_source", control_time_state.get("effective_source"))
+        )
+        state_effective = str(control_time_state.get("effective_source", "")).strip().lower()
+        requested_effective = (
+            "physical" if requested_time_source == "auto" and timestamps_np is not None
+            else "index" if requested_time_source == "auto"
+            else requested_time_source
+        )
+        if state_effective != requested_effective:
+            raise ValueError(
+                "control-time transform state/source mismatch: "
+                f"state={state_effective!r}, requested={requested_effective!r}"
+            )
+        control_time_state["requested_source"] = state_requested
+    control_time_state["sample_count"] = int(X_np.shape[0])
+    control_time_feature = apply_control_time_transform(
+        timestamps_np,
+        control_time_state,
+        sequence_length=int(X_np.shape[2]),
+    )
 
     if rate > 0.0:
         X_missing_np, mask_ndl = apply_missingness(
@@ -826,6 +995,9 @@ def preprocess(
         interpolate=resolved_interpolate,
         use_intensity=resolved_use_intensity,
         time_grid_np=None,
+        control_time_feature=control_time_feature,
+        control_time_transform_state=control_time_state,
+        return_control_time_transform=return_control_time_transform,
         control_value_transform=control_value_transform,
         control_value_train_indices=control_value_train_indices,
         control_value_transform_state=control_value_transform_state,

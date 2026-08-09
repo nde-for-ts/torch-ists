@@ -60,11 +60,11 @@ def test_semantic_artifact_identity_does_not_require_content_hashes():
         split_seeds=[0],
     )
 
-    legacy_identity = dict(identity)
-    legacy_identity.pop("split_seeds")
-    legacy_identity["split_sha256s"] = [{"seed": 0, "sha256": "optional-provenance"}]
+    stored_identity = dict(identity)
+    stored_identity.pop("split_seeds")
+    stored_identity["split_sha256s"] = [{"seed": 0, "sha256": "optional-provenance"}]
     common.validate_param_artifact_identity(
-        {"artifact_identity": legacy_identity},
+        {"artifact_identity": stored_identity},
         data_name="BasicMotions",
         model_name="cnn",
         task="classification",
