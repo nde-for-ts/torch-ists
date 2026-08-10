@@ -478,7 +478,7 @@ def preprocess(
     timestamps: Optional[Any] = None,
     timestamp_delta_scale: Optional[float] = None,
     missingness_reference: Optional[Any] = None,
-    control_value_transform: str = "identity",
+    control_value_transform: Optional[str] = None,
     control_value_train_indices: Optional[Any] = None,
     control_value_transform_state: Optional[dict] = None,
     return_control_value_transform: bool = False,
@@ -505,7 +505,7 @@ def preprocess(
 | `timestamps` | `Optional[Any]` | `None` | Optional timestamp grid `[N, L]`. It supplies timestamp deltas and, with `control_time_source="auto"`, an elapsed physical-time control channel. |
 | `timestamp_delta_scale` | `Optional[float]` | `None` | Positive scale for timestamp-based deltas. The scripts use the train split median positive timestamp step. |
 | `missingness_reference` | `Optional[Any]` | `None` | Optional reference array used by non-MCAR missingness mechanisms such as MAR/MNAR; script workflows pass train-split reference statistics. |
-| `control_value_transform` | `str` | `"identity"` | Value-channel transform used before interpolation-coefficient construction. `"standardize"` fits finite observed values from `control_value_train_indices`; `"train_standardize"` is accepted as an input alias. |
+| `control_value_transform` | `Optional[str]` | `None` | Model-aware default: coefficient consumers request `"standardize"`; other models and calls without `model_name` use `"identity"`. Explicit `"standardize"` fits finite observed values from `control_value_train_indices`; `"train_standardize"` is accepted as an input alias. |
 | `control_value_train_indices` | `Optional[Any]` | `None` | Required training sample indices when fitting `"standardize"`. Validation and test samples do not contribute statistics. |
 | `control_value_transform_state` | `Optional[dict]` | `None` | Previously fitted state to reuse without refitting, for example across robustness conditions. |
 | `return_control_value_transform` | `bool` | `False` | Append the fitted state as a fifth return value. The default four-value return is unchanged. |
@@ -523,7 +523,11 @@ def preprocess(
 3. `X_delta`: `[N, L, D]` - Time-since-last-observation (index-based)
 4. `coeffs`: interpolation coefficients, or `None` when `build_coeffs=False`. The tensor's trailing channel dimension depends on the interpolation mode and whether intensity channels are included.
 
-If `return_control_value_transform=True`, a fifth item contains the fitted transform state. Standardization applies only to value channels used to construct coefficients; time and intensity channels are unchanged, and missing entries remain missing. The default `identity` path is numerically identical to the prior four-output behavior.
+If `return_control_value_transform=True`, a fifth item contains the fitted transform state.
+Standardization applies only to finite observed value channels used to construct coefficients;
+time and intensity channels are unchanged, and missing entries remain missing. An omitted
+transform on a coefficient-consuming model requires explicit training indices or a fitted state.
+Explicit `identity` remains numerically identical to the earlier four-output behavior.
 
 If `return_control_time_transform=True`, the control-time state is appended after the usual outputs and after the value-transform state when both are requested. Timestamp validation and origin subtraction occur in float64 before conversion to model dtype; the physical-time unit is fitted from training-split positive gaps only.
 

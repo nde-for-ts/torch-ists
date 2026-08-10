@@ -852,7 +852,7 @@ def preprocess(
     timestamps: Optional[Any] = None,
     timestamp_delta_scale: Optional[float] = None,
     missingness_reference: Optional[Any] = None,
-    control_value_transform: str = "identity",
+    control_value_transform: Optional[str] = None,
     control_value_train_indices: Optional[Any] = None,
     control_value_transform_state: Optional[dict] = None,
     return_control_value_transform: bool = False,
@@ -888,9 +888,13 @@ def preprocess(
         missingness_reference: Optional [N_ref, D, L] array used as the reference
             distribution for MAR/MNAR synthetic masks. Script entrypoints pass the
             training split here to avoid test-to-train mask-stat leakage.
-        control_value_transform: ``identity`` (default) or train-observed
-            ``standardize`` for value channels before coefficient construction.
-            ``train_standardize`` is accepted as an input alias.
+        control_value_transform: ``identity`` or train-observed ``standardize``
+            for value channels before coefficient construction. When omitted,
+            model-aware calls request ``standardize`` only for models that
+            consume interpolation coefficients; other calls use ``identity``.
+            A model-aware standardized call therefore requires explicit
+            training indices or a fitted transform state. ``train_standardize``
+            is accepted as an input alias.
         control_value_train_indices: Training sample indices used to fit
             ``standardize`` after missingness is applied.
         control_value_transform_state: Optional previously fitted state. Robustness
@@ -931,6 +935,21 @@ def preprocess(
         resolved_interpolate = "cubic"
     if resolved_use_intensity is None:
         resolved_use_intensity = True
+
+    if control_value_transform is None:
+        if model_name is None:
+            resolved_control_value_transform = "identity"
+        else:
+            from .handlers import resolve_model_control_value_transform
+
+            resolved_control_value_transform, _ = resolve_model_control_value_transform(
+                model_name,
+                "standardize",
+            )
+    else:
+        resolved_control_value_transform = normalize_control_value_transform(
+            control_value_transform
+        )
 
     if isinstance(X, torch.Tensor):
         X_np = X.detach().cpu().numpy().astype(np.float32)
@@ -1005,7 +1024,7 @@ def preprocess(
         control_time_feature=control_time_feature,
         control_time_transform_state=control_time_state,
         return_control_time_transform=return_control_time_transform,
-        control_value_transform=control_value_transform,
+        control_value_transform=resolved_control_value_transform,
         control_value_train_indices=control_value_train_indices,
         control_value_transform_state=control_value_transform_state,
         return_control_value_transform=return_control_value_transform,

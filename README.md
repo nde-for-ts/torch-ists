@@ -1,6 +1,6 @@
 # torch-ists
 
-[![Version](https://img.shields.io/badge/version-0.6.8-blue)](pyproject.toml) [![Python](https://img.shields.io/badge/python-%3E%3D3.10-blue)](pyproject.toml) [![PyTorch](https://img.shields.io/badge/PyTorch-%3E%3D2.0-ee4c2c)](pyproject.toml) [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![Package status](https://img.shields.io/badge/status-preview-orange)](#project-status)
+[![Version](https://img.shields.io/badge/version-0.6.9-blue)](pyproject.toml) [![Python](https://img.shields.io/badge/python-%3E%3D3.10-blue)](pyproject.toml) [![PyTorch](https://img.shields.io/badge/PyTorch-%3E%3D2.0-ee4c2c)](pyproject.toml) [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![Package status](https://img.shields.io/badge/status-preview-orange)](#project-status)
 
 **PyTorch toolkit for irregularly sampled multivariate time series with continuous-time methods (Neural ODE/CDE/SDE) and discrete-time baselines.**
 
@@ -147,7 +147,14 @@ active model names and data-path requirements without importing optional model d
 
 Coefficient-driven CDE and SDE rows consume the `coeffs` returned by `preprocess(...)`. Direct sequence, attention, and event-driven rows, including ODE-LSTM, the direct ODE-RNN models, Neural Jump ODE (NJ-ODE), and LatentSDE, use the sequence stack and accept `coeffs=None`.
 
-The source-checkout search and evaluation scripts request train-observed value standardization by default for coefficient-driven models; pass `--control-value-transform identity` for earlier coefficient-scale parity. The direct `preprocess(...)` API keeps `identity` as its low-level default because fitting standardization requires explicit training indices. When verified timestamps are supplied, preprocessing uses an elapsed physical-time control channel while retaining a separate shared normalized interpolation parameter.
+Source-checkout search/evaluation and direct model-aware preprocessing request train-observed
+value standardization by default for coefficient-driven models. A direct call must supply
+`control_value_train_indices` or a fitted transform state; it fails closed instead of fitting on
+all samples. Models that do not consume coefficients, and calls without `model_name`, retain
+`identity`. Pass `--control-value-transform identity` or
+`control_value_transform="identity"` for explicit coefficient-scale parity. When verified
+timestamps are supplied, preprocessing uses an elapsed physical-time control channel while
+retaining a separate shared normalized interpolation parameter.
 
 Verified physical event clocks are routed to time-aware attention, source ODE, and coefficient-driven recurrent ODE paths. Runs without timestamps preserve their normalized-index or elapsed-delta behavior. Stable SDE models continue to use the normalized solver and Brownian clock even when the control contains a physical-time feature.
 

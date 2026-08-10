@@ -127,7 +127,10 @@ save_splits(path, train_idx, valid_idx, test_idx)
 
 Continuous-time interpolation coefficients still use the package's normalized sequence grid.
 
-When `model_name` is supplied, `interpolate` and `use_intensity` default to `get_data_config(model_name)`; explicit kwargs override.
+When `model_name` is supplied, `interpolate` and `use_intensity` default to
+`get_data_config(model_name)`; explicit kwargs override. Coefficient-consuming models also
+default to train-observed standardization, so direct calls must pass training indices or reuse a
+fitted transform state. Explicit `control_value_transform="identity"` remains available.
 
 Missingness controls:
 
