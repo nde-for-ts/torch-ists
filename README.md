@@ -1,6 +1,6 @@
 # torch-ists
 
-[![Version](https://img.shields.io/badge/version-0.6.7-blue)](pyproject.toml) [![Python](https://img.shields.io/badge/python-%3E%3D3.10-blue)](pyproject.toml) [![PyTorch](https://img.shields.io/badge/PyTorch-%3E%3D2.0-ee4c2c)](pyproject.toml) [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![Package status](https://img.shields.io/badge/status-preview-orange)](#project-status)
+[![Version](https://img.shields.io/badge/version-0.6.8-blue)](pyproject.toml) [![Python](https://img.shields.io/badge/python-%3E%3D3.10-blue)](pyproject.toml) [![PyTorch](https://img.shields.io/badge/PyTorch-%3E%3D2.0-ee4c2c)](pyproject.toml) [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![Package status](https://img.shields.io/badge/status-preview-orange)](#project-status)
 
 **PyTorch toolkit for irregularly sampled multivariate time series with continuous-time methods (Neural ODE/CDE/SDE) and discrete-time baselines.**
 
@@ -95,19 +95,23 @@ series for classification, regression, and outlier detection; regression keeps f
 instead of coercing them to class IDs. Bundle summaries report the validated task and actual target
 shape/dtype.
 
-For a built-in benchmark dataset:
+For a built-in benchmark dataset, choose an explicit data root. Downloads verify each pinned
+asset before an atomic install, and an attested cache can be reused offline:
 
 ```python
 from torch_ists import benchmark_loader
 
-X, y = benchmark_loader.get_data("BasicMotions")
+data_root = "/path/to/torch-ists-data"
+benchmark_loader.download(data_root=data_root)
+X, y = benchmark_loader.get_data("BasicMotions", data_root=data_root)
 ```
 
 See [Custom Data Guide](docs/custom_data_guide.md) for cache locations and user-provided dataset handling.
 
 ## Quick Start
 
-Install the `cde` extra before this preprocessing call (`PYTHONNOUSERSITE=1 python -m pip install -e ".[cde]"`). The example is self-contained and derives model dimensions from the raw array:
+The example is self-contained and derives model dimensions from the raw array. Direct sequence
+models can set `build_coeffs=False` and do not need the optional interpolation dependency:
 
 ```python
 import numpy as np
@@ -127,7 +131,9 @@ model = ists_classifier(
     device="cpu",
 )
 
-X_missing, X_mask, X_delta, _ = preprocess(X, model_name="transformer")
+X_missing, X_mask, X_delta, _ = preprocess(
+    X, model_name="transformer", build_coeffs=False
+)
 seq = torch.stack([X_missing, X_mask, X_delta], dim=1)  # [N, 3, L, D]
 logits = model(seq, coeffs=None)
 print(logits.shape)  # torch.Size([40, 2])
@@ -135,6 +141,9 @@ print(logits.shape)  # torch.Size([40, 2])
 
 Models follow ordinary PyTorch device movement: after `model.to(new_device)`, forward-time input
 routing uses the live parameter/buffer device rather than the device string passed at construction.
+
+`get_active_model_list()` and `get_model_capabilities(name)` expose the installed package's
+active model names and data-path requirements without importing optional model dependencies.
 
 Coefficient-driven CDE and SDE rows consume the `coeffs` returned by `preprocess(...)`. Direct sequence, attention, and event-driven rows, including ODE-LSTM, the direct ODE-RNN models, Neural Jump ODE (NJ-ODE), and LatentSDE, use the sequence stack and accept `coeffs=None`.
 

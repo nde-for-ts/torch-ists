@@ -63,6 +63,32 @@ def get_model_task_capabilities(model_name: str) -> dict[str, object]:
     }
 
 
+def get_model_capabilities(model_name: str) -> dict[str, object]:
+    """Return active-registry-backed model and data-path capabilities."""
+    from .config.alias_policy import normalize_flow_alias, normalize_tsde_method_alias
+    from .config.model_data_policy import get_data_config
+    from .config.models import MODEL_REGISTRY
+    from .handlers import model_consumes_coefficients
+
+    requested = str(model_name).strip().lower()
+    canonical = normalize_tsde_method_alias(normalize_flow_alias(requested))
+    if canonical not in MODEL_REGISTRY:
+        raise ValueError(
+            f"Model {model_name!r} is not active in this package. Inspect supported names "
+            "with `from torch_ists import get_active_model_list; "
+            "get_active_model_list()`."
+        )
+    data_config = dict(get_data_config(canonical))
+    return {
+        "name": canonical,
+        "active": True,
+        "consumes_coefficients": bool(model_consumes_coefficients(canonical)),
+        "interpolation": data_config.get("interpolation"),
+        "use_intensity": bool(data_config.get("use_intensity", False)),
+        "task_capabilities": get_model_task_capabilities(canonical),
+    }
+
+
 def validate_model_task_capability(
     model_name: str,
     task: str,
@@ -96,3 +122,16 @@ def validate_model_task_capability(
         "task": task_name,
         "capabilities": capabilities,
     }
+
+
+__all__ = [
+    "SUPPORTED_TASKS",
+    "TASK_DISPLAY_NAMES",
+    "SEQUENCE_TASKS",
+    "DATASET_ONLY_TASKS",
+    "normalize_task",
+    "get_task_display_name",
+    "get_model_task_capabilities",
+    "get_model_capabilities",
+    "validate_model_task_capability",
+]

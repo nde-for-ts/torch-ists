@@ -613,11 +613,9 @@ def _finalize_preprocess_outputs(
     control_value_train_indices: Optional[Any] = None,
     control_value_transform_state: Optional[dict] = None,
     return_control_value_transform: bool = False,
+    build_coeffs: bool = True,
 ):
     import torch
-
-    torchcde = _require_torchcde()
-    from .module.cde import controldiffeq
 
     X_missing = torch.from_numpy(X_missing_np).to(torch.float32).permute(0, 2, 1)  # [N, L, D]
     X_mask = torch.from_numpy(mask_ndl).to(torch.float32).permute(0, 2, 1)         # [N, L, D]
@@ -663,24 +661,29 @@ def _finalize_preprocess_outputs(
     values_t = torch.cat([time_feat, control_values], dim=-1)
     values_ti = torch.cat([time_feat, intensity, control_values], dim=-1)
 
-    target = values_ti if use_intensity else values_t
-    if interpolate == "natural":
-        coeff_tuple = controldiffeq.natural_cubic_spline_coeffs(times, target)
-        coeffs = torch.cat(coeff_tuple, dim=-1)
-    elif interpolate == "linear":
-        coeffs = torchcde.linear_interpolation_coeffs(target, times)
-    elif interpolate == "rectilinear":
-        rect_times = torch.linspace(0, 1, seq_len * 2 - 1, dtype=times.dtype, device=times.device)
-        coeffs = torchcde.linear_interpolation_coeffs(target, rect_times, rectilinear=0)
-    elif interpolate == "cubic":
-        coeffs = torchcde.natural_cubic_coeffs(target, times)
-    elif interpolate == "hermite":
-        coeffs = torchcde.hermite_cubic_coefficients_with_backward_differences(target, times)
-    else:
-        raise ValueError(
-            f"Unsupported interpolation: {interpolate}. "
-            "Supported values are {'natural', 'linear', 'rectilinear', 'cubic', 'hermite'}."
-        )
+    coeffs = None
+    if build_coeffs:
+        torchcde = _require_torchcde()
+        from .module.cde import controldiffeq
+
+        target = values_ti if use_intensity else values_t
+        if interpolate == "natural":
+            coeff_tuple = controldiffeq.natural_cubic_spline_coeffs(times, target)
+            coeffs = torch.cat(coeff_tuple, dim=-1)
+        elif interpolate == "linear":
+            coeffs = torchcde.linear_interpolation_coeffs(target, times)
+        elif interpolate == "rectilinear":
+            rect_times = torch.linspace(0, 1, seq_len * 2 - 1, dtype=times.dtype, device=times.device)
+            coeffs = torchcde.linear_interpolation_coeffs(target, rect_times, rectilinear=0)
+        elif interpolate == "cubic":
+            coeffs = torchcde.natural_cubic_coeffs(target, times)
+        elif interpolate == "hermite":
+            coeffs = torchcde.hermite_cubic_coefficients_with_backward_differences(target, times)
+        else:
+            raise ValueError(
+                f"Unsupported interpolation: {interpolate}. "
+                "Supported values are {'natural', 'linear', 'rectilinear', 'cubic', 'hermite'}."
+            )
 
     outputs = (X_missing, X_mask, X_delta, coeffs)
     if return_control_value_transform:
@@ -857,6 +860,7 @@ def preprocess(
     control_time_train_indices: Optional[Any] = None,
     control_time_transform_state: Optional[dict] = None,
     return_control_time_transform: bool = False,
+    build_coeffs: bool = True,
 ):
     """Preprocess data and build interpolation features.
 
@@ -900,6 +904,9 @@ def preprocess(
             physical time unit.
         control_time_transform_state: Optional previously fitted state to reuse.
         return_control_time_transform: If true, append the control-time state.
+        build_coeffs: If false, return ``None`` as the fourth value without
+            importing ``torchcde``. This additive path is for direct sequence
+            models; the default remains coefficient construction.
 
     Returns:
         X_missing: torch.Tensor [N, L, D]
@@ -1002,6 +1009,7 @@ def preprocess(
         control_value_train_indices=control_value_train_indices,
         control_value_transform_state=control_value_transform_state,
         return_control_value_transform=return_control_value_transform,
+        build_coeffs=bool(build_coeffs),
     )
 
 

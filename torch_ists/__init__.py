@@ -27,15 +27,19 @@ __all__ = [
     "ists_classifier",
     "ists_model",
     "ists_layer",
+    "get_active_model_list",
+    "get_model_capabilities",
 ]
 
-__version__ = "0.6.7"
+__version__ = "0.6.8"
 
 _LAZY_EXPORTS = {
     "ists_layer": (".layer", "ists_layer"),
     "ists_classifier": (".model", "ists_classifier"),
     "ists_model": (".model", "ists_model"),
     "benchmark_loader": (".benchmark_loader", None),
+    "get_active_model_list": (".config.model_scope", "get_active_model_list"),
+    "get_model_capabilities": (".task_registry", "get_model_capabilities"),
 }
 
 

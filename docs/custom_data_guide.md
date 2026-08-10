@@ -123,7 +123,7 @@ save_splits(path, train_idx, valid_idx, test_idx)
 | `X_missing` | `[N,L,D]` | values with `NaN` at missing positions |
 | `X_mask` | `[N,L,D]` | 1.0 observed, 0.0 missing |
 | `X_delta` | `[N,L,D]` | steps since last observation; source-checkout NPZ runs use timestamp-normalized deltas when `timestamps [N,L]` are present |
-| `coeffs` | model-dependent | interpolation coefficients |
+| `coeffs` | model-dependent | interpolation coefficients, or `None` when `build_coeffs=False` |
 
 Continuous-time interpolation coefficients still use the package's normalized sequence grid.
 
@@ -138,7 +138,9 @@ Missingness controls:
 | `seed` | `0` | Controls synthetic missingness sampling. |
 | `channel_sync` | `False` | If true, synthetic missing time indices are shared across feature channels. |
 
-Sequence/attention baselines can use `coeffs=None`; CDE/SDE/continuous-time methods need `preprocess(X, model_name=...)`.
+Sequence and attention baselines can call
+`preprocess(X, model_name=..., build_coeffs=False)` to obtain the sequence stack without
+installing `torchcde`. CDE/SDE/continuous-time methods need coefficient construction.
 
 ## 7. Validation Checklist
 

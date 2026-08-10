@@ -270,17 +270,29 @@ The Data Loading API provides:
 1. **Custom Data Loading**: `DataLoader` factory (from_numpy, from_dataframe, from_file)
 2. **Built-in Benchmark Loader**: `benchmark_loader.download()` / `benchmark_loader.get_data()`
 
-**Exported**: `DataLoader`, `DatasetBundle`, `benchmark_loader`
+**Exported**: `DataLoader`, `DatasetBundle`, `benchmark_loader`,
+`get_active_model_list`, `get_model_capabilities`
 
 `DataLoader` is for user-provided arrays, data frames, and files. The `benchmark_loader` submodule is the built-in archive loader used by the benchmark scripts. For the end-to-end user-provided dataset workflow, see [Custom Data Guide](custom_data_guide.md).
 
 ```python
 from torch_ists import benchmark_loader
 
-X, y = benchmark_loader.get_data("BasicMotions")
+data_root = "/path/to/torch-ists-data"
+benchmark_loader.download(data_root=data_root)
+X, y = benchmark_loader.get_data("BasicMotions", data_root=data_root)
 ```
 
-Install `.[data]` for the optional `pandas` and `sktime` dependencies. The loader stores and searches UCR/UEA archives under `TORCH_ISTS_DATA_ROOT` when set, otherwise under `<package checkout>/data`. Fallback search checks `Univariate_ts/<dataset>/<dataset>_{TRAIN,TEST}.ts` and `Multivariate_ts/<dataset>/<dataset>_{TRAIN,TEST}.ts`.
+Install `.[data]` for the optional `pandas` and `sktime` dependencies. `download(data_root=...)`
+retrieves each HTTPS asset into a temporary path, verifies its pinned SHA-256 digest, validates
+archive structure, and atomically installs it. A cache is reused offline only when its sidecar
+attests the same URL, digest, and target. `get_data(..., data_root=...)` searches only the
+explicit root before failing. Without an explicit root, the loader uses `TORCH_ISTS_DATA_ROOT`
+when set, otherwise `<package checkout>/data`.
+
+`get_active_model_list()` reports the installed registry. `get_model_capabilities(name)`
+returns the canonical name, coefficient-consumption flag, interpolation setting, intensity use,
+and task capabilities for one active model.
 
 Benchmark loader behavior: the included scripts pool the original UCR/UEA train and test partitions before creating split files. Variable-length series are padded to the pooled train+test maximum length with `NaN` by default, and labels default to pooled train+test encoding. Use `get_data(..., label_policy="train", padding="last")` only to reproduce older benchmark preprocessing.
 
@@ -474,6 +486,7 @@ def preprocess(
     control_time_train_indices: Optional[Any] = None,
     control_time_transform_state: Optional[dict] = None,
     return_control_time_transform: bool = False,
+    build_coeffs: bool = True,
 ):
 ```
 
@@ -500,6 +513,7 @@ def preprocess(
 | `control_time_train_indices` | `Optional[Any]` | `None` | Training indices used to fit the physical-time unit from positive timestamp gaps. Required when fitting physical time. |
 | `control_time_transform_state` | `Optional[dict]` | `None` | Previously fitted control-time state to reuse without refitting. |
 | `return_control_time_transform` | `bool` | `False` | Append the fitted control-time state after any requested value-transform state. |
+| `build_coeffs` | `bool` | `True` | If false, return `None` for `coeffs` without importing `torchcde`; intended for direct sequence models. |
 
 #### Returns
 
@@ -507,7 +521,7 @@ def preprocess(
 1. `X_missing`: `[N, L, D]` - Data with NaN for missing values
 2. `X_mask`: `[N, L, D]` - Observation mask (1.0=observed, 0.0=missing)
 3. `X_delta`: `[N, L, D]` - Time-since-last-observation (index-based)
-4. `coeffs`: `torch.Tensor` interpolation coefficients. The trailing channel dimension depends on the interpolation mode and whether intensity channels are included.
+4. `coeffs`: interpolation coefficients, or `None` when `build_coeffs=False`. The tensor's trailing channel dimension depends on the interpolation mode and whether intensity channels are included.
 
 If `return_control_value_transform=True`, a fifth item contains the fitted transform state. Standardization applies only to value channels used to construct coefficients; time and intensity channels are unchanged, and missing entries remain missing. The default `identity` path is numerically identical to the prior four-output behavior.
 
