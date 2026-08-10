@@ -50,8 +50,11 @@ __all__ = [
 
 def model_consumes_coefficients(model_name: str) -> bool:
     """Return whether the routed model uses interpolation coefficients."""
-    handler = HandlerRegistry.get_handler(str(model_name))
-    return bool(handler.consumes_coefficients(str(model_name)))
+    from torch_ists.config.alias_policy import normalize_flow_alias, normalize_tsde_method_alias
+
+    canonical_name = normalize_tsde_method_alias(normalize_flow_alias(str(model_name)))
+    handler = HandlerRegistry.get_handler(canonical_name)
+    return bool(handler.consumes_coefficients(canonical_name))
 
 
 def resolve_model_control_value_transform(model_name: str, requested: str | None):

@@ -180,9 +180,7 @@ def bootstrap_handler_registry() -> None:
             coefficient_models=(
                 name
                 for name in FLOW_MODELS
-                if name == "flowpath"
-                or name.startswith("flowpath-")
-                or name == "dualdynamics"
+                if name == "dualdynamics"
                 or name.startswith("dualdynamics-")
             ),
         )
