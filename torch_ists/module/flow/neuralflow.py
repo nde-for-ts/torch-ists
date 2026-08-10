@@ -69,6 +69,9 @@ class NeuralFlow(nn.Module):
         self.used_flow_backend_fallback = (
             self.requested_flow_backend == "auto" and self.flow_backend == "native"
         )
+        self.flow_backend_fallback_reason = getattr(
+            self.flow_network, "fallback_reason", None
+        )
         # Expose the effective backend (``auto`` -> real stribor/native build).
         self.flow_backend = getattr(self.flow_network, "backend", self.flow_backend)
 

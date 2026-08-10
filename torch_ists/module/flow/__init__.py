@@ -5,6 +5,13 @@ from __future__ import annotations
 from importlib import import_module
 
 from .operators import resolve_flow_backend
+from .backend_runtime import (
+    FlowBackendSelection,
+    assert_backend_agreement,
+    assert_effective_backend_match,
+    freeze_model_params,
+    resolve_flow_backend_once,
+)
 
 _LAZY_EXPORTS = {
     "NeuralFlow": (".neuralflow", "NeuralFlow"),
@@ -13,7 +20,18 @@ _LAZY_EXPORTS = {
     "DualDynamics": (".dualdynamics", "DualDynamics"),
 }
 
-__all__ = ["NeuralFlow", "FlowPath", "FusionCDE", "DualDynamics", "resolve_flow_backend"]
+__all__ = [
+    "NeuralFlow",
+    "FlowPath",
+    "FusionCDE",
+    "DualDynamics",
+    "resolve_flow_backend",
+    "FlowBackendSelection",
+    "resolve_flow_backend_once",
+    "freeze_model_params",
+    "assert_backend_agreement",
+    "assert_effective_backend_match",
+]
 
 
 def __getattr__(name: str):

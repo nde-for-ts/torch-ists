@@ -20,9 +20,10 @@ _FLOW_OPTION_TO_NATIVE_CLASS = {
 _FLOW_BACKEND_ALIASES = {
     "native": "native",
     "stribor": "stribor",
-    # The common default tries the reviewed Stribor backend first and falls back
-    # to the package-authored native operator when the pinned checkout is absent
-    # or invalid. ``default`` and an unset backend both resolve to ``auto``.
+    # The common default tries the supported Stribor runtime first and falls
+    # back to the package-authored native operator when that optional runtime is
+    # absent or uses an unsupported version. ``default`` and an unset backend
+    # both resolve to ``auto``.
     "default": "auto",
     "auto": "auto",
     # Compatibility-only spellings. Runtime state and serialized configuration
@@ -46,15 +47,15 @@ def resolve_flow_backend(value: object | None) -> str:
     return normalized
 
 
-def _nfe_class_for_flow_option(flow_option: str):
-    from .operators_nfe import CouplingFlow as NFECouplingFlow
-    from .operators_nfe import GRUFlow as NFEGRUFlow
-    from .operators_nfe import ResNetFlow as NFEResNetFlow
+def _stribor_class_for_flow_option(flow_option: str):
+    from .operators_stribor import CouplingFlow as StriborCouplingFlow
+    from .operators_stribor import GRUFlow as StriborGRUFlow
+    from .operators_stribor import ResNetFlow as StriborResNetFlow
 
     return {
-        "r": NFEResNetFlow,
-        "g": NFEGRUFlow,
-        "c": NFECouplingFlow,
+        "r": StriborResNetFlow,
+        "g": StriborGRUFlow,
+        "c": StriborCouplingFlow,
     }[flow_option]
 
 
@@ -67,7 +68,7 @@ def _build_native(option, dim, n_layers, hidden_dims):
 
 
 def _build_stribor(option, dim, n_layers, hidden_dims):
-    return _nfe_class_for_flow_option(option)(
+    return _stribor_class_for_flow_option(option)(
         dim=int(dim),
         n_layers=max(1, int(n_layers)),
         hidden_dims=list(hidden_dims or []),
@@ -95,21 +96,21 @@ def build_flow_operator(
         return _build_native(option, dim, n_layers, hidden_dims)
 
     if normalized_backend == "stribor":
-        # Explicit reviewed reference backend; fail closed when unavailable so a
-        # canonical/paper-facing selection is never silently downgraded.
+        # Explicit Stribor backend; fail closed when unavailable so a requested
+        # numerical implementation is never silently changed.
         return _build_stribor(option, dim, n_layers, hidden_dims)
 
-    # ``auto`` (the common default): try the reviewed Stribor backend, fall back
-    # to native when the pinned checkout is absent or invalid. The fallback keeps
-    # every flow model runnable without the external checkout; it is a deployment
-    # convenience and is not a canonical comparison setting.
-    from .nfe_reference import NFEInstallationError
-    from .operators_nfe import StriborBackendUnavailableError
+    # ``auto`` (the common default): try the supported Stribor backend and fall
+    # back only for an expected bootstrap availability condition. Constructor,
+    # numerical, and training failures are intentionally not caught here.
+    from .operators_stribor import StriborBackendUnavailableError
 
     try:
         return _build_stribor(option, dim, n_layers, hidden_dims)
-    except (NFEInstallationError, StriborBackendUnavailableError):
-        return _build_native(option, dim, n_layers, hidden_dims)
+    except StriborBackendUnavailableError:
+        operator = _build_native(option, dim, n_layers, hidden_dims)
+        operator.fallback_reason = "optional_backend_unavailable"
+        return operator
 
 
 __all__ = [

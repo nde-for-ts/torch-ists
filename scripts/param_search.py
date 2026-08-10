@@ -55,6 +55,8 @@ from _common import (
     normalize_runtime_baseline_id,
     normalize_search_profile,
     omit_none_runtime_baseline_id,
+    assert_flow_backend_execution_context,
+    prepare_flow_backend_config,
     resolve_dataset_fixed_batch_policy,
     resolve_effective_param_config,
     resolve_learning_rate_policy,
@@ -851,6 +853,14 @@ def _normalize_param_config_for_save(
     if search_provenance is not None:
         saved.update(search_provenance)
     return saved
+
+
+def _flow_backend_manifest_fields(model_config: dict) -> dict:
+    return {
+        key: model_config[key]
+        for key in ("requested_backend", "effective_backend", "fallback_reason")
+        if model_config.get(key) is not None
+    }
 
 
 def _build_search_provenance(
@@ -2079,6 +2089,7 @@ def optimize(
             model_config,
             constrained_capacity_config,
         )
+        model_config = prepare_flow_backend_config(model_name, model_config)
         split_root_local = split_root
 
         if search_repeat == SINGLE_SEARCH_REPEAT:
@@ -2251,6 +2262,7 @@ def optimize(
             "control_time_transform": saved_model_config[
                 "control_time_transform"
             ],
+            **_flow_backend_manifest_fields(saved_model_config),
         }
 
     if device_mode == "cuda" and not torch.cuda.is_available():
@@ -2315,6 +2327,7 @@ def optimize(
             model_config,
             constrained_capacity_config,
         )
+    model_config = prepare_flow_backend_config(model_name, model_config)
 
     scheduler = ASHAScheduler(
         max_t=max_num_epochs,
@@ -2323,6 +2336,7 @@ def optimize(
     search_alg = BasicVariantGenerator(random_state=SEED)
 
     def optimize_model(model_config):
+        assert_flow_backend_execution_context(model_name, model_config)
         trial_seed = _derive_trial_seed(SEED, _current_tune_trial_token(model_config))
         tune_model(data_name=data_name, missing_rate=missing_rate, model_name=model_name,
                    model_config=model_config, EPOCHS=max_num_epochs, SEED=SEED,
@@ -2524,6 +2538,7 @@ def optimize(
         "control_time_transform": saved_param_config[
             "control_time_transform"
         ],
+        **_flow_backend_manifest_fields(saved_param_config),
     }
 
 
@@ -2615,6 +2630,11 @@ def main():
                     try:
                         with open(existing_param_path, "rb") as f:
                             existing_cfg = pickle.load(f)
+                        existing_cfg = prepare_flow_backend_config(
+                            model_name,
+                            existing_cfg,
+                            require_recorded=True,
+                        )
                     except Exception as exc:
                         reason = f"failed to load existing params for reuse check: {exc}"
                         LOGGER.error("[FAIL] %s/%s: %s", data_name, model_name, reason)
@@ -2765,6 +2785,7 @@ def main():
                             ),
                             "architecture_axes": existing_cfg.get("architecture_axes"),
                             "effective_params": existing_cfg.get("effective_params"),
+                            **_flow_backend_manifest_fields(existing_cfg),
                             "capacity_metadata": _capacity_metadata_from_config(existing_cfg),
                             "split_path": portable_artifact_reference(split_path),
                             "param_path": portable_artifact_reference(existing_param_path),
@@ -2886,6 +2907,7 @@ def main():
                         "search_grid_version": search_result["search_grid_version"],
                         "architecture_axes": search_result["architecture_axes"],
                         "effective_params": search_result["effective_params"],
+                        **_flow_backend_manifest_fields(search_result),
                         "capacity_metadata": search_result["capacity_metadata"],
                         "runtime_baseline_id": search_result["runtime_baseline_id"],
                         "best_loss": float(search_result["best_loss"]),

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "torch-ists"
-version = "0.6.6"
+version = "0.6.7"
 description = "PyTorch package for irregular time series modeling"
 readme = "README.md"
 license = { text = "MIT" }
@@ -65,6 +65,12 @@ cde = [
     # torch-version-pinned. Use .[signatory] for source-checkout builds.
 ]
 
+# Direct flow operators built from the supported MIT Stribor runtime.
+# The external Neural Flows checkout is a development parity oracle only.
+flow = [
+    "stribor==0.1.0",
+]
+
 # Source-build optional dependency for Neural RDE paths.
 # Kept out of .[cde] and .[all] so standard installs do not silently pick a
 # torch-incompatible prebuilt wheel.
@@ -89,6 +95,7 @@ all = [
     "torchdyn>=1.0.6",
     "torchcde>=0.2.5",
     "torchsde>=0.2.6",
+    "stribor==0.1.0",
 ]
 
 [project.urls]

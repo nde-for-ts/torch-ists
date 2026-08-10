@@ -1,6 +1,6 @@
 # torch-ists
 
-[![Version](https://img.shields.io/badge/version-0.6.6-blue)](pyproject.toml) [![Python](https://img.shields.io/badge/python-%3E%3D3.10-blue)](pyproject.toml) [![PyTorch](https://img.shields.io/badge/PyTorch-%3E%3D2.0-ee4c2c)](pyproject.toml) [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![Package status](https://img.shields.io/badge/status-preview-orange)](#project-status)
+[![Version](https://img.shields.io/badge/version-0.6.7-blue)](pyproject.toml) [![Python](https://img.shields.io/badge/python-%3E%3D3.10-blue)](pyproject.toml) [![PyTorch](https://img.shields.io/badge/PyTorch-%3E%3D2.0-ee4c2c)](pyproject.toml) [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![Package status](https://img.shields.io/badge/status-preview-orange)](#project-status)
 
 **PyTorch toolkit for irregularly sampled multivariate time series with continuous-time methods (Neural ODE/CDE/SDE) and discrete-time baselines.**
 
@@ -49,11 +49,16 @@ PYTHONNOUSERSITE=1 python -m pip install -e .[cde]
 # SDE backends
 PYTHONNOUSERSITE=1 python -m pip install -e .[sde]
 
+# Direct Stribor flow backend (otherwise auto falls back to native)
+PYTHONNOUSERSITE=1 python -m pip install -e .[flow]
+
 # Full optional stack, including data loading and continuous-time model backends
 PYTHONNOUSERSITE=1 python -m pip install -e .[all]
 ```
 
-Flow models request the `auto` backend by default. It validates and uses the reviewed Stribor implementation when the pinned external checkout is available, then falls back to the package-authored native operators only for expected installation or provenance failures. Explicit `stribor` is fail-closed, while explicit `native` skips the external probe. Review the upstream repository's terms first; the pinned source does not publish a LICENSE file and is not bundled with this package. Install the required checkout explicitly:
+Flow models request `auto` by default. A core-only install uses the package-authored native fallback; `.[flow]` installs the supported MIT `stribor==0.1.0` runtime so `auto` selects the direct Stribor adapter without a Git checkout. Explicit `stribor` is fail-closed, while explicit `native` skips the optional-runtime probe. Only expected absence or supported-version incompatibility can trigger fallback; constructor, numerical, memory, and training failures remain errors.
+
+The external Neural Flows checkout is optional and used only as a development parity oracle. It is not required by `.[flow]`, included in `.[all]`, or bundled in wheels and source distributions. Its pinned source does not publish a LICENSE file. To run the separate parity checks:
 
 ```bash
 PYTHONNOUSERSITE=1 python -m pip install "stribor==0.1.0" "torchdiffeq==0.2.1"
@@ -61,7 +66,7 @@ PYTHONNOUSERSITE=1 python -m pip install --no-deps "git+https://github.com/mbilo
 PYTHONNOUSERSITE=1 python -c "from torch_ists.module.flow.nfe_reference import require_nfe_installation; print(require_nfe_installation()['valid'])"
 ```
 
-The final command validates the repository URL, commit, dependency versions, import location, and source files without importing the external model code. The selector applies to `neuralflow`, `flowpath`, `dualdynamics`, and the shipped low-level `FusionCDE` class. Canonical search and model-run scripts record explicit `stribor` and fail closed rather than falling back; direct construction can request the same strict policy with `model_params={"flow_backend": "stribor"}`. `"nfe"` and related historical spellings are accepted only as input aliases and serialize as `stribor`. FusionCDE was introduced in `0.6.5` for semantic migration and remains outside the active 52-model registry.
+The final command validates the parity-oracle repository URL, commit, dependency versions, import location, and source files without importing its model code. The selector applies to `neuralflow`, `flowpath`, `dualdynamics`, and the shipped low-level `FusionCDE` class. Search resolves the requested backend once before trials, records `requested_backend` and `effective_backend`, and freezes the effective value through model-run; a changed execution environment is rejected. Results accepted as Stribor evidence must record `effective_backend="stribor"`. `"nfe"` and related historical spellings are input-only aliases and serialize as `stribor`. FusionCDE remains outside the active 52-model registry.
 
 **Source-checkout scripts require `torchcde`.** The `scripts/set_splits.py` -> `scripts/param_search.py` -> `scripts/model_run.py` pipeline shares one preprocessing path that builds interpolation coefficients with `torchcde`. This applies to sequence baselines too. Install `.[all]` (recommended) or at least `.[tune,cde]`.
 

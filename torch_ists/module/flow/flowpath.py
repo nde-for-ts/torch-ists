@@ -78,6 +78,9 @@ class FlowPath(nn.Module):
         self.used_flow_backend_fallback = (
             self.requested_flow_backend == "auto" and self.flow_backend == "native"
         )
+        self.flow_backend_fallback_reason = getattr(
+            self.flow_network, "fallback_reason", None
+        )
         self.linear = nn.Sequential(
             nn.Tanh(),
             nn.Linear(hidden, hidden),

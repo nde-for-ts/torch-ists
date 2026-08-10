@@ -50,6 +50,7 @@ from _common import (
     normalize_runtime_baseline_id,
     normalize_search_profile,
     omit_none_runtime_baseline_id,
+    prepare_flow_backend_config,
     resolve_dataset_fixed_batch_policy,
     resolve_learning_rate_policy,
     SINGLE_SEARCH_REPEAT,
@@ -119,6 +120,14 @@ def _normalize_search_profile_arg(raw: str) -> str:
         return normalize_search_profile(raw)
     except ValueError as exc:
         raise argparse.ArgumentTypeError(str(exc)) from exc
+
+
+def _flow_backend_manifest_fields(model_config: dict) -> dict:
+    return {
+        key: model_config[key]
+        for key in ("requested_backend", "effective_backend", "fallback_reason")
+        if model_config.get(key) is not None
+    }
 
 
 CONSTRAINED_SEARCH_POLICY = "constrained"
@@ -2317,6 +2326,12 @@ def run_model(
 ):
     task = str(task).strip().lower()
     validate_model_task_capability(model_name, task)
+    model_config = prepare_flow_backend_config(
+        model_name,
+        model_config,
+        require_recorded=True,
+    )
+    flow_backend_selection = _flow_backend_manifest_fields(model_config)
     effective_control_transform, consumes_coefficients = resolve_model_control_value_transform(
         model_name,
         control_value_transform,
@@ -2523,6 +2538,8 @@ def run_model(
         requested_control_value_transform=control_value_transform,
         control_time_source="auto",
     )
+    if flow_backend_selection:
+        output_contract["flow_backend"] = dict(flow_backend_selection)
     if CHECK and os.path.exists(out_path):
         _validate_existing_output_contract(
             out_path,
@@ -2843,6 +2860,8 @@ def run_model(
             control_time_transform=control_time_metadata,
         )
         payload.update(param_search_contract)
+        if flow_backend_selection:
+            payload["meta"]["flow_backend"] = dict(flow_backend_selection)
 
         # Save robustness results
         output_path = _build_output_path(
@@ -2941,6 +2960,7 @@ def run_model(
             "training_loop": training_loop_metadata,
             "coeff_cache": coeff_cache_summary,
             "control_value_transform": control_transform_metadata,
+            **flow_backend_selection,
         }
 
     # Normal mode: single test evaluation
@@ -3124,6 +3144,8 @@ def run_model(
         control_time_transform=control_time_metadata,
     )
     payload.update(param_search_contract)
+    if flow_backend_selection:
+        payload["meta"]["flow_backend"] = dict(flow_backend_selection)
     atomic_pickle_dump(payload, output_path)
     return {
         "dataset": data_name,
@@ -3153,6 +3175,7 @@ def run_model(
         "coeff_cache": coeff_cache_summary,
         "control_value_transform": control_transform_metadata,
         "control_time_transform": control_time_metadata,
+        **flow_backend_selection,
     }
 
 

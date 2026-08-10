@@ -76,6 +76,9 @@ class DualDynamics(nn.Module):
         self.used_flow_backend_fallback = (
             self.requested_flow_backend == "auto" and self.flow_backend == "native"
         )
+        self.flow_backend_fallback_reason = getattr(
+            self.flow_network, "fallback_reason", None
+        )
 
     def _normalize_seq_ts(self, x: torch.Tensor, seq_ts: torch.Tensor) -> torch.Tensor:
         if seq_ts.dim() == 1:

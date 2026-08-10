@@ -672,7 +672,8 @@ def _is_flowpath_model_name(model_name: str) -> bool:
 def _normalize_flow_backend_for_output(value: object) -> str:
     backend = str(value).strip().lower()
     aliases = {
-        "default": "stribor",
+        "default": "auto",
+        "auto": "auto",
         "native": "native",
         "stribor": "stribor",
         "nfe": "stribor",
@@ -682,9 +683,105 @@ def _normalize_flow_backend_for_output(value: object) -> str:
     normalized = aliases.get(backend)
     if normalized is None:
         raise ValueError(
-            f"Unsupported flow backend: {value!r}. Allowed backends: ['native', 'stribor']"
+            f"Unsupported flow backend: {value!r}. Allowed backends: ['auto', 'native', 'stribor']"
         )
     return normalized
+
+
+def prepare_flow_backend_config(
+    model_name: str,
+    model_config: dict,
+    *,
+    require_recorded: bool = False,
+) -> dict:
+    """Resolve a flow backend once and freeze it into an execution config."""
+    config = dict(model_config)
+    if not _is_flow_model_name(model_name):
+        return config
+
+    from torch_ists.module.flow import (
+        FlowBackendSelection,
+        assert_effective_backend_match,
+        freeze_model_params,
+        resolve_flow_backend,
+        resolve_flow_backend_once,
+    )
+
+    model_params = dict(config.get("model_params") or {})
+    recorded_request = config.get("requested_backend")
+    recorded_effective = config.get("effective_backend")
+    if (recorded_request is None) != (recorded_effective is None):
+        raise ValueError(
+            "Flow parameter artifacts must record requested_backend and "
+            "effective_backend together."
+        )
+
+    if recorded_request is None and recorded_effective is None:
+        configured_backend = model_params.get("flow_backend")
+        normalized_configured = (
+            None
+            if configured_backend is None
+            else resolve_flow_backend(configured_backend)
+        )
+        if require_recorded and normalized_configured not in {"stribor", "native"}:
+            raise ValueError(
+                "Flow execution requires a recorded backend selection. Regenerate "
+                "the parameter artifact or provide an explicitly recorded native "
+                "or stribor lineage."
+            )
+        request = normalized_configured or "auto"
+        selection = resolve_flow_backend_once(request)
+    else:
+        selection = resolve_flow_backend_once(recorded_request)
+        assert_effective_backend_match(config, selection)
+        expected = FlowBackendSelection(
+            str(recorded_request),
+            str(recorded_effective),
+            config.get("fallback_reason"),
+        )
+        if selection != expected:
+            raise ValueError(
+                "Parameter-search and model-run flow backends differ: "
+                f"params={expected.effective_backend!r}, "
+                f"run={selection.effective_backend!r}"
+            )
+
+    configured_backend = model_params.get("flow_backend")
+    if configured_backend is not None:
+        normalized_configured = resolve_flow_backend(configured_backend)
+        if normalized_configured != "auto" and normalized_configured != selection.effective_backend:
+            raise ValueError(
+                "Parameter model_params.flow_backend differs from the resolved "
+                f"effective backend: params={normalized_configured!r}, "
+                f"run={selection.effective_backend!r}"
+            )
+
+    config["model_params"] = freeze_model_params(model_params, selection)
+    config.update(selection.as_manifest_fields())
+    if selection.fallback_reason is None:
+        config.pop("fallback_reason", None)
+    return config
+
+
+def assert_flow_backend_execution_context(model_name: str, model_config: dict) -> None:
+    """Fail before a trial starts when its optional runtime differs from the driver."""
+    if not _is_flow_model_name(model_name):
+        return
+    from torch_ists.module.flow import (
+        FlowBackendSelection,
+        assert_backend_agreement,
+        resolve_flow_backend_once,
+    )
+
+    if model_config.get("requested_backend") is None or model_config.get("effective_backend") is None:
+        raise ValueError("Flow execution context is missing its frozen backend selection.")
+    expected = FlowBackendSelection(
+        str(model_config["requested_backend"]),
+        str(model_config["effective_backend"]),
+        model_config.get("fallback_reason"),
+    )
+    observed = resolve_flow_backend_once(expected.requested_backend)
+    assert_backend_agreement(expected, observed)
 
 
 def _default_flow_depth_for_model(model_name: str) -> int:
@@ -750,7 +847,6 @@ def _resolve_native_axis_metadata(normalized_model: str, profile: str) -> dict:
             depth_axis = "num_hidden_layers"
             native_axes = ["hidden_dim", "num_hidden_layers"]
             fixed_axes.append("flow_depth=1")
-            fixed_axes.append("model_params.flow_backend=stribor")
         else:
             depth_axis = "head_depth"
             native_axes = ["hidden_dim", "head_depth"]
@@ -758,7 +854,6 @@ def _resolve_native_axis_metadata(normalized_model: str, profile: str) -> dict:
                 native_axes.append("flow_depth")
             else:
                 fixed_axes.append("flow_depth")
-            fixed_axes.append("model_params.flow_backend=stribor")
     elif normalized_model in _SAND_MODELS:
         width_axis = "model_params.d_model"
         depth_axis = "model_params.n_layers"
@@ -908,7 +1003,7 @@ def resolve_effective_param_config(
         num_layers = 1
         num_hidden_layers = depth_level
         head_depth = depth_level
-        model_params.setdefault("flow_backend", "stribor")
+        model_params.setdefault("flow_backend", "auto")
     elif _is_flow_model_name(normalized_model):
         if _is_model_native_profile(profile):
             raw_flow_depth = config.get(
@@ -924,7 +1019,7 @@ def resolve_effective_param_config(
         num_layers = 1
         num_hidden_layers = depth_level
         head_depth = depth_level
-        model_params.setdefault("flow_backend", "stribor")
+        model_params.setdefault("flow_backend", "auto")
     elif normalized_model in _SAND_MODELS:
         flow_depth = _default_flow_depth_for_model(normalized_model)
         num_layers = 1

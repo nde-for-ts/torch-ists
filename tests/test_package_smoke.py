@@ -84,6 +84,8 @@ def test_source_distribution_manifest_is_complete():
     )
     assert all(entry in manifest for entry in required)
     flow_root = package_root / "torch_ists" / "module" / "flow"
+    assert (flow_root / "operators_stribor.py").is_file()
+    assert (flow_root / "backend_runtime.py").is_file()
     assert (flow_root / "operators_nfe.py").is_file()
     assert (flow_root / "nfe_reference.py").is_file()
     assert (flow_root / "NFE_PROVENANCE.json").is_file()
@@ -317,14 +319,13 @@ def test_latent_sde_uses_each_sample_terminal_kl_and_holds_tail(monkeypatch):
 
 
 def test_distributed_flow_backend_uses_stribor_first_with_native_fallback():
-    from torch_ists.module.flow import resolve_flow_backend
+    from torch_ists.module.flow import resolve_flow_backend, resolve_flow_backend_once
     from torch_ists.module.flow.nfe_reference import (
-        NFEInstallationError,
         PINNED_NFE_COMMIT,
-        validate_nfe_installation,
     )
     from torch_ists.module.flow.operators import build_flow_operator
     from torch_ists.module.flow.operators_native import CouplingFlow, GRUFlow, ResNetFlow
+    from torch_ists.module.flow.operators_stribor import StriborBackendUnavailableError
 
     flow_root = Path(torch_ists.__file__).resolve().parent / "module" / "flow"
     assert resolve_flow_backend(None) == "auto"
@@ -332,23 +333,23 @@ def test_distributed_flow_backend_uses_stribor_first_with_native_fallback():
     assert resolve_flow_backend("nfe") == "stribor"
     assert not (flow_root / "_nfe_guard.py").exists()
     assert not (flow_root / "_neural_flows").exists()
+    assert (flow_root / "operators_stribor.py").is_file()
+    assert (flow_root / "backend_runtime.py").is_file()
     assert (flow_root / "operators_nfe.py").is_file()
     provenance = json.loads((flow_root / "NFE_PROVENANCE.json").read_text(encoding="utf-8"))
     assert provenance["source_commit"] == PINNED_NFE_COMMIT
     assert provenance["source_code_bundled"] is False
 
-    validation = validate_nfe_installation()
-    if validation["valid"]:
-        reference_flow = build_flow_operator(
+    try:
+        direct_flow = build_flow_operator(
             flow_option="r",
             backend="stribor",
             dim=3,
             n_layers=2,
             hidden_dims=[5],
         )
-        assert reference_flow.backend == "stribor"
-    else:
-        with pytest.raises(NFEInstallationError, match="pinned external checkout"):
+    except StriborBackendUnavailableError:
+        with pytest.raises(StriborBackendUnavailableError):
             build_flow_operator(
                 flow_option="r",
                 backend="stribor",
@@ -356,6 +357,10 @@ def test_distributed_flow_backend_uses_stribor_first_with_native_fallback():
                 n_layers=2,
                 hidden_dims=[5],
             )
+        expected_backend = "native"
+    else:
+        assert direct_flow.backend == "stribor"
+        expected_backend = "stribor"
 
     selected = build_flow_operator(
         flow_option="r",
@@ -364,7 +369,8 @@ def test_distributed_flow_backend_uses_stribor_first_with_native_fallback():
         n_layers=2,
         hidden_dims=[5],
     )
-    assert selected.backend == ("stribor" if validation["valid"] else "native")
+    assert selected.backend == expected_backend
+    assert resolve_flow_backend_once("auto").effective_backend == expected_backend
 
     x = torch.randn(2, 4, 3)
     zero_time = torch.zeros(2, 4, 1)
