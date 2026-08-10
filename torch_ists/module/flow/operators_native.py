@@ -66,6 +66,56 @@ def _prepare_reference_time(t0: torch.Tensor, state: torch.Tensor) -> torch.Tens
     return t0.to(device=state.device, dtype=state.dtype)
 
 
+def _validate_inverse_inputs(
+    state: torch.Tensor,
+    time: torch.Tensor,
+    *,
+    context: str,
+) -> None:
+    if not bool(torch.isfinite(state).all()):
+        raise ValueError(f"{context} inverse state must be finite")
+    if not bool(torch.isfinite(time).all()):
+        raise ValueError(f"{context} inverse time must be finite")
+
+
+def _validate_inverse_result(
+    state: torch.Tensor,
+    *,
+    context: str,
+) -> None:
+    if not bool(torch.isfinite(state).all()):
+        raise RuntimeError(f"{context} inverse produced a non-finite state")
+
+
+def _fixed_point_inverse(
+    y: torch.Tensor,
+    t: torch.Tensor,
+    *,
+    update,
+    iterations: int,
+    context: str,
+) -> torch.Tensor:
+    resolved_iterations = max(1, int(iterations))
+    x = y
+    for _ in range(resolved_iterations):
+        x = y - update(x, t)
+    _validate_inverse_result(x, context=context)
+
+    residual = x + update(x, t) - y
+    _validate_inverse_result(residual, context=f"{context} residual")
+    dtype = x.dtype if torch.is_floating_point(x) else torch.float32
+    tolerance = 32.0 * torch.finfo(dtype).eps
+    scale = torch.maximum(
+        x.detach().abs().amax(),
+        y.detach().abs().amax(),
+    ).clamp_min(1.0)
+    if bool((residual.detach().abs().amax() > tolerance * scale).item()):
+        raise RuntimeError(
+            f"{context} inverse did not converge within {resolved_iterations} iterations"
+        )
+    return x
+
+
 class _TimeTanh(nn.Module):
     """Learned zero-origin time modulation."""
 
@@ -133,11 +183,21 @@ class _ResNetFlowBlock(nn.Module):
     def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         return x + self._update(x, t)
 
-    def inverse(self, y: torch.Tensor, t: torch.Tensor, iterations: int = 100) -> torch.Tensor:
-        x = y
-        for _ in range(max(1, int(iterations))):
-            x = y - self._update(x, t)
-        return x
+    def inverse(
+        self,
+        y: torch.Tensor,
+        t: torch.Tensor,
+        iterations: int = 100,
+        *,
+        context: str = "ResNetFlow",
+    ) -> torch.Tensor:
+        return _fixed_point_inverse(
+            y,
+            t,
+            update=self._update,
+            iterations=iterations,
+            context=context,
+        )
 
 
 class ResNetFlow(nn.Module):
@@ -173,8 +233,15 @@ class ResNetFlow(nn.Module):
 
     def inverse(self, y: torch.Tensor, t: torch.Tensor, iterations: int = 100) -> torch.Tensor:
         y, t = _prepare_inputs(y, t, dim=self.dim)
-        for layer in reversed(self.layers):
-            y = layer.inverse(y, t, iterations=iterations)
+        _validate_inverse_inputs(y, t, context="ResNetFlow")
+        for reverse_index, layer in enumerate(reversed(self.layers)):
+            layer_index = self.num_layers - 1 - reverse_index
+            y = layer.inverse(
+                y,
+                t,
+                iterations=iterations,
+                context=f"ResNetFlow layer {layer_index}",
+            )
         return y
 
 
@@ -203,11 +270,21 @@ class _GRUFlowBlock(nn.Module):
     def forward(self, h: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         return h + self._update(h, t)
 
-    def inverse(self, y: torch.Tensor, t: torch.Tensor, iterations: int = 100) -> torch.Tensor:
-        x = y
-        for _ in range(max(1, int(iterations))):
-            x = y - self._update(x, t)
-        return x
+    def inverse(
+        self,
+        y: torch.Tensor,
+        t: torch.Tensor,
+        iterations: int = 100,
+        *,
+        context: str = "GRUFlow",
+    ) -> torch.Tensor:
+        return _fixed_point_inverse(
+            y,
+            t,
+            update=self._update,
+            iterations=iterations,
+            context=context,
+        )
 
 
 class GRUFlow(nn.Module):
@@ -233,8 +310,15 @@ class GRUFlow(nn.Module):
 
     def inverse(self, y: torch.Tensor, t: torch.Tensor, iterations: int = 100) -> torch.Tensor:
         y, t = _prepare_inputs(y, t, dim=self.dim)
-        for layer in reversed(self.layers):
-            y = layer.inverse(y, t, iterations=iterations)
+        _validate_inverse_inputs(y, t, context="GRUFlow")
+        for reverse_index, layer in enumerate(reversed(self.layers)):
+            layer_index = self.num_layers - 1 - reverse_index
+            y = layer.inverse(
+                y,
+                t,
+                iterations=iterations,
+                context=f"GRUFlow layer {layer_index}",
+            )
         return y
 
 
@@ -281,12 +365,22 @@ class _CouplingFlowLayer(nn.Module):
         changed = x * torch.exp(log_scale) + shift
         return frozen + changed * (1.0 - mask)
 
-    def inverse(self, y: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+    def inverse(
+        self,
+        y: torch.Tensor,
+        t: torch.Tensor,
+        *,
+        context: str = "CouplingFlow",
+    ) -> torch.Tensor:
         mask = self._mask(y)
         frozen = y * mask
         shift, log_scale = self._affine_parameters(frozen, t, mask)
+        _validate_inverse_result(shift, context=f"{context} shift")
+        _validate_inverse_result(log_scale, context=f"{context} log-scale")
         changed = (y - shift) * torch.exp(-log_scale)
-        return frozen + changed * (1.0 - mask)
+        result = frozen + changed * (1.0 - mask)
+        _validate_inverse_result(result, context=context)
+        return result
 
 
 class CouplingFlow(nn.Module):
@@ -322,8 +416,10 @@ class CouplingFlow(nn.Module):
 
     def inverse(self, y: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         y, t = _prepare_inputs(y, t, dim=self.dim)
-        for layer in reversed(self.layers):
-            y = layer.inverse(y, t)
+        _validate_inverse_inputs(y, t, context="CouplingFlow")
+        for reverse_index, layer in enumerate(reversed(self.layers)):
+            layer_index = self.num_layers - 1 - reverse_index
+            y = layer.inverse(y, t, context=f"CouplingFlow layer {layer_index}")
         return y
 
 
