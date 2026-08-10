@@ -732,19 +732,24 @@ def prepare_flow_backend_config(
         request = normalized_configured or "auto"
         selection = resolve_flow_backend_once(request)
     else:
-        selection = resolve_flow_backend_once(recorded_request)
-        assert_effective_backend_match(config, selection)
         expected = FlowBackendSelection(
             str(recorded_request),
             str(recorded_effective),
             config.get("fallback_reason"),
         )
-        if selection != expected:
-            raise ValueError(
-                "Parameter-search and model-run flow backends differ: "
-                f"params={expected.effective_backend!r}, "
-                f"run={selection.effective_backend!r}"
-            )
+        if expected.requested_backend == "auto":
+            # Parameter search resolves ``auto`` once. Final execution consumes
+            # that recorded numerical backend instead of probing a new host.
+            selection = expected
+        else:
+            selection = resolve_flow_backend_once(expected.requested_backend)
+            assert_effective_backend_match(config, selection)
+            if selection != expected:
+                raise ValueError(
+                    "Parameter-search and model-run flow backends differ: "
+                    f"params={expected.effective_backend!r}, "
+                    f"run={selection.effective_backend!r}"
+                )
 
     configured_backend = model_params.get("flow_backend")
     if configured_backend is not None:

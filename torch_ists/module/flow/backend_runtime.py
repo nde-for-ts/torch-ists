@@ -5,11 +5,19 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Mapping
 
-from .operators import resolve_flow_backend
+from .operators import AUTO_FALLBACK_REASON, resolve_flow_backend
 from .operators_stribor import StriborBackendUnavailableError, require_stribor
 
 
-AUTO_FALLBACK_REASON = "optional_backend_unavailable"
+_FALLBACK_REASON_ALIASES = {
+    "optional_backend_unavailable": AUTO_FALLBACK_REASON,
+}
+_FALLBACK_REASONS = {
+    AUTO_FALLBACK_REASON,
+    "dependency_mismatch",
+    "identity_mismatch",
+    "family_profile_incompatible",
+}
 
 
 @dataclass(frozen=True)
@@ -21,16 +29,29 @@ class FlowBackendSelection:
     def __post_init__(self) -> None:
         requested = resolve_flow_backend(self.requested_backend)
         effective = resolve_flow_backend(self.effective_backend)
+        fallback_reason = self.fallback_reason
+        if fallback_reason is not None:
+            fallback_reason = str(fallback_reason).strip().lower()
+            fallback_reason = _FALLBACK_REASON_ALIASES.get(
+                fallback_reason,
+                fallback_reason,
+            )
+            if fallback_reason not in _FALLBACK_REASONS:
+                raise ValueError(
+                    "Unsupported fallback_reason. Allowed: "
+                    f"{sorted(_FALLBACK_REASONS)}"
+                )
         if effective == "auto":
             raise ValueError("effective_backend must be 'stribor' or 'native', not 'auto'")
         if requested != "auto" and requested != effective:
             raise ValueError("explicit flow backend requests cannot change effective backend")
-        if self.fallback_reason is not None and not (
+        if fallback_reason is not None and not (
             requested == "auto" and effective == "native"
         ):
             raise ValueError("fallback_reason is valid only for auto-to-native selection")
         object.__setattr__(self, "requested_backend", requested)
         object.__setattr__(self, "effective_backend", effective)
+        object.__setattr__(self, "fallback_reason", fallback_reason)
 
     def as_manifest_fields(self) -> dict[str, str]:
         fields = {

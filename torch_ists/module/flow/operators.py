@@ -11,6 +11,9 @@ from .operators_native import (
 )
 
 
+AUTO_FALLBACK_REASON = "external_unavailable"
+
+
 _FLOW_OPTION_TO_NATIVE_CLASS = {
     "r": NativeResNetFlow,
     "g": NativeGRUFlow,
@@ -109,11 +112,12 @@ def build_flow_operator(
         return _build_stribor(option, dim, n_layers, hidden_dims)
     except StriborBackendUnavailableError:
         operator = _build_native(option, dim, n_layers, hidden_dims)
-        operator.fallback_reason = "optional_backend_unavailable"
+        operator.fallback_reason = AUTO_FALLBACK_REASON
         return operator
 
 
 __all__ = [
+    "AUTO_FALLBACK_REASON",
     "build_flow_operator",
     "resolve_flow_backend",
 ]
