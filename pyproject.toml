@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "torch-ists"
-version = "0.7.4"
+version = "0.7.5"
 description = "PyTorch package for irregular time series modeling"
 readme = "README.md"
 license = { text = "MIT" }
@@ -67,7 +67,7 @@ cde = [
 ]
 
 # Direct flow operators built from the supported MIT Stribor runtime.
-# The external Neural Flows checkout is a development parity oracle only.
+# The external Neural Flows checkout is optional and used only for exact-reference comparisons.
 flow = [
     "stribor==0.1.0",
 ]

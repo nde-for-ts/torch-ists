@@ -42,19 +42,18 @@
 ```bash
 # editable install from the package checkout
 cd torch-ists
-PYTHONNOUSERSITE=1 python -m pip install -e .
+python -m pip install -e .
 ```
 
 For the included command-line scripts, including `scripts/param_search.py`:
 
 ```bash
 cd torch-ists
-PYTHONNOUSERSITE=1 python -m pip install -e .[tune]
+python -m pip install -e .[tune]
 ```
 
 Environment:
 
-- `PYTHONNOUSERSITE=1` is recommended for isolated script commands
 - `Python >= 3.10`
 - `.[tune]` is required for Ray Tune-backed parameter search
 - `.[data]` installs `pandas` and `sktime` for `torch_ists.benchmark_loader`
@@ -67,7 +66,7 @@ Environment:
 - `signatory` is intentionally not included in `.[all]` because the PyPI wheel is torch-version-pinned
 
 ```bash
-PYTHONNOUSERSITE=1 python -m pip install --no-build-isolation -e .[signatory]
+python -m pip install --no-build-isolation -e .[signatory]
 ```
 
 ### 1.2 Basic Usage
@@ -97,6 +96,8 @@ logits = model(seq, coeffs=coeffs)
 Coefficient-driven rows consume the `coeffs` returned by `preprocess`. Direct sequence, attention, and event-driven rows such as ODE-LSTM, Neural Jump ODE (NJ-ODE), and LatentSDE accept `coeffs=None` and use the sequence stack directly.
 
 Import package as `torch_ists`.
+
+The installed package version is available as `torch_ists.__version__`. Model discovery is available through `get_active_model_list()` and `get_model_capabilities(...)` without importing optional model backends.
 
 ---
 
@@ -270,8 +271,7 @@ The Data Loading API provides:
 1. **Custom Data Loading**: `DataLoader` factory (from_numpy, from_dataframe, from_file)
 2. **Built-in Benchmark Loader**: `benchmark_loader.download()` / `benchmark_loader.get_data()`
 
-**Exported**: `DataLoader`, `DatasetBundle`, `benchmark_loader`,
-`get_active_model_list`, `get_model_capabilities`
+**Exported**: `DataLoader`, `DatasetBundle`, `benchmark_loader`, `get_active_model_list`, `get_model_capabilities`
 
 `DataLoader` is for user-provided arrays, data frames, and files. The `benchmark_loader` submodule is the built-in archive loader used by the benchmark scripts. For the end-to-end user-provided dataset workflow, see [Custom Data Guide](custom_data_guide.md).
 
@@ -283,16 +283,9 @@ benchmark_loader.download(data_root=data_root)
 X, y = benchmark_loader.get_data("BasicMotions", data_root=data_root)
 ```
 
-Install `.[data]` for the optional `pandas` and `sktime` dependencies. `download(data_root=...)`
-retrieves each HTTPS asset into a temporary path, verifies its pinned SHA-256 digest, validates
-archive structure, and atomically installs it. A cache is reused offline only when its sidecar
-attests the same URL, digest, and target. `get_data(..., data_root=...)` searches only the
-explicit root before failing. Without an explicit root, the loader uses `TORCH_ISTS_DATA_ROOT`
-when set, otherwise `<package checkout>/data`.
+Install `.[data]` for the optional `pandas` and `sktime` dependencies. `download(data_root=...)` retrieves each HTTPS asset into a temporary path, verifies its pinned SHA-256 digest, validates archive structure, and atomically installs it. A cache is reused offline only when its sidecar attests the same URL, digest, and target. `get_data(..., data_root=...)` searches only the explicit root before failing. Without an explicit root, the loader uses `TORCH_ISTS_DATA_ROOT` when set, otherwise `<package checkout>/data`.
 
-`get_active_model_list()` reports the installed registry. `get_model_capabilities(name)`
-returns the canonical name, coefficient-consumption flag, interpolation setting, intensity use,
-and task capabilities for one active model.
+`get_active_model_list()` reports the installed registry. `get_model_capabilities(name)` returns the canonical name, coefficient-consumption flag, interpolation setting, intensity use, and task capabilities for one active model.
 
 Benchmark loader behavior: the included scripts pool the original UCR/UEA train and test partitions before creating split files. Variable-length series are padded to the pooled train+test maximum length with `NaN` by default, and labels default to pooled train+test encoding. Use `get_data(..., label_policy="train", padding="last")` only to reproduce older benchmark preprocessing.
 
@@ -306,7 +299,31 @@ The loader concatenates the original UCR/UEA train and test partitions before th
 
 ---
 
-### 3.1 `DataLoader.from_numpy()`
+### 3.1 `benchmark_loader.download()` / `benchmark_loader.get_data()`
+
+Download verified benchmark assets or load one UCR/UEA dataset from an explicit cache root.
+
+#### Signatures
+
+```python
+def download(*, data_root=None, manifest=None):
+    ...
+
+def get_data(
+    dataname,
+    *,
+    label_policy: str = "pooled",
+    padding: str = "nan",
+    data_root=None,
+):
+    ...
+```
+
+`download(...)` returns the resolved data root after verifying every configured asset. `get_data(...)` returns `(X, y)`, with `X [N,D,L]`; variable-length inputs use `NaN` padding by default. `manifest` is an optional sequence of asset dictionaries with `name`, HTTPS `url`, SHA-256 `sha256`, relative `target`, and archive `kind` fields.
+
+---
+
+### 3.2 `DataLoader.from_numpy()`
 
 Load user-provided data from NumPy arrays.
 
@@ -359,12 +376,11 @@ bundle = DataLoader.from_numpy(X, y)
 print(bundle.X.shape)  # (100, 8, 64)
 ```
 
-Unknown task names fail before a bundle is created. `DatasetBundle.summary()` reports `task`, actual
-target shape, and target dtype; classification summaries additionally report `num_classes`.
+Unknown task names fail before a bundle is created. `DatasetBundle.summary()` reports `task`, actual target shape, and target dtype; classification summaries additionally report `num_classes`.
 
 ---
 
-### 3.2 `DataLoader.from_dataframe()`
+### 3.3 `DataLoader.from_dataframe()`
 
 Load user-provided data from pandas DataFrame (long format).
 
@@ -384,10 +400,7 @@ def from_dataframe(
 ) -> DatasetBundle:
 ```
 
-The long-format loader currently accepts scalar-per-series `classification`, `regression`, and
-`outlier_detection` targets. Every row in a series must carry the same target. Classification targets
-must be finite and integer-like; regression targets retain their numeric dtype, including fractional
-values. Tasks that require structured targets fail before sequence arrays are allocated.
+The long-format loader currently accepts scalar-per-series `classification`, `regression`, and `outlier_detection` targets. Every row in a series must carry the same target. Classification targets must be finite and integer-like; regression targets retain their numeric dtype, including fractional values. Tasks that require structured targets fail before sequence arrays are allocated.
 
 #### Example
 
@@ -415,7 +428,7 @@ print(bundle.X.shape)  # (2, 2, 3)
 
 ---
 
-### 3.3 `DataLoader.from_file()`
+### 3.4 `DataLoader.from_file()`
 
 Load user-provided data from file (npz, csv, parquet). The Python API accepts CSV and parquet through `DataLoader.from_file`; the included scripts accept built-in benchmark data and local NPZ files only.
 
@@ -446,6 +459,10 @@ bundle = DataLoader.from_file(
     label_col='label',
 )
 ```
+
+### 3.5 `DatasetBundle`
+
+`DatasetBundle` stores `X`, `y`, optional `timestamps`, and a metadata dictionary. `summary()` returns shapes, dtypes, missing-value counts, timestamp availability, task metadata, and `num_classes` for classification targets.
 
 ---
 
@@ -523,11 +540,7 @@ def preprocess(
 3. `X_delta`: `[N, L, D]` - Time-since-last-observation (index-based)
 4. `coeffs`: interpolation coefficients, or `None` when `build_coeffs=False`. The tensor's trailing channel dimension depends on the interpolation mode and whether intensity channels are included.
 
-If `return_control_value_transform=True`, a fifth item contains the fitted transform state.
-Standardization applies only to finite observed value channels used to construct coefficients;
-time and intensity channels are unchanged, and missing entries remain missing. An omitted
-transform on a coefficient-consuming model requires explicit training indices or a fitted state.
-Explicit `identity` remains numerically identical to the earlier four-output behavior.
+If `return_control_value_transform=True`, a fifth item contains the fitted transform state. Standardization applies only to finite observed value channels used to construct coefficients; time and intensity channels are unchanged, and missing entries remain missing. An omitted transform on a coefficient-consuming model requires explicit training indices or a fitted state. Explicit `identity` remains numerically identical to the earlier four-output behavior.
 
 If `return_control_time_transform=True`, the control-time state is appended after the usual outputs and after the value-transform state when both are requested. Timestamp validation and origin subtraction occur in float64 before conversion to model dtype; the physical-time unit is fitted from training-split positive gaps only.
 
@@ -793,8 +806,7 @@ The classifier returns logits only.
 `file` is an optional compatibility / pass-through parameter and should be left unset (`file=None`) for normal use; this also applies to `ists_model` and `ists_layer`.
 
 Behavior notes:
-- Calling `.to(...)` after construction moves the complete model normally. Forward-time input routing
-  derives the live device from module parameters or buffers instead of a constructor-time string.
+- Calling `.to(...)` after construction moves the complete model normally. Forward-time input routing derives the live device from module parameters or buffers instead of a constructor-time string.
 - If `use_intensity` is omitted (`None`), runtime resolves it from `get_data_config(model_name)`.
 - `method` is a solver argument for continuous-time methods. Effective solver behavior remains model-specific; the package does not promise one package-wide default across ODE/CDE/SDE methods.
 - NeuralFlow (`neuralflow-*`) is flow-only and does not use a numerical solver; active solver settings raise `ValueError` instead of being ignored. The neutral shared-call setting `adjoint=False` is accepted for compatibility. Its default native transforms are identity at zero elapsed time, provide inverse transforms, and only expand a singleton initial-state time axis; other state/time length mismatches raise `ValueError`.
@@ -949,7 +961,7 @@ Current defaults:
 - `fusioncde`: `flow_depth=1` by default
 - `neuralflow` uses the residual-flow variant by default as a flow-only row. `dualdynamics` and `flowpath` are CDE/control-path rows. FlowPath builds its learned control from the raw value/time path and accepts but does not consume interpolation coefficients.
 - `flow_backend="auto"` is the runtime default for all flow models. A core-only install falls back to package-authored native operators; installing `.[flow]` provides `stribor==0.1.0` and makes `auto` select the package-owned direct Stribor adapter without an external checkout. Explicit `stribor` is fail-closed and explicit `native` bypasses the optional-runtime probe. Runtime objects expose `requested_flow_backend`, effective `flow_backend`, `used_flow_backend_fallback`, and the enumerated fallback reason when applicable. Older `nfe` spellings are input-only aliases and normalize to `stribor`. Search resolves once before trials, freezes the effective backend, and model-run rejects a recorded/runtime mismatch.
-- `fusioncde-r/g/c` preserve the prevalidated coefficient-augmented flow/CDE dataflow under a distinct descriptive family name. They consume interpolation coefficients and therefore use train-observed value standardization by default in packaged workflows.
+- `fusioncde-r/g/c` provide the coefficient-augmented flow/CDE dataflow under a distinct descriptive name. They consume interpolation coefficients and therefore use train-observed value standardization by default in packaged workflows.
 - Model names use residual-flow defaults: `neuralflow`, `dualdynamics`, `flowpath`, and `fusioncde`. Explicit `-r/-g/-c` variants remain accepted variants.
 
 Compatibility mapping:
@@ -972,7 +984,25 @@ The config API provides model metadata, model-specific preprocessing settings, a
 
 ---
 
-### 7.1 `get_data_config()`
+### 7.1 `get_active_model_list()` / `get_model_capabilities()`
+
+Inspect the installed model names and one model's data-path and task capabilities.
+
+#### Signatures
+
+```python
+def get_active_model_list(scope: str = "active") -> list:
+    ...
+
+def get_model_capabilities(model_name: str) -> dict[str, object]:
+    ...
+```
+
+Both functions are exported from top-level `torch_ists`. `get_active_model_list()` returns a copy of the installed canonical-name list. `get_model_capabilities(...)` accepts canonical names and documented aliases, then returns the canonical name, active status, coefficient-consumption flag, interpolation mode, intensity use, and task-capability dictionary. Unknown names raise `ValueError`.
+
+---
+
+### 7.2 `get_data_config()`
 
 Get model-specific preprocessing settings used by `preprocess(X, model_name=...)`.
 
@@ -1002,6 +1032,7 @@ def get_data_config(model_name: str) -> Dict[str, Any]:
 | `neuralrde-1/2/3` | `'natural'` | `False` | consumes `coeffs`; computes log-signature control paths at the selected depth |
 | `ancde`, `exit`, `leap` | `'natural'` | `False` | consumes `coeffs`; uses CDE control paths with `rk4` and a fixed-grid step from input times |
 | `dualdynamics` and explicit variants | `'hermite'` | `False` | consumes `coeffs`; uses flow-based CDE/control-path dynamics |
+| `fusioncde` and explicit variants | `'hermite'` | `False` | consumes `coeffs`; combines the raw path with a fixed-spline control |
 | `flowpath` and explicit variants | `'hermite'` | `False` | accepts but ignores `coeffs`; builds a learned control from the raw value/time path with mask-aware missing-value handling |
 | `gru-d`, `gru-dt`, `ode-rnn-spline` | `'natural'` | `True` | consumes `coeffs` with intensity channels |
 | `gru-ode` | `'natural'` | `False` | consumes `coeffs` |
@@ -1035,7 +1066,7 @@ For sequence baselines, `transformer`, `transformer-mask`, `sand`, `mtan`, `miam
 
 ---
 
-### 7.2 `has_auxiliary_loss()`
+### 7.3 `has_auxiliary_loss()`
 
 Check if model returns auxiliary loss.
 

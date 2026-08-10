@@ -1,4 +1,4 @@
-"""Run-level flow-backend selection and lineage checks."""
+"""Run-level flow-backend selection and compatibility checks."""
 
 from __future__ import annotations
 

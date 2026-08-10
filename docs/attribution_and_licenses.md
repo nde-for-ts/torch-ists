@@ -96,7 +96,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 ### NeuralFlow reference implementation
 
-The `neuralflow` family is informed by the residual, GRU-style, and coupling architectures introduced in *Neural Flows: Efficient Alternative to Neural ODEs* (Biloš, Sommer, Rangapuram, Januschowski, Günnemann; NeurIPS 2021). The reference implementation is [`mbilos/neural-flows-experiments`](https://github.com/mbilos/neural-flows-experiments). That repository does not publish a LICENSE file, so this distribution does not bundle its source. The operators in `flow/operators_native.py` are package-authored adaptations and are not claimed to be source-identical or numerically exact reproductions. The optional `flow` extra installs the MIT [`stribor==0.1.0`](https://github.com/mbilos/stribor) runtime; `flow/operators_stribor.py` constructs the supported operators directly from its public API and does not import the external Neural Flows checkout. That checkout remains an optional development parity oracle pinned to commit `bd19f7c92461e83521e268c1a235ef845a3dd963`. `flow/NFE_PROVENANCE.json` records the oracle files used by those tests. Older `nfe` spellings remain input aliases only.
+The `neuralflow` family is informed by the residual, GRU-style, and coupling architectures introduced in *Neural Flows: Efficient Alternative to Neural ODEs* (Biloš, Sommer, Rangapuram, Januschowski, Günnemann; NeurIPS 2021). The reference implementation is [`mbilos/neural-flows-experiments`](https://github.com/mbilos/neural-flows-experiments). That repository does not publish a LICENSE file, so this distribution does not bundle its source. The operators in `flow/operators_native.py` are package-authored adaptations and are not claimed to be source-identical or numerically exact reproductions. The optional `flow` extra installs the MIT [`stribor==0.1.0`](https://github.com/mbilos/stribor) runtime; `flow/operators_stribor.py` constructs the supported operators directly from its public API and does not import the external Neural Flows checkout. That checkout is optional and pinned to commit `bd19f7c92461e83521e268c1a235ef845a3dd963` for exact-reference comparisons. `flow/NFE_PROVENANCE.json` records the reference files used by those checks. Older `nfe` spellings remain input compatibility aliases only.
 
 ## Benchmark datasets
 
@@ -113,7 +113,7 @@ Installed separately, each under its own license (not bundled):
 - **Core**: `torch`, `numpy`, `scipy`, `scikit-learn`
 - **Continuous-time backends** (`.[ode]` / `.[cde]` / `.[sde]`): `torchdiffeq`, `torchdyn`, `torchcde`, `torchsde`
 - **Direct flow backend** (`.[flow]`): [`stribor==0.1.0`](https://github.com/mbilos/stribor) (MIT)
-- **Optional NeuralFlow parity oracle**: `torchdiffeq==0.2.1` (MIT) plus the separately installed pinned NFE checkout; it is not an ordinary runtime dependency and is not bundled because its repository does not publish a license
+- **Optional NeuralFlow exact-reference comparison**: `torchdiffeq==0.2.1` (MIT) plus the separately installed pinned NFE checkout; it is not an ordinary runtime dependency and is not bundled because its repository does not publish a license
 - **Neural RDE log-signatures** (source-build optional extra): `signatory`
 - **Optional** (`.[tune]` / `.[data]`): `ray[tune]`, `pandas`, `sktime`
 

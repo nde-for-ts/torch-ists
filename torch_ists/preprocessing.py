@@ -1068,7 +1068,3 @@ def preprocess_compat(
         interpolate=interpolate,
         use_intensity=use_intensity,
     )
-
-
-apply_missingness_refactoring_compat = apply_missingness_compat
-preprocess_refactoring_compat = preprocess_compat

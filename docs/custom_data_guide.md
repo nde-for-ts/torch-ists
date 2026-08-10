@@ -36,7 +36,7 @@ Current limitations:
 - registering a new dataset catalog entry inside the package
 - preserving the original UCR/UEA train/test split in the packaged benchmark loader
 - per-sample timestamp solver grids in packaged model forward calls
-- bundled benchmark runner scripts; orchestration scripts are not part of the public package payload
+- CSV or parquet input directly through source-checkout scripts; use `DataLoader.from_file(...)` instead
 
 ## 2. Input Data Format
 
@@ -96,10 +96,7 @@ bundle = DataLoader.from_file(
 )
 ```
 
-`DataLoader.from_dataframe` and CSV/parquet `from_file` return a `DatasetBundle` without writing NPZ.
-Pass `task="regression"` to preserve fractional regression targets. Unknown task names, inconsistent
-targets within a series, non-integer classification labels, and DataFrame tasks requiring structured
-targets fail closed. Persist `bundle.X` and `bundle.y` when you need a portable array payload.
+`DataLoader.from_dataframe` and CSV/parquet `from_file` return a `DatasetBundle` without writing NPZ. Pass `task="regression"` to preserve fractional regression targets. Unknown task names, inconsistent targets within a series, non-integer classification labels, and DataFrame tasks requiring structured targets fail closed. Persist `bundle.X` and `bundle.y` when you need a portable array payload.
 
 ## 5. Generate or Reuse Splits
 
@@ -127,10 +124,7 @@ save_splits(path, train_idx, valid_idx, test_idx)
 
 Continuous-time interpolation coefficients still use the package's normalized sequence grid.
 
-When `model_name` is supplied, `interpolate` and `use_intensity` default to
-`get_data_config(model_name)`; explicit kwargs override. Coefficient-consuming models also
-default to train-observed standardization, so direct calls must pass training indices or reuse a
-fitted transform state. Explicit `control_value_transform="identity"` remains available.
+When `model_name` is supplied, `interpolate` and `use_intensity` default to `get_data_config(model_name)`; explicit kwargs override. Coefficient-consuming models also default to train-observed standardization, so direct calls must pass training indices or reuse a fitted transform state. Explicit `control_value_transform="identity"` remains available.
 
 Missingness controls:
 
@@ -141,9 +135,7 @@ Missingness controls:
 | `seed` | `0` | Controls synthetic missingness sampling. |
 | `channel_sync` | `False` | If true, synthetic missing time indices are shared across feature channels. |
 
-Sequence and attention baselines can call
-`preprocess(X, model_name=..., build_coeffs=False)` to obtain the sequence stack without
-installing `torchcde`. CDE/SDE/continuous-time methods need coefficient construction.
+Sequence and attention baselines can call `preprocess(X, model_name=..., build_coeffs=False)` to obtain the sequence stack without installing `torchcde`. CDE/SDE/continuous-time methods need coefficient construction.
 
 ## 7. Validation Checklist
 

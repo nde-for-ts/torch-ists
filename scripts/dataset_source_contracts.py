@@ -10,7 +10,6 @@ import numpy as np
 
 
 PRIMARY_DATASET_SOURCES = frozenset({"default", "npz"})
-COMPAT_DATASET_SOURCE_ALIASES = {"refactoring": "default"}
 TIMESTAMP_COMMON_GRID_ATOL = 1e-6
 
 
@@ -24,7 +23,6 @@ class DatasetPayload:
 
 def normalize_dataset_source(dataset_source: str) -> str:
     normalized = str(dataset_source).strip().lower()
-    normalized = COMPAT_DATASET_SOURCE_ALIASES.get(normalized, normalized)
     if normalized not in PRIMARY_DATASET_SOURCES:
         raise ValueError(
             f"Unsupported dataset_source: {dataset_source!r}. "
@@ -299,9 +297,6 @@ def load_default_dataset_payload(dataset_name: str) -> DatasetPayload:
 def load_default_dataset(dataset_name: str) -> Tuple[np.ndarray, np.ndarray]:
     payload = load_default_dataset_payload(dataset_name)
     return payload.X, payload.y
-
-
-load_dataset_refactoring = load_default_dataset
 
 
 def load_dataset_payload(

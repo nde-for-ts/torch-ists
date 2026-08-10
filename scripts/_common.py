@@ -555,7 +555,7 @@ _PARAM_ARTIFACT_INTEGRITY_SENTINELS = (
 
 
 def is_pre_integrity_param_artifact(model_config: dict | None) -> bool:
-    """Return True for pre-0.3.2 param artifacts that lack integrity metadata."""
+    """Return True for parameter artifacts that lack integrity metadata."""
     if not isinstance(model_config, dict) or not model_config:
         return False
     return all(
@@ -584,8 +584,8 @@ def validate_param_artifact_metadata(
         if not allow_compatibility_search_profile:
             raise ValueError(
                 f"{context} is missing required field 'search_profile'. "
-                "Regenerate params with scripts/param_search.py. Hidden compatibility "
-                "profile compatibility must be explicitly opted in for audits."
+                "Regenerate params with scripts/param_search.py. Compatibility search "
+                "profiles require explicit opt-in."
             )
         profile = REPRODUCTION_SEARCH_PROFILE
     else:
@@ -727,7 +727,7 @@ def prepare_flow_backend_config(
             raise ValueError(
                 "Flow execution requires a recorded backend selection. Regenerate "
                 "the parameter artifact or provide an explicitly recorded native "
-                "or stribor lineage."
+                "or stribor backend."
             )
         request = normalized_configured or "auto"
         selection = resolve_flow_backend_once(request)

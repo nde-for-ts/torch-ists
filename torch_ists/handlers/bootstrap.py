@@ -25,7 +25,7 @@ _OPTIONAL_DEPENDENCY_HINTS = {
     "torchsde": "Install `torchsde` or use `pip install \"torch-ists[all]\"`.",
     "torchdyn": "Install `torchdyn` or use `pip install \"torch-ists[ode]\"`.",
     "signatory": "Install from source with `pip install -e .[signatory]`; the PyPI wheel is torch-version-pinned.",
-    "stribor": "Install `stribor==0.1.0` for the optional external NFE reference backend.",
+    "stribor": "Install `stribor==0.1.0` for the optional direct Stribor flow backend.",
 }
 
 

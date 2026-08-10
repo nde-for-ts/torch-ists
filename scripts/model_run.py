@@ -742,7 +742,7 @@ def parse_cli_args():
         "--max-runs",
         type=int,
         default=None,
-        help="Maximum number of runs to satisfy gate count.",
+        help="Maximum number of runs to execute.",
     )
     parser.add_argument(
         "--max-runs-mode",
@@ -923,7 +923,7 @@ def parse_cli_args():
         help=(
             "Value-channel transform used to construct interpolation coefficients. "
             "standardize (default) fits observed training values only; use identity "
-            "explicitly to preserve the pre-0.6.0 numerical behavior."
+            "explicitly to keep coefficient values unstandardized."
         ),
     )
     parser.add_argument(
@@ -2252,7 +2252,7 @@ def _build_result_payload(
     resolved_mode = resolved_regime if str(mode).strip().lower() == "standard" else str(mode)
     meta = {
         "task": str(task),
-        "task_support_tier": "stable" if str(task) == "classification" else "experimental",
+        "task_support_tier": "stable" if str(task) == "classification" else "preview",
         "epochs": int(epochs),
         "interpolate": str(interpolate),
         "use_intensity": bool(use_intensity),

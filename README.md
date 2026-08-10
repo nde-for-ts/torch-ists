@@ -1,6 +1,6 @@
 # torch-ists
 
-[![Version](https://img.shields.io/badge/version-0.7.4-blue)](pyproject.toml) [![Python](https://img.shields.io/badge/python-%3E%3D3.10-blue)](pyproject.toml) [![PyTorch](https://img.shields.io/badge/PyTorch-%3E%3D2.0-ee4c2c)](pyproject.toml) [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![Package status](https://img.shields.io/badge/status-preview-orange)](#project-status)
+[![Version](https://img.shields.io/badge/version-0.7.5-blue)](pyproject.toml) [![Python](https://img.shields.io/badge/python-%3E%3D3.10-blue)](pyproject.toml) [![PyTorch](https://img.shields.io/badge/PyTorch-%3E%3D2.0-ee4c2c)](pyproject.toml) [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![Package status](https://img.shields.io/badge/status-preview-orange)](#project-status)
 
 **PyTorch toolkit for irregularly sampled multivariate time series with continuous-time methods (Neural ODE/CDE/SDE) and discrete-time baselines.**
 
@@ -19,61 +19,60 @@ Requirements:
 - `Python >= 3.10`
 - `PyTorch >= 2.0`
 - `pip >= 22.3` for the pyproject-only build path; upgrade older system pip before installing from source.
-- `PYTHONNOUSERSITE=1` for runtime commands
 
 This preview is not published on PyPI. Install it from a source checkout as shown below.
 
 Install the base package:
 
 ```bash
-PYTHONNOUSERSITE=1 python -m pip install --upgrade pip
-PYTHONNOUSERSITE=1 python -m pip install -e .
-PYTHONNOUSERSITE=1 python -c "import torch_ists; print(torch_ists.__version__)"
+python -m pip install --upgrade pip
+python -m pip install -e .
+python -c "import torch_ists; print(torch_ists.__version__)"
 ```
 
 Optional dependencies:
 
 ```bash
 # Hyperparameter search (Ray Tune)
-PYTHONNOUSERSITE=1 python -m pip install -e .[tune]
+python -m pip install -e .[tune]
 
 # Built-in benchmark dataset loader
-PYTHONNOUSERSITE=1 python -m pip install -e .[data]
+python -m pip install -e .[data]
 
 # ODE backends
-PYTHONNOUSERSITE=1 python -m pip install -e .[ode]
+python -m pip install -e .[ode]
 
 # CDE backends
-PYTHONNOUSERSITE=1 python -m pip install -e .[cde]
+python -m pip install -e .[cde]
 
 # SDE backends
-PYTHONNOUSERSITE=1 python -m pip install -e .[sde]
+python -m pip install -e .[sde]
 
 # Direct Stribor flow backend (otherwise auto falls back to native)
-PYTHONNOUSERSITE=1 python -m pip install -e .[flow]
+python -m pip install -e .[flow]
 
 # Full optional stack, including data loading and continuous-time model backends
-PYTHONNOUSERSITE=1 python -m pip install -e .[all]
+python -m pip install -e .[all]
 ```
 
 Flow models request `auto` by default. A core-only install uses the package-authored native fallback; `.[flow]` installs the supported MIT `stribor==0.1.0` runtime so `auto` selects the direct Stribor adapter without a Git checkout. Explicit `stribor` is fail-closed, while explicit `native` skips the optional-runtime probe. Only expected absence or supported-version incompatibility can trigger fallback; constructor, numerical, memory, and training failures remain errors.
 
-The external Neural Flows checkout is optional and used only as a development parity oracle. It is not required by `.[flow]`, included in `.[all]`, or bundled in wheels and source distributions. Its pinned source does not publish a LICENSE file. To run the separate parity checks:
+The external Neural Flows checkout is optional and used only for exact-reference comparisons. It is not required by `.[flow]`, included in `.[all]`, or bundled in wheels and source distributions. Its pinned source does not publish a LICENSE file. To run those optional comparisons:
 
 ```bash
-PYTHONNOUSERSITE=1 python -m pip install "stribor==0.1.0" "torchdiffeq==0.2.1"
-PYTHONNOUSERSITE=1 python -m pip install --no-deps "git+https://github.com/mbilos/neural-flows-experiments.git@bd19f7c92461e83521e268c1a235ef845a3dd963"
-PYTHONNOUSERSITE=1 python -c "from torch_ists.module.flow.nfe_reference import require_nfe_installation; print(require_nfe_installation()['valid'])"
+python -m pip install "stribor==0.1.0" "torchdiffeq==0.2.1"
+python -m pip install --no-deps "git+https://github.com/mbilos/neural-flows-experiments.git@bd19f7c92461e83521e268c1a235ef845a3dd963"
+python -c "from torch_ists.module.flow.nfe_reference import require_nfe_installation; print(require_nfe_installation()['valid'])"
 ```
 
-The final command validates the parity-oracle repository URL, commit, dependency versions, import location, and source files without importing its model code. The selector applies to `neuralflow`, `flowpath`, `fusioncde`, and `dualdynamics`. Search resolves the requested backend once before trials, records `requested_backend` and `effective_backend`, and freezes the effective value through model-run; a changed execution environment is rejected. Results accepted as Stribor evidence must record `effective_backend="stribor"`. `"nfe"` and related historical spellings are input-only aliases and serialize as `stribor`.
+The final command validates the reference repository URL, commit, dependency versions, import location, and source files without importing its model code. The selector applies to `neuralflow`, `flowpath`, `fusioncde`, and `dualdynamics`. Search resolves the requested backend once before trials, records `requested_backend` and `effective_backend`, and freezes the effective value through model-run; a changed execution environment is rejected. Results produced with Stribor must record `effective_backend="stribor"`. `"nfe"` and related compatibility spellings are input-only aliases and serialize as `stribor`.
 
 **Source-checkout scripts require `torchcde`.** The `scripts/set_splits.py` -> `scripts/param_search.py` -> `scripts/model_run.py` pipeline shares one preprocessing path that builds interpolation coefficients with `torchcde`. This applies to sequence baselines too. Install `.[all]` (recommended) or at least `.[tune,cde]`.
 
 Neural RDE (`neuralrde-1/2/3`) additionally requires `signatory`. It is kept out of `.[all]` because the PyPI wheel is torch-version-pinned; install the source-build extra only when those models are needed:
 
 ```bash
-PYTHONNOUSERSITE=1 python -m pip install --no-build-isolation -e .[signatory]
+python -m pip install --no-build-isolation -e .[signatory]
 ```
 
 ## Data Loading
@@ -90,13 +89,9 @@ bundle = DataLoader.from_numpy(X, y)
 print(bundle.X.shape, bundle.y.shape)
 ```
 
-Loader task names are validated. Long-format DataFrame input supports one constant scalar target per
-series for classification, regression, and outlier detection; regression keeps fractional targets
-instead of coercing them to class IDs. Bundle summaries report the validated task and actual target
-shape/dtype.
+Loader task names are validated. Long-format DataFrame input supports one constant scalar target per series for classification, regression, and outlier detection; regression keeps fractional targets instead of coercing them to class IDs. Bundle summaries report the validated task and actual target shape/dtype.
 
-For a built-in benchmark dataset, choose an explicit data root. Downloads verify each pinned
-asset before an atomic install, and an attested cache can be reused offline:
+For a built-in benchmark dataset, choose an explicit data root. Downloads verify each pinned asset before an atomic install, and an attested cache can be reused offline:
 
 ```python
 from torch_ists import benchmark_loader
@@ -110,8 +105,7 @@ See [Custom Data Guide](docs/custom_data_guide.md) for cache locations and user-
 
 ## Quick Start
 
-The example is self-contained and derives model dimensions from the raw array. Direct sequence
-models can set `build_coeffs=False` and do not need the optional interpolation dependency:
+The example is self-contained and derives model dimensions from the raw array. Direct sequence models can set `build_coeffs=False` and do not need the optional interpolation dependency:
 
 ```python
 import numpy as np
@@ -139,58 +133,49 @@ logits = model(seq, coeffs=None)
 print(logits.shape)  # torch.Size([40, 2])
 ```
 
-Models follow ordinary PyTorch device movement: after `model.to(new_device)`, forward-time input
-routing uses the live parameter/buffer device rather than the device string passed at construction.
+Models follow ordinary PyTorch device movement: after `model.to(new_device)`, forward-time input routing uses the live parameter/buffer device rather than the device string passed at construction.
 
-`get_active_model_list()` and `get_model_capabilities(name)` expose the installed package's
-active model names and data-path requirements without importing optional model dependencies.
+`get_active_model_list()` and `get_model_capabilities(name)` expose the installed package's active model names and data-path requirements without importing optional model dependencies.
 
 Coefficient-driven CDE and SDE rows consume the `coeffs` returned by `preprocess(...)`. Direct sequence, attention, and event-driven rows, including ODE-LSTM, the direct ODE-RNN models, Neural Jump ODE (NJ-ODE), and LatentSDE, use the sequence stack and accept `coeffs=None`.
 
-Source-checkout search/evaluation and direct model-aware preprocessing request train-observed
-value standardization by default for coefficient-driven models. A direct call must supply
-`control_value_train_indices` or a fitted transform state; it fails closed instead of fitting on
-all samples. Models that do not consume coefficients, and calls without `model_name`, retain
-`identity`. Pass `--control-value-transform identity` or
-`control_value_transform="identity"` for explicit coefficient-scale parity. When verified
-timestamps are supplied, preprocessing uses an elapsed physical-time control channel while
-retaining a separate shared normalized interpolation parameter.
+Source-checkout search/evaluation and direct model-aware preprocessing request train-observed value standardization by default for coefficient-driven models. A direct call must supply `control_value_train_indices` or a fitted transform state; it fails closed instead of fitting on all samples. Models that do not consume coefficients, and calls without `model_name`, retain `identity`. Pass `--control-value-transform identity` or `control_value_transform="identity"` for explicit coefficient-scale parity. When validated timestamps are supplied, preprocessing uses an elapsed physical-time control channel while retaining a separate shared normalized interpolation parameter.
 
-Verified physical event clocks are routed to time-aware attention, source ODE, and coefficient-driven recurrent ODE paths. Runs without timestamps preserve their normalized-index or elapsed-delta behavior. Stable SDE models continue to use the normalized solver and Brownian clock even when the control contains a physical-time feature.
+Validated physical event clocks are routed to time-aware attention, source ODE, and coefficient-driven recurrent ODE paths. Runs without timestamps preserve their normalized-index or elapsed-delta behavior. Stable SDE models continue to use the normalized solver and Brownian clock even when the control contains a physical-time feature.
 
 Adaptive and manually stepped continuous-time paths use finite default step budgets while preserving explicit caller overrides.
 
 The source-checkout pipeline shares a continuous-time preprocessing path that builds interpolation coefficients with `torchcde`. The following bounded classification workflow can be launched from any working directory after an editable source install. It keeps every generated artifact under `/tmp`:
 
 ```bash
-TORCH_ISTS_ROOT="$(PYTHONNOUSERSITE=1 python -c 'import pathlib, torch_ists; print(pathlib.Path(torch_ists.__file__).resolve().parents[1])')"
+TORCH_ISTS_ROOT="$(python -c 'import pathlib, torch_ists; print(pathlib.Path(torch_ists.__file__).resolve().parents[1])')"
 cd /tmp
 
-PYTHONNOUSERSITE=1 python -c "import numpy as np, pathlib; p=pathlib.Path('/tmp/torch_ists_demo'); p.mkdir(parents=True, exist_ok=True); rng=np.random.default_rng(0); np.savez(p/'toy.npz', X=rng.normal(size=(40, 3, 24)).astype('float32'), y=np.array([0, 1] * 20))"
+python -c "import numpy as np, pathlib; p=pathlib.Path('/tmp/torch_ists_demo'); p.mkdir(parents=True, exist_ok=True); rng=np.random.default_rng(0); np.savez(p/'toy.npz', X=rng.normal(size=(40, 3, 24)).astype('float32'), y=np.array([0, 1] * 20))"
 
-PYTHONNOUSERSITE=1 PYTHONPATH="$TORCH_ISTS_ROOT" python "$TORCH_ISTS_ROOT/scripts/set_splits.py" \
+PYTHONPATH="$TORCH_ISTS_ROOT" python "$TORCH_ISTS_ROOT/scripts/set_splits.py" \
     --dataset-name Demo --dataset-source npz --dataset-npz /tmp/torch_ists_demo/toy.npz \
     --seed 42 --out-dir /tmp/torch_ists_demo/split \
     --contract-dir /tmp/torch_ists_demo/evidence
 
-PYTHONNOUSERSITE=1 PYTHONPATH="$TORCH_ISTS_ROOT" python "$TORCH_ISTS_ROOT/scripts/param_search.py" \
+PYTHONPATH="$TORCH_ISTS_ROOT" python "$TORCH_ISTS_ROOT/scripts/param_search.py" \
     --datasets Demo --dataset-source npz --dataset-npz /tmp/torch_ists_demo/toy.npz \
     --models cnn --seed 42 --num-samples 1 --max-num-epochs 1 --max-runs 1 \
     --split-root /tmp/torch_ists_demo/split --param-root /tmp/torch_ists_demo/params \
     --contract-dir /tmp/torch_ists_demo/evidence --device cpu
 
-PYTHONNOUSERSITE=1 PYTHONPATH="$TORCH_ISTS_ROOT" python "$TORCH_ISTS_ROOT/scripts/set_splits.py" \
+PYTHONPATH="$TORCH_ISTS_ROOT" python "$TORCH_ISTS_ROOT/scripts/set_splits.py" \
     --dataset-name Demo --dataset-source npz --dataset-npz /tmp/torch_ists_demo/toy.npz \
     --seed 0 --out-dir /tmp/torch_ists_demo/split \
     --contract-dir /tmp/torch_ists_demo/evidence
 
-PYTHONNOUSERSITE=1 PYTHONPATH="$TORCH_ISTS_ROOT" python "$TORCH_ISTS_ROOT/scripts/model_run.py" \
+PYTHONPATH="$TORCH_ISTS_ROOT" python "$TORCH_ISTS_ROOT/scripts/model_run.py" \
     --datasets Demo --dataset-source npz --dataset-npz /tmp/torch_ists_demo/toy.npz \
     --models cnn --seed 0 --epochs 1 --max-runs 1 \
     --split-root /tmp/torch_ists_demo/split --param-root /tmp/torch_ists_demo/params \
     --out-root /tmp/torch_ists_demo/out --contract-dir /tmp/torch_ists_demo/evidence --device cpu
 
-PYTHONNOUSERSITE=1 PYTHONPATH="$TORCH_ISTS_ROOT" python "$TORCH_ISTS_ROOT/scripts/aggregate_results.py" \
+PYTHONPATH="$TORCH_ISTS_ROOT" python "$TORCH_ISTS_ROOT/scripts/aggregate_results.py" \
     --evidence-root /tmp/torch_ists_demo/evidence --out-root /tmp/torch_ists_demo/out \
     --output-dir /tmp/torch_ists_demo/aggregate
 ```

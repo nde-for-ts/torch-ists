@@ -68,7 +68,7 @@ Recommended custom-model paths:
 NDE-style custom models should consume interpolation coefficients. Install the CDE extra when using this pattern:
 
 ```bash
-PYTHONNOUSERSITE=1 python -m pip install -e .[cde]
+python -m pip install -e .[cde]
 ```
 
 ```python

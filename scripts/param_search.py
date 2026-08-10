@@ -388,7 +388,7 @@ def parse_cli_args():
         "--max-runs",
         type=int,
         default=None,
-        help="Maximum number of runs to satisfy gate count.",
+        help="Maximum number of runs to execute.",
     )
     parser.add_argument(
         "--max-runs-mode",
@@ -532,7 +532,7 @@ def parse_cli_args():
         help=(
             "Value-channel transform used to construct interpolation coefficients. "
             "standardize (default) fits observed training values only; use identity "
-            "explicitly to preserve the pre-0.6.0 numerical behavior."
+            "explicitly to keep coefficient values unstandardized."
         ),
     )
     args = parser.parse_args()
@@ -2301,7 +2301,6 @@ def optimize(
             ],
             "env_vars": {
                 "PYTHONPATH": pythonpath,
-                "PYTHONNOUSERSITE": os.environ.get("PYTHONNOUSERSITE", "1"),
             },
         }
         ray.init(runtime_env=runtime_env)

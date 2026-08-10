@@ -81,7 +81,7 @@ For a non-classification task, pass `--target-source dataset --targets-root <tar
 A bounded bundle matching the README toy data can be created with:
 
 ```bash
-PYTHONNOUSERSITE=1 python -c "import numpy as np, pathlib; n,l,d,h=40,24,3,4; p=pathlib.Path('/tmp/torch_ists_demo/targets'); p.mkdir(parents=True,exist_ok=True); np.savez(p/'Demo.npz', regression_target=np.zeros((n,1),'float32'), forecasting_target=np.zeros((n,h,d),'float32'), imputation_target=np.zeros((n,l,d),'float32'), imputation_loss_mask=np.ones((n,l,d),'float32'), outlier_detection_target=(np.arange(n)%4==0).astype('float32')[:,None], change_detection_target=np.zeros((n,l,1),'float32'), change_detection_loss_mask=np.ones((n,l,1),'float32'))"
+python -c "import numpy as np, pathlib; n,l,d,h=40,24,3,4; p=pathlib.Path('/tmp/torch_ists_demo/targets'); p.mkdir(parents=True,exist_ok=True); np.savez(p/'Demo.npz', regression_target=np.zeros((n,1),'float32'), forecasting_target=np.zeros((n,h,d),'float32'), imputation_target=np.zeros((n,l,d),'float32'), imputation_loss_mask=np.ones((n,l,d),'float32'), outlier_detection_target=(np.arange(n)%4==0).astype('float32')[:,None], change_detection_target=np.zeros((n,l,1),'float32'), change_detection_loss_mask=np.ones((n,l,1),'float32'))"
 ```
 
 Non-classification artifacts append the task name. Split, parameter, and standard-run paths are `<split-root>/<dataset>/<dataset>_<seed>__task_<task>`, `<param-root>/<dataset>/<dataset>_<model>__task_<task>`, and `<out-root>/<dataset>/<missing_rate>/<dataset>_<missing_rate>_<model>_<seed>__task_<task>`. Preview splits are deterministic and label-independent; an unsuffixed classification split is never reused for a preview task.
@@ -95,7 +95,7 @@ Non-classification artifacts append the task name. Split, parameter, and standar
 **Usage**:
 
 ```bash
-PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/set_splits.py --dataset-name BasicMotions --seed 42
+PYTHONPATH=. python scripts/set_splits.py --dataset-name BasicMotions --seed 42
 ```
 
 ### Flags
@@ -129,7 +129,7 @@ PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/set_splits.py --dataset-name Basi
 **Usage** (bounded first-run smoke):
 
 ```bash
-PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/param_search.py \
+PYTHONPATH=. python scripts/param_search.py \
     --seed 42 \
     --num-samples 1 --max-num-epochs 1
 ```
@@ -203,7 +203,7 @@ Requires the split file from `set_splits.py` at the configured search seed (defa
 **Usage** (standard evaluation, bounded first-run smoke):
 
 ```bash
-PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/model_run.py \
+PYTHONPATH=. python scripts/model_run.py \
     --seed 0 \
     --epochs 1 --max-runs 1
 ```
@@ -213,7 +213,7 @@ This is a bounded smoke run; the full default (`--epochs 100`) is the full-run s
 **Usage** (missingness evaluation, explicit missingness):
 
 ```bash
-PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/model_run.py \
+PYTHONPATH=. python scripts/model_run.py \
     --seed 0 \
     --missing-rates 0.3 \
     --epochs 1 --max-runs 1
@@ -326,7 +326,7 @@ Requires:
 **Usage**:
 
 ```bash
-PYTHONNOUSERSITE=1 PYTHONPATH=. python scripts/aggregate_results.py \
+PYTHONPATH=. python scripts/aggregate_results.py \
     --evidence-root evidence --out-root out --output-dir aggregate
 ```
 

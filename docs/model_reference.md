@@ -97,7 +97,7 @@ Package implementations informed by the original papers and repositories. They a
 
 `ode-rnn` and `latentode` come from the same NeurIPS 2019 paper but expose different package architectures: `ode-rnn` evolves a recurrent state directly between observations, while `latentode` learns a variational initial state and decodes a generative latent trajectory. Sample-level task heads use the inferred initial latent representation; sequence-level heads use the decoded trajectory. GRU-ODE-Bayes, Latent ODE, and NJ-ODE expose their method-specific objectives through `return_aux_loss=True`.
 
-The API keys in this section are the registry entries. Names such as `SourceLatentODEBackbone` and `SourceGRUODEBayesBackbone` are implementation class names, not additional models or aliases. The separate registry entries `gru-ode`/`gru-ode-bayes` and `ode-rnn-spline`/`ode-rnn` denote different packaged architectures and are counted independently. Historical or pre-patch implementation snapshots remain internal and do not create additional lineage-suffixed public names.
+The API keys in this section are the registry entries. Names such as `SourceLatentODEBackbone` and `SourceGRUODEBayesBackbone` are implementation class names, not additional models or aliases. The separate registry entries `gru-ode`/`gru-ode-bayes` and `ode-rnn-spline`/`ode-rnn` denote different packaged architectures and are counted independently.
 
 The packaged defaults are Euler for `ode-rnn`, GRU-ODE-Bayes, and NJ-ODE, and adaptive Dopri5 for Latent ODE.
 
@@ -163,7 +163,7 @@ Use `neuralflow` for the residual-flow default. The suffix selects an explicit f
 
 The `native` operators are package-authored adaptations of the paper's residual, GRU-style, and coupling constructions. They enforce identity at zero elapsed time, expose forward/inverse transforms, and reject ambiguous time-axis broadcasting. They are not represented as byte-for-byte or numerically exact reproductions of the reference repository. Results and checkpoints produced with native NeuralFlow operators before `0.5.4` should be regenerated because the corrected transforms are numerically incompatible.
 
-Installing `.[flow]` provides the supported MIT `stribor==0.1.0` runtime. The package-owned adapter constructs residual, GRU-style, and coupling operators directly from that public API; it does not load or bundle the external Neural Flows source. The runtime default `auto` selects this direct adapter when available and falls back to `native` only for expected absence or supported-version incompatibility. Explicit `stribor` is fail-closed and explicit `native` skips the probe. Search records the requested and effective backend once and model-run rejects a mismatch. The pinned `mbilos/neural-flows-experiments` checkout remains an optional development parity oracle only. Older `nfe` spellings are input-only aliases.
+Installing `.[flow]` provides the supported MIT `stribor==0.1.0` runtime. The package-owned adapter constructs residual, GRU-style, and coupling operators directly from that public API; it does not load or bundle the external Neural Flows source. The runtime default `auto` selects this direct adapter when available and falls back to `native` only for expected absence or supported-version incompatibility. Explicit `stribor` is fail-closed and explicit `native` skips the probe. Search records the requested and effective backend once and model-run rejects a mismatch. The pinned `mbilos/neural-flows-experiments` checkout is optional and used only for exact-reference comparisons. Older `nfe` spellings are input-only compatibility aliases.
 
 Active NeuralFlow solver settings are rejected because there is no integration step to configure; the neutral shared-call setting `adjoint=False` remains accepted. Its strict raw-missing path uses mask-aware zero filling and supports only `imputation_strategy="zero"`.
 
@@ -187,7 +187,7 @@ Origin papers:
 
 Use `dualdynamics`, `flowpath`, and `fusioncde` for residual-flow defaults. The suffix selects an explicit flow variant: `-r` = residual flow, `-g` = GRU-style flow, and `-c` = coupling-style flow. These remain CDE/control-path methods.
 
-FusionCDE preserves the prevalidated coefficient-augmented package adaptation by fusing the raw path with a fixed-spline control. It is behavior-defined and is not presented as official FlowPath or as a new paper method. Historical artifacts are not renamed or rewritten: old `flowpath-*` results retain their original lineage and must not be loaded as native parameters for corrected FlowPath or FusionCDE without a separate equivalence record.
+FusionCDE is the coefficient-augmented package implementation that fuses the raw path with a fixed-spline control. It is a distinct packaged method name and is not presented as official FlowPath or as a new paper method. Parameter files produced for earlier `flowpath-*` implementations are not accepted as parameters for current FlowPath or FusionCDE.
 
 For missing-data handling, use `preprocess(X, model_name=...)`. `flowpath-*` keeps the mask-aware raw missing-value path and ignores the generated coefficients; `dualdynamics-*` and `fusioncde-*` follow coefficient-driven control paths and use train-observed value standardization by default in packaged workflows.
 
