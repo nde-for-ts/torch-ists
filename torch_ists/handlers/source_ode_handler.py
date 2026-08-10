@@ -150,6 +150,11 @@ class SourceODEHandler(BaseHandler):
         **kwargs: Any,
     ):
         del coeffs
+        raw_delta = seq[:, 2, :, :]
+        if not bool(torch.isfinite(raw_delta).all()):
+            raise ValueError("source-model deltas must be finite")
+        if bool((raw_delta < 0).any()):
+            raise ValueError("source-model deltas must be non-negative")
         data = self.preprocess_input(
             seq,
             times,

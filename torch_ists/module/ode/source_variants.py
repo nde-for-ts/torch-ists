@@ -197,12 +197,11 @@ def _reconstruct_sample_times(
     if seq_delta.size(1) == 0:
         return seq_delta.clone()
 
-    delta = torch.nan_to_num(
-        seq_delta,
-        nan=0.0,
-        posinf=0.0,
-        neginf=0.0,
-    ).clamp_min(0.0)
+    if not bool(torch.isfinite(seq_delta).all()):
+        raise ValueError("seq_delta must be finite before source-clock reconstruction")
+    if bool((seq_delta < 0).any()):
+        raise ValueError("seq_delta must be non-negative before source-clock reconstruction")
+    delta = seq_delta
     fallback = fallback_times.to(dtype=delta.dtype, device=delta.device)
     if not bool(torch.isfinite(fallback).all()):
         raise ValueError("fallback_times must be finite")
@@ -219,12 +218,19 @@ def _reconstruct_sample_times(
     if delta.size(1) == 1:
         reconstructed = start
     else:
-        elapsed_increment = (delta[:, 1:] - delta[:, :-1]).clamp_min(0.0)
+        elapsed_increment = delta[:, 1:] - delta[:, :-1]
         adjacent_delta = torch.where(
             observed[:, :-1],
             delta[:, 1:],
             elapsed_increment,
         )
+        zero_total = delta.sum(dim=1) <= 0
+        invalid_increment = (adjacent_delta <= 0) & ~zero_total.unsqueeze(1)
+        if bool(invalid_increment.any()):
+            raise ValueError(
+                "seq_delta must reconstruct strictly increasing source clocks; "
+                "elapsed deltas may reset only after an observed step"
+            )
         reconstructed = torch.cat(
             [start, start + torch.cumsum(adjacent_delta, dim=1)],
             dim=1,
