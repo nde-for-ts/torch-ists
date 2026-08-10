@@ -1,6 +1,6 @@
 # torch-ists
 
-[![Version](https://img.shields.io/badge/version-0.7.3-blue)](pyproject.toml) [![Python](https://img.shields.io/badge/python-%3E%3D3.10-blue)](pyproject.toml) [![PyTorch](https://img.shields.io/badge/PyTorch-%3E%3D2.0-ee4c2c)](pyproject.toml) [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![Package status](https://img.shields.io/badge/status-preview-orange)](#project-status)
+[![Version](https://img.shields.io/badge/version-0.7.4-blue)](pyproject.toml) [![Python](https://img.shields.io/badge/python-%3E%3D3.10-blue)](pyproject.toml) [![PyTorch](https://img.shields.io/badge/PyTorch-%3E%3D2.0-ee4c2c)](pyproject.toml) [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![Package status](https://img.shields.io/badge/status-preview-orange)](#project-status)
 
 **PyTorch toolkit for irregularly sampled multivariate time series with continuous-time methods (Neural ODE/CDE/SDE) and discrete-time baselines.**
 
@@ -10,7 +10,7 @@ It provides runtime APIs, benchmark scripts, and a built-in benchmark archive lo
 
 ## Overview
 
-The package exposes `ists_classifier` for classification and the lower-level `ists_model` constructor for additional task heads. It includes 52 models spanning sequence baselines, attention-based methods, Neural ODE/CDE/SDE methods, NeuralFlow, DualDynamics and FlowPath, and Stable Neural SDEs.
+The package exposes `ists_classifier` for classification and the lower-level `ists_model` constructor for additional task heads. It includes 55 models spanning sequence baselines, attention-based methods, Neural ODE/CDE/SDE methods, NeuralFlow, DualDynamics, FlowPath, FusionCDE, and Stable Neural SDEs.
 
 ## Installation
 
@@ -66,7 +66,7 @@ PYTHONNOUSERSITE=1 python -m pip install --no-deps "git+https://github.com/mbilo
 PYTHONNOUSERSITE=1 python -c "from torch_ists.module.flow.nfe_reference import require_nfe_installation; print(require_nfe_installation()['valid'])"
 ```
 
-The final command validates the parity-oracle repository URL, commit, dependency versions, import location, and source files without importing its model code. The selector applies to `neuralflow`, `flowpath`, `dualdynamics`, and the shipped low-level `FusionCDE` class. Search resolves the requested backend once before trials, records `requested_backend` and `effective_backend`, and freezes the effective value through model-run; a changed execution environment is rejected. Results accepted as Stribor evidence must record `effective_backend="stribor"`. `"nfe"` and related historical spellings are input-only aliases and serialize as `stribor`. FusionCDE remains outside the active 52-model registry.
+The final command validates the parity-oracle repository URL, commit, dependency versions, import location, and source files without importing its model code. The selector applies to `neuralflow`, `flowpath`, `fusioncde`, and `dualdynamics`. Search resolves the requested backend once before trials, records `requested_backend` and `effective_backend`, and freezes the effective value through model-run; a changed execution environment is rejected. Results accepted as Stribor evidence must record `effective_backend="stribor"`. `"nfe"` and related historical spellings are input-only aliases and serialize as `stribor`.
 
 **Source-checkout scripts require `torchcde`.** The `scripts/set_splits.py` -> `scripts/param_search.py` -> `scripts/model_run.py` pipeline shares one preprocessing path that builds interpolation coefficients with `torchcde`. This applies to sequence baselines too. Install `.[all]` (recommended) or at least `.[tune,cde]`.
 
@@ -208,7 +208,7 @@ Missing-value handling:
 
 ## Models Included
 
-The package includes the 52 canonical model names below. See [Model Reference](docs/model_reference.md) for per-model details.
+The package includes the 55 canonical model names below. See [Model Reference](docs/model_reference.md) for per-model details.
 
 **Canonical model names:**
 
@@ -219,11 +219,11 @@ The package includes the 52 canonical model names below. See [Model Reference](d
 - **Neural CDE and Neural RDE** — `neuralcde`, `neuralcde-l`, `neuralcde-r`, `neuralcde-c`, `neuralcde-h`, `neuralrde-1`, `neuralrde-2`, `neuralrde-3` (§5)
 - **ANCDE, EXIT, and LEAP** — `ancde`, `exit`, `leap` (§6)
 - **NeuralFlow** — `neuralflow-r`, `neuralflow-g`, `neuralflow-c` (§7)
-- **DualDynamics and FlowPath** — `dualdynamics-r`, `dualdynamics-g`, `dualdynamics-c`, `flowpath-r`, `flowpath-g`, `flowpath-c` (§8)
+- **DualDynamics, FlowPath, and FusionCDE** — `dualdynamics-r`, `dualdynamics-g`, `dualdynamics-c`, `flowpath-r`, `flowpath-g`, `flowpath-c`, `fusioncde-r`, `fusioncde-g`, `fusioncde-c` (§8)
 - **SDE baselines** — `naive_cde`, `neural_ode`, `neural_ode_t`, `neural_sde`, `neural_sde_t`, `latentsde` (§9)
 - **Stable Neural SDEs** — `neural_lsde`, `neural_lnsde`, `neural_gsde` (§10)
 
-Compatibility aliases do not add models to the 52-model roster: `neuralflow`, `dualdynamics`, and `flowpath` resolve to their corresponding `-r` variants.
+Compatibility aliases do not add models to the 55-model roster: `neuralflow`, `dualdynamics`, `flowpath`, and `fusioncde` resolve to their corresponding `-r` variants.
 
 ## Custom Model Guide
 

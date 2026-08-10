@@ -90,6 +90,18 @@ def _configure_import_paths() -> None:
 _configure_import_paths()
 
 
+def _strict_flow_search_config(model_name: str, model_config: dict) -> dict:
+    """Pin canonical parameter search to Stribor without changing runtime defaults."""
+    from torch_ists.config.alias_policy import is_flow_family_name
+
+    config = dict(model_config)
+    if is_flow_family_name(model_name):
+        model_params = dict(config.get("model_params") or {})
+        model_params["flow_backend"] = "stribor"
+        config["model_params"] = model_params
+    return prepare_flow_backend_config(model_name, config)
+
+
 def _parse_csv_list(raw):
     if raw is None:
         return None
@@ -2089,7 +2101,7 @@ def optimize(
             model_config,
             constrained_capacity_config,
         )
-        model_config = prepare_flow_backend_config(model_name, model_config)
+        model_config = _strict_flow_search_config(model_name, model_config)
         split_root_local = split_root
 
         if search_repeat == SINGLE_SEARCH_REPEAT:
@@ -2327,7 +2339,7 @@ def optimize(
             model_config,
             constrained_capacity_config,
         )
-    model_config = prepare_flow_backend_config(model_name, model_config)
+    model_config = _strict_flow_search_config(model_name, model_config)
 
     scheduler = ASHAScheduler(
         max_t=max_num_epochs,

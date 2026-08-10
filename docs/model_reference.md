@@ -171,24 +171,25 @@ For missing-data handling, `neuralflow` and its explicit variants keep raw missi
 
 ---
 
-## 8. DualDynamics and FlowPath
+## 8. DualDynamics, FlowPath, and FusionCDE
 
-DualDynamics and FlowPath are flow-based Neural CDE / control-path methods rather than flow-only comparators. DualDynamics consumes interpolation coefficients. FlowPath follows the official `input_option='x'` structure: it accepts the shared `coeffs` argument for API compatibility but builds its learned control directly from the mask-aware raw `[time, x]` path. Both default to `rk4` with a fixed-grid step size from the input times.
+DualDynamics, FlowPath, and FusionCDE are flow-based Neural CDE / control-path methods rather than flow-only comparators. DualDynamics and FusionCDE consume interpolation coefficients. FlowPath follows the official `input_option='x'` structure: it accepts the shared `coeffs` argument for API compatibility but builds its learned control directly from the mask-aware raw `[time, x]` path. All three default to `rk4` with a fixed-grid step size from the input times.
 
 | Model group | Models |
 |---|---|
 | DualDynamics | default name `dualdynamics`; explicit variants `dualdynamics-r`, `dualdynamics-g`, `dualdynamics-c` |
 | FlowPath | default name `flowpath`; explicit variants `flowpath-r`, `flowpath-g`, `flowpath-c` |
+| FusionCDE | default name `fusioncde`; explicit variants `fusioncde-r`, `fusioncde-g`, `fusioncde-c` |
 
 Origin papers:
 - DualDynamics: [*DualDynamics: Synergizing Implicit and Explicit Methods for Robust Irregular Time Series Analysis* (AAAI 2025)](https://ojs.aaai.org/index.php/AAAI/article/view/34173) · [arXiv:2401.04979](https://arxiv.org/abs/2401.04979)
 - FlowPath: [*FlowPath: Learning Data-Driven Manifolds with Invertible Flows for Robust Irregularly-sampled Time Series Classification* (AAAI 2026)](https://ojs.aaai.org/index.php/AAAI/article/view/39643) · [arXiv:2511.10841](https://arxiv.org/abs/2511.10841)
 
-Use `dualdynamics` and `flowpath` for residual-flow defaults. The suffix selects an explicit flow variant: `-r` = residual flow, `-g` = GRU-style flow, and `-c` = coupling-style flow. These remain CDE/control-path methods.
+Use `dualdynamics`, `flowpath`, and `fusioncde` for residual-flow defaults. The suffix selects an explicit flow variant: `-r` = residual flow, `-g` = GRU-style flow, and `-c` = coupling-style flow. These remain CDE/control-path methods.
 
-The low-level `FusionCDE` class preserves the prior coefficient-augmented package adaptation by fusing the raw path with a fixed-spline control. It is behavior-defined, is not presented as official FlowPath, and is not an active row in the 52-model registry in `0.6.5`. Historical artifacts are not renamed or rewritten: old `flowpath-*` results retain their original lineage and must not be loaded as native parameters for corrected FlowPath.
+FusionCDE preserves the prevalidated coefficient-augmented package adaptation by fusing the raw path with a fixed-spline control. It is behavior-defined and is not presented as official FlowPath or as a new paper method. Historical artifacts are not renamed or rewritten: old `flowpath-*` results retain their original lineage and must not be loaded as native parameters for corrected FlowPath or FusionCDE without a separate equivalence record.
 
-For missing-data handling, use `preprocess(X, model_name=...)`. `flowpath-*` keeps the mask-aware raw missing-value path and ignores the generated coefficients; `dualdynamics-*` follows the coefficient-driven control path.
+For missing-data handling, use `preprocess(X, model_name=...)`. `flowpath-*` keeps the mask-aware raw missing-value path and ignores the generated coefficients; `dualdynamics-*` and `fusioncde-*` follow coefficient-driven control paths and use train-observed value standardization by default in packaged workflows.
 
 ---
 

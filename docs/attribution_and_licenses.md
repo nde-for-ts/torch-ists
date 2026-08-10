@@ -16,7 +16,7 @@ Methods implemented in this package and covered by its MIT license (see [LICENSE
 | Stable Neural SDEs | `neural_lsde`, `neural_lnsde`, `neural_gsde` | `sde/` | Oh, Lim, Kim, *Stable Neural SDEs* (ICLR 2024) — [arXiv:2402.14989](https://arxiv.org/abs/2402.14989); repo [yongkyung-oh/Stable-Neural-SDEs](https://github.com/yongkyung-oh/Stable-Neural-SDEs) | MIT (this package) |
 | DualDynamics | `dualdynamics`, `dualdynamics-r/g/c` | `flow/dualdynamics.py` | Oh, Lim, Kim, *DualDynamics* (AAAI 2025) — [arXiv:2401.04979](https://arxiv.org/abs/2401.04979) | MIT (this package) |
 | FlowPath | `flowpath`, `flowpath-r/g/c` | `flow/flowpath.py` | Oh et al., *FlowPath* (AAAI 2026) — [arXiv:2511.10841](https://arxiv.org/abs/2511.10841) | MIT (this package) |
-| FusionCDE class | low-level class; not an active registry row in `0.6.5` | `flow/fusioncde.py` | Package adaptation preserving the coefficient-augmented raw/fixed-control fusion; no separate origin-paper claim | MIT (this package) |
+| FusionCDE | `fusioncde`, `fusioncde-r/g/c` | `flow/fusioncde.py` | Package adaptation preserving the coefficient-augmented raw/fixed-control fusion; no separate origin-paper claim | MIT (this package) |
 | Native NeuralFlow operators | `neuralflow`, `neuralflow-r/g/c` | `flow/operators_native.py` | Package-authored adaptations informed by [Biloš et al. 2021](https://arxiv.org/abs/2110.13040) and its [reference repository](https://github.com/mbilos/neural-flows-experiments) | MIT (this package) |
 | SDE baselines | `naive_cde`, `neural_ode`, `neural_ode_t`, `neural_sde`, `neural_sde_t` | `sde/` | Package-authored baselines (no external paper); integrate through the `torchsde` wrapper | MIT (this package) |
 

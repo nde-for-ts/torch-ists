@@ -181,7 +181,7 @@ def bootstrap_handler_registry() -> None:
                 name
                 for name in FLOW_MODELS
                 if name == "dualdynamics"
-                or name.startswith("dualdynamics-")
+                or name.startswith(("dualdynamics-", "fusioncde-"))
             ),
         )
     )

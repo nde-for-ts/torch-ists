@@ -938,7 +938,7 @@ See [Custom Model Guide](custom_model_guide.md) for the wrapper pattern.
 `head_depth` and `flow_depth` are different knobs.
 
 - `head_depth`: controls the depth of the prediction head after the backbone. `1` applies a direct projection, and `k > 1` adds `k - 1` hidden-to-hidden layers before the final projection.
-- `flow_depth`: controls the number of flow blocks for `neuralflow`, `dualdynamics`, and their explicit flow variants. FlowPath fixes this depth to `1`; the shipped low-level FusionCDE class retains its own flow-depth setting.
+- `flow_depth`: controls the number of flow blocks for `neuralflow`, `dualdynamics`, `fusioncde`, and their explicit flow variants. FlowPath fixes this depth to `1`.
 
 Current defaults:
 - `cnn`, `rnn`, `lstm`, `gru`: `head_depth` is not used
@@ -946,10 +946,11 @@ Current defaults:
 - `neuralflow`: `flow_depth=3` by default
 - `dualdynamics`: `flow_depth=2` by default
 - `flowpath`: `flow_depth=1` is fixed; `num_hidden_layers` is its single official depth axis
+- `fusioncde`: `flow_depth=1` by default
 - `neuralflow` uses the residual-flow variant by default as a flow-only row. `dualdynamics` and `flowpath` are CDE/control-path rows. FlowPath builds its learned control from the raw value/time path and accepts but does not consume interpolation coefficients.
 - `flow_backend="auto"` is the runtime default for all flow models. A core-only install falls back to package-authored native operators; installing `.[flow]` provides `stribor==0.1.0` and makes `auto` select the package-owned direct Stribor adapter without an external checkout. Explicit `stribor` is fail-closed and explicit `native` bypasses the optional-runtime probe. Runtime objects expose `requested_flow_backend`, effective `flow_backend`, `used_flow_backend_fallback`, and the enumerated fallback reason when applicable. Older `nfe` spellings are input-only aliases and normalize to `stribor`. Search resolves once before trials, freezes the effective backend, and model-run rejects a recorded/runtime mismatch.
-- The low-level `FusionCDE` class preserves the earlier coefficient-augmented flow/CDE dataflow but is not an active row in the 52-model registry in `0.6.5`.
-- Model names use residual-flow defaults: `neuralflow`, `dualdynamics`, and `flowpath`. Explicit `-r/-g/-c` variants remain accepted variants.
+- `fusioncde-r/g/c` preserve the prevalidated coefficient-augmented flow/CDE dataflow under a distinct descriptive family name. They consume interpolation coefficients and therefore use train-observed value standardization by default in packaged workflows.
+- Model names use residual-flow defaults: `neuralflow`, `dualdynamics`, `flowpath`, and `fusioncde`. Explicit `-r/-g/-c` variants remain accepted variants.
 
 Compatibility mapping:
 - The older `num_hidden_layers` spelling is interpreted as `head_depth`.
