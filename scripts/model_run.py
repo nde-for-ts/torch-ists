@@ -1342,6 +1342,10 @@ def _validate_prediction_payload(
     expected_contract=None,
     expected_sample_indices=None,
     expected_y_true=None,
+    expected_task_target=None,
+    expected_task_mask=None,
+    expected_future_timestamps=None,
+    expected_forecast_origin=None,
     output_path,
 ):
     if not isinstance(predictions, dict):
@@ -1454,6 +1458,12 @@ def _validate_prediction_payload(
                     raise OutputArtifactContractError(
                         f"Output artifact {output_path} cannot be reused: {key} must be finite."
                     )
+            if expected_task_target is not None and not np.array_equal(
+                np.asarray(predictions["target"]), np.asarray(expected_task_target)
+            ):
+                raise OutputArtifactContractError(
+                    f"Output artifact {output_path} cannot be reused: target does not match current targets."
+                )
             if task in {"forecasting", "imputation", "change_detection"}:
                 target_mask = predictions.get("target_mask")
                 if target_mask is None:
@@ -1473,6 +1483,41 @@ def _validate_prediction_payload(
                     raise OutputArtifactContractError(
                         f"Output artifact {output_path} cannot be reused: target_mask must contain "
                         "finite binary supervision."
+                    )
+                if expected_task_mask is not None and not np.array_equal(
+                    mask_array, np.asarray(expected_task_mask)
+                ):
+                    raise OutputArtifactContractError(
+                        f"Output artifact {output_path} cannot be reused: target_mask does not match current supervision."
+                    )
+            if task == "forecasting":
+                future_times = np.asarray(predictions.get("future_timestamps"))
+                origin = np.asarray(predictions.get("forecast_origin"))
+                expected_future_shape = (count, int(expected_contract["forecast_horizon"]))
+                if future_times.shape != expected_future_shape or origin.shape != (count,):
+                    raise OutputArtifactContractError(
+                        f"Output artifact {output_path} cannot be reused: forecasting schedule shape is invalid."
+                    )
+                if (
+                    not np.isfinite(future_times).all()
+                    or not np.isfinite(origin).all()
+                    or not np.all(np.diff(future_times, axis=1) > 0)
+                    or not np.all(future_times[:, 0] > origin)
+                ):
+                    raise OutputArtifactContractError(
+                        f"Output artifact {output_path} cannot be reused: forecasting schedule is invalid."
+                    )
+                if expected_future_timestamps is not None and not np.array_equal(
+                    future_times, np.asarray(expected_future_timestamps)
+                ):
+                    raise OutputArtifactContractError(
+                        f"Output artifact {output_path} cannot be reused: future timestamps do not match current targets."
+                    )
+                if expected_forecast_origin is not None and not np.array_equal(
+                    origin, np.asarray(expected_forecast_origin)
+                ):
+                    raise OutputArtifactContractError(
+                        f"Output artifact {output_path} cannot be reused: forecast origin does not match current context."
                     )
     else:
         if any(predictions.get(key) is not None for key in ("y_true", "y_pred", "logit_list")):
@@ -1522,6 +1567,10 @@ def _validate_output_payload(
     *,
     expected_sample_indices=None,
     expected_y_true=None,
+    expected_task_target=None,
+    expected_task_mask=None,
+    expected_future_timestamps=None,
+    expected_forecast_origin=None,
 ):
     for payload_key, contract_key in (
         ("dataset", "dataset"),
@@ -1593,6 +1642,10 @@ def _validate_output_payload(
             expected_contract=expected_contract,
             expected_sample_indices=expected_sample_indices,
             expected_y_true=expected_y_true,
+            expected_task_target=expected_task_target,
+            expected_task_mask=expected_task_mask,
+            expected_future_timestamps=expected_future_timestamps,
+            expected_forecast_origin=expected_forecast_origin,
             output_path=output_path,
         )
         if regime == "robustness" and evaluation.get("test_missing_type") == "CHANNEL_DROP":
@@ -1632,6 +1685,10 @@ def _validate_existing_output_contract(
     *,
     expected_sample_indices=None,
     expected_y_true=None,
+    expected_task_target=None,
+    expected_task_mask=None,
+    expected_future_timestamps=None,
+    expected_forecast_origin=None,
 ):
     try:
         payload = _read_output_payload(output_path)
@@ -1746,6 +1803,10 @@ def _validate_existing_output_contract(
         output_path,
         expected_sample_indices=expected_sample_indices,
         expected_y_true=expected_y_true,
+        expected_task_target=expected_task_target,
+        expected_task_mask=expected_task_mask,
+        expected_future_timestamps=expected_future_timestamps,
+        expected_forecast_origin=expected_forecast_origin,
     )
     return actual_contract
 
@@ -2037,6 +2098,8 @@ def _build_task_predictions_payload(
     task_mask,
     save_predictions,
     sample_indices,
+    future_timestamps=None,
+    forecast_origin=None,
 ):
     pred_np = np.asarray(task_pred)
     target_np = np.asarray(task_target)
@@ -2063,6 +2126,14 @@ def _build_task_predictions_payload(
             "target": task_target,
             "pred": task_pred,
             **({"target_mask": task_mask} if mask_np is not None else {}),
+            **(
+                {
+                    "future_timestamps": np.asarray(future_timestamps),
+                    "forecast_origin": np.asarray(forecast_origin),
+                }
+                if future_timestamps is not None and forecast_origin is not None
+                else {}
+            ),
         }
     if save_predictions == "summary":
         return {
@@ -2167,6 +2238,8 @@ def _build_evaluation_result(
     task_pred=None,
     task_target=None,
     task_mask=None,
+    future_timestamps=None,
+    forecast_origin=None,
     *,
     task="classification",
     test_missing_type="MCAR",
@@ -2231,9 +2304,15 @@ def _build_evaluation_result(
         predictions = _build_task_predictions_payload(
             task_pred,
             task_target,
-            task_mask=task_mask if task == "imputation" else None,
+            task_mask=(
+                task_mask
+                if task in {"forecasting", "imputation", "change_detection"}
+                else None
+            ),
             save_predictions=save_predictions,
             sample_indices=sample_indices,
+            future_timestamps=future_timestamps,
+            forecast_origin=forecast_origin,
         )
     result = {
         "missing_seed": int(missing_seed),
@@ -2578,6 +2657,30 @@ def run_model(
                 np.asarray(Y)[np.asarray(test_idx, dtype=np.int64)]
                 if task == "classification"
                 else None
+            ),
+            expected_task_target=(
+                None
+                if task == "classification"
+                else task_targets[np.asarray(test_idx, dtype=np.int64)]
+            ),
+            expected_task_mask=(
+                None
+                if target_masks is None
+                else target_masks[np.asarray(test_idx, dtype=np.int64)]
+            ),
+            expected_future_timestamps=(
+                None
+                if forecasting_schedule is None
+                else forecasting_schedule["future_timestamps"][
+                    np.asarray(test_idx, dtype=np.int64)
+                ]
+            ),
+            expected_forecast_origin=(
+                None
+                if forecasting_schedule is None
+                else forecasting_schedule["forecast_origin"][
+                    np.asarray(test_idx, dtype=np.int64)
+                ]
             ),
         )
         return None
@@ -3082,6 +3185,7 @@ def run_model(
         )
     else:
         pred_list, target_list, target_mask_list = [], [], []
+        future_time_list, forecast_origin_list = [], []
         with torch.no_grad():
             for batch in test_batch:
                 mask = _expand_mask_or_delta(batch['x_mask'], batch['x_missing'])
@@ -3111,6 +3215,9 @@ def run_model(
                     if target_mask is None or tuple(target_mask.shape) != tuple(target.shape):
                         raise ValueError(f"{task} evaluation requires a target_mask matching target")
                     target_mask_list.append(target_mask.detach().cpu().numpy())
+                if task == "forecasting":
+                    future_time_list.append(batch["future_timestamps"].detach().cpu().numpy())
+                    forecast_origin_list.append(batch["forecast_origin"].detach().cpu().numpy())
 
         task_pred = np.concatenate(pred_list, axis=0)
         task_target = np.concatenate(target_list, axis=0)
@@ -3127,6 +3234,14 @@ def run_model(
             task_pred=task_pred,
             task_target=task_target,
             task_mask=task_mask,
+            future_timestamps=(
+                np.concatenate(future_time_list, axis=0) if future_time_list else None
+            ),
+            forecast_origin=(
+                np.concatenate(forecast_origin_list, axis=0)
+                if forecast_origin_list
+                else None
+            ),
             missing_seed=SEED,
             save_predictions=save_predictions,
             sample_indices=test_idx,
@@ -3515,6 +3630,7 @@ def _evaluate_robustness(
                         )
                     else:
                         pred_list, target_list, target_mask_list = [], [], []
+                        future_time_list, forecast_origin_list = [], []
                         with torch.no_grad():
                             for batch in test_batch:
                                 mask = _expand_mask_or_delta(batch['x_mask'], batch['x_missing'])
@@ -3547,6 +3663,13 @@ def _evaluate_robustness(
                                             f"{task} evaluation requires a target_mask matching target"
                                         )
                                     target_mask_list.append(target_mask.detach().cpu().numpy())
+                                if task == "forecasting":
+                                    future_time_list.append(
+                                        batch["future_timestamps"].detach().cpu().numpy()
+                                    )
+                                    forecast_origin_list.append(
+                                        batch["forecast_origin"].detach().cpu().numpy()
+                                    )
 
                         task_pred = np.concatenate(pred_list, axis=0)
                         task_target = np.concatenate(target_list, axis=0)
@@ -3560,6 +3683,16 @@ def _evaluate_robustness(
                             task_pred=task_pred,
                             task_target=task_target,
                             task_mask=task_mask,
+                            future_timestamps=(
+                                np.concatenate(future_time_list, axis=0)
+                                if future_time_list
+                                else None
+                            ),
+                            forecast_origin=(
+                                np.concatenate(forecast_origin_list, axis=0)
+                                if forecast_origin_list
+                                else None
+                            ),
                             task=task,
                             test_missing_type=test_mechanism,
                             test_channel_sync=test_channel_sync,
