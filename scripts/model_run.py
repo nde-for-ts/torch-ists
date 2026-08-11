@@ -56,8 +56,10 @@ from _common import (
     resolve_learning_rate_policy,
     SINGLE_SEARCH_REPEAT,
     STANDARD_SEARCH_POLICY,
+    task_definition_for_task,
     validate_param_artifact_identity,
     validate_param_artifact_metadata,
+    validate_task_definition,
 )
 from dataset_source_contracts import (
     load_dataset_payload,
@@ -389,7 +391,9 @@ def _validate_param_search_profile(
                 "Regenerate params with scripts/param_search.py --search-policy constrained."
             )
     pre_integrity_shape = is_pre_integrity_param_artifact(model_config)
-    if not (allow_compatibility_search_profile and pre_integrity_shape):
+    if expected_task == "forecasting" or not (
+        allow_compatibility_search_profile and pre_integrity_shape
+    ):
         validate_param_artifact_identity(
             model_config,
             data_name=expected_data_name,
@@ -1269,6 +1273,9 @@ def _build_output_contract(
         ),
         "control_time_source": str(control_time_source),
     }
+    task_definition = task_definition_for_task(task_name)
+    if task_definition is not None:
+        contract["task_definition"] = task_definition
     if parameter_artifact_interpretation is not None:
         contract["parameter_artifact_interpretation"] = copy.deepcopy(
             parameter_artifact_interpretation
@@ -1789,6 +1796,9 @@ def _validate_existing_output_contract(
         "training_loop_policy",
         "control_value_transform",
         "parameter_artifact_interpretation",
+        "method_definition",
+        "control_time_source",
+        "task_definition",
     )
     mismatches = []
     for field in semantic_fields:
@@ -1804,6 +1814,27 @@ def _validate_existing_output_contract(
             continue
         if field == "parameter_artifact_interpretation":
             if actual_contract.get(field) != expected_contract.get(field):
+                mismatches.append(field)
+            continue
+        if field == "method_definition":
+            expected_method = expected_contract.get(field)
+            if expected_method is not None and actual_contract.get(field) != expected_method:
+                mismatches.append(field)
+            continue
+        if field == "control_time_source":
+            expected_source = str(expected_contract.get(field, "auto")).strip().lower()
+            if field not in actual_contract:
+                if expected_source == "physical":
+                    mismatches.append(field)
+            elif str(actual_contract.get(field)).strip().lower() != expected_source:
+                mismatches.append(field)
+            continue
+        if field == "task_definition":
+            expected_definition = expected_contract.get(field)
+            if (
+                expected_definition is not None
+                and actual_contract.get(field) != expected_definition
+            ):
                 mismatches.append(field)
             continue
         if field not in actual_contract:
@@ -2460,6 +2491,7 @@ def run_model(
 ):
     task = str(task).strip().lower()
     validate_model_task_capability(model_name, task)
+    validate_task_definition(model_config, task=task, context="Parameter artifact")
     method_definition = _validate_model_method_identity(model_name, model_config)
     model_config = prepare_flow_backend_config(
         model_name,
@@ -2671,7 +2703,7 @@ def run_model(
         control_value_transform=effective_control_transform,
         requested_control_value_transform=control_value_transform,
         parameter_artifact_interpretation=parameter_artifact_interpretation,
-        control_time_source="auto",
+        control_time_source="physical" if timestamps is not None else "index",
         method_definition=method_definition,
         search_algorithm_seed=model_config.get("search_algorithm_seed"),
         search_policy=_infer_cli_search_policy(model_config),

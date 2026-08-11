@@ -290,7 +290,9 @@ def _validate_existing_param_artifact_for_reuse(
         require_lr=True,
     )
     pre_integrity_shape = is_pre_integrity_param_artifact(model_config)
-    if not (allow_compatibility_search_profile and pre_integrity_shape):
+    if task == "forecasting" or not (
+        allow_compatibility_search_profile and pre_integrity_shape
+    ):
         validate_param_artifact_identity(
             model_config,
             data_name=data_name,

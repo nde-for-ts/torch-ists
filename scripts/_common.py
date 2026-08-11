@@ -433,6 +433,40 @@ def _stored_split_seeds(identity: dict) -> list[int]:
     return _normalize_split_seeds(seeds)
 
 
+def task_definition_for_task(task: str) -> str | None:
+    if str(task).strip().lower() == "forecasting":
+        return "future-time-conditioned"
+    return None
+
+
+def validate_task_definition(
+    model_config: dict,
+    *,
+    task: str,
+    context: str = "param artifact",
+) -> str | None:
+    expected = task_definition_for_task(task)
+    if expected is None:
+        return None
+    identity = model_config.get("artifact_identity") if isinstance(model_config, dict) else None
+    actual = (
+        str(identity.get("task_definition") or "").strip().lower()
+        if isinstance(identity, dict)
+        else ""
+    )
+    if not actual:
+        raise ValueError(
+            f"{context} predates time-conditioned forecasting. "
+            "Run a fresh forecasting parameter search with the current scripts."
+        )
+    if actual != expected:
+        raise ValueError(
+            f"{context} task_definition mismatch: "
+            f"found={actual!r}, expected={expected!r}."
+        )
+    return expected
+
+
 def build_param_artifact_identity(
     *,
     data_name: str,
@@ -463,6 +497,9 @@ def build_param_artifact_identity(
         "dataset_source": str(dataset_source or "").strip().lower(),
         "split_seeds": _normalize_split_seeds(split_seeds),
     }
+    task_definition = task_definition_for_task(task_name)
+    if task_definition is not None:
+        identity["task_definition"] = task_definition
     method_definition = _method_definition_for_model(model_name)
     if method_definition is not None:
         identity["method_definition"] = method_definition
@@ -521,6 +558,7 @@ def validate_param_artifact_identity(
         "data_name": str(identity.get("data_name", "")),
         "model_name": _canonical_model_name(str(identity.get("model_name", ""))),
         "task": actual_task,
+        "task_definition": str(identity.get("task_definition") or "").strip().lower(),
         "target_source": str(actual_target_source or "").strip().lower(),
         "forecast_horizon": actual_forecast_horizon,
         "dataset_source": str(identity.get("dataset_source") or "").strip().lower(),
@@ -537,6 +575,9 @@ def validate_param_artifact_identity(
             compared_fields.append("split_seeds")
     else:
         compared_fields.extend(("forecast_horizon", "dataset_source", "split_seeds"))
+        if actual_task == "forecasting":
+            validate_task_definition(model_config, task=actual_task, context=context)
+            compared_fields.append("task_definition")
     mismatches = [
         key for key in compared_fields if actual.get(key) != expected.get(key)
     ]
