@@ -400,7 +400,7 @@ def from_dataframe(
 ) -> DatasetBundle:
 ```
 
-The long-format loader currently accepts scalar-per-series `classification`, `regression`, and `outlier_detection` targets. Every row in a series must carry the same target. Classification targets must be finite and integer-like; regression targets retain their numeric dtype, including fractional values. Tasks that require structured targets fail before sequence arrays are allocated.
+The long-format loader currently accepts scalar-per-series `classification`, `regression`, and `outlier_detection` targets. Every row in a series must carry the same target. Classification targets must be finite and integer-like; regression targets must be finite and real-valued and retain their numeric dtype, including fractional values. Tasks that require structured targets fail before sequence arrays are allocated.
 
 #### Example
 

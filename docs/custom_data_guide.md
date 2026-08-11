@@ -96,7 +96,7 @@ bundle = DataLoader.from_file(
 )
 ```
 
-`DataLoader.from_dataframe` and CSV/parquet `from_file` return a `DatasetBundle` without writing NPZ. Pass `task="regression"` to preserve fractional regression targets. Unknown task names, inconsistent targets within a series, non-integer classification labels, and DataFrame tasks requiring structured targets fail closed. Persist `bundle.X` and `bundle.y` when you need a portable array payload.
+`DataLoader.from_dataframe` and CSV/parquet `from_file` return a `DatasetBundle` without writing NPZ. Pass `task="regression"` to preserve finite real-valued fractional targets. Unknown task names, inconsistent targets within a series, non-integer classification labels, and DataFrame tasks requiring structured targets fail closed. Persist `bundle.X` and `bundle.y` when you need a portable array payload.
 
 ## 5. Generate or Reuse Splits
 
