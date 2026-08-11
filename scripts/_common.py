@@ -3,12 +3,15 @@
 
 from __future__ import annotations
 
+import copy
 import importlib.util
 import json
 import math
 import os
 import sys
 from pathlib import Path
+
+import numpy as np
 
 BATCH_SIZE_POLICY_NAME = "dataset-derived-fixed"
 LEARNING_RATE_POLICY_NAME = "fixed-lr-fallback"
@@ -476,6 +479,7 @@ def build_param_artifact_identity(
     forecast_horizon: int | None = None,
     dataset_source: str | None = None,
     split_seeds=None,
+    task_semantics: dict | None = None,
 ) -> dict:
     task_name = str(task).strip().lower()
     if task_name == "classification":
@@ -503,7 +507,76 @@ def build_param_artifact_identity(
     method_definition = _method_definition_for_model(model_name)
     if method_definition is not None:
         identity["method_definition"] = method_definition
+    if task_name != "classification" and task_semantics is not None:
+        identity["task_semantics"] = copy.deepcopy(task_semantics)
     return identity
+
+
+def build_param_task_semantics(
+    *,
+    task: str,
+    output_dim: int,
+    target,
+    target_mask=None,
+    forecasting_schedule: dict | None = None,
+    split_records=None,
+) -> dict:
+    task_name = str(task).strip().lower()
+    if task_name == "classification":
+        raise ValueError("classification parameter identity does not use task_semantics")
+    target_array = np.asarray(target)
+    semantics = {
+        "output_dim": int(output_dim),
+        "target_shape": [int(value) for value in target_array.shape],
+        "target_dtype": str(target_array.dtype),
+        "target": _json_safe_semantic_values(
+            target_array,
+            field="target",
+            allow_nan=True,
+        ),
+        "search_splits": [],
+    }
+    if target_mask is not None:
+        mask_array = np.asarray(target_mask)
+        semantics.update(
+            target_mask_shape=[int(value) for value in mask_array.shape],
+            target_mask_dtype=str(mask_array.dtype),
+            target_mask=_json_safe_semantic_values(mask_array, field="target_mask"),
+        )
+    if forecasting_schedule is not None:
+        future = np.asarray(forecasting_schedule["future_timestamps"], dtype=np.float64)
+        origin = np.asarray(forecasting_schedule["forecast_origin"], dtype=np.float64)
+        semantics.update(
+            future_timestamps=_json_safe_semantic_values(
+                future,
+                field="future_timestamps",
+            ),
+            forecast_origin=_json_safe_semantic_values(origin, field="forecast_origin"),
+        )
+    for record in split_records or []:
+        semantics["search_splits"].append(
+            {
+                "seed": int(record["seed"]),
+                "train_indices": np.asarray(record["train_indices"], dtype=np.int64).tolist(),
+                "valid_indices": np.asarray(record["valid_indices"], dtype=np.int64).tolist(),
+                "test_indices": np.asarray(record["test_indices"], dtype=np.int64).tolist(),
+            }
+        )
+    return semantics
+
+
+def _json_safe_semantic_values(values, *, field: str, allow_nan: bool = False):
+    array = np.asarray(values)
+    if np.issubdtype(array.dtype, np.complexfloating):
+        raise ValueError(f"{field} must contain real-valued data")
+    if np.issubdtype(array.dtype, np.floating):
+        if np.isinf(array).any() or (not allow_nan and np.isnan(array).any()):
+            raise ValueError(f"{field} must contain finite values")
+        if np.isnan(array).any():
+            payload = array.astype(object)
+            payload[np.isnan(array)] = None
+            return payload.tolist()
+    return array.tolist()
 
 
 def validate_param_artifact_identity(
@@ -516,6 +589,7 @@ def validate_param_artifact_identity(
     forecast_horizon: int | None = None,
     dataset_source: str | None = None,
     split_seeds=None,
+    task_semantics: dict | None = None,
     context: str = "param artifact",
 ) -> None:
     identity = model_config.get("artifact_identity") if isinstance(model_config, dict) else None
@@ -530,6 +604,7 @@ def validate_param_artifact_identity(
         forecast_horizon=forecast_horizon,
         dataset_source=dataset_source,
         split_seeds=split_seeds,
+        task_semantics=task_semantics,
     )
     actual_task = str(identity.get("task", "")).strip().lower()
     actual_target_source = identity.get("target_source")
@@ -564,6 +639,7 @@ def validate_param_artifact_identity(
         "dataset_source": str(identity.get("dataset_source") or "").strip().lower(),
         "split_seeds": actual_split_seeds,
         "method_definition": str(identity.get("method_definition") or "").strip().lower(),
+        "task_semantics": copy.deepcopy(identity.get("task_semantics")),
     }
     compared_fields = ["data_name", "model_name", "task", "target_source"]
     if expected.get("method_definition"):
@@ -575,6 +651,8 @@ def validate_param_artifact_identity(
             compared_fields.append("split_seeds")
     else:
         compared_fields.extend(("forecast_horizon", "dataset_source", "split_seeds"))
+        if task_semantics is not None:
+            compared_fields.append("task_semantics")
         if actual_task == "forecasting":
             validate_task_definition(model_config, task=actual_task, context=context)
             compared_fields.append("task_definition")

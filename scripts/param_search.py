@@ -46,6 +46,7 @@ from _common import (
     CONSTRAINED_SEARCH_FAMILY,
     DEFAULT_SEARCH_PROFILE,
     build_param_artifact_identity,
+    build_param_task_semantics,
     build_model_kwargs_from_config,
     configure_runtime_paths,
     default_method_for_model,
@@ -232,6 +233,7 @@ def _build_expected_param_artifact_identity(
     if normalized_dataset_source == "npz":
         if dataset_npz is None or not Path(dataset_npz).exists():
             raise FileNotFoundError(f"Dataset NPZ not found: {dataset_npz}")
+    split_records = []
     for seed in split_seeds:
         split_path = resolve_task_split_path(
             split_root,
@@ -241,6 +243,43 @@ def _build_expected_param_artifact_identity(
         )
         if not split_path.exists():
             raise FileNotFoundError(f"Split artifact not found: {split_path}")
+        with open(split_path, "rb") as handle:
+            train_idx, valid_idx, test_idx = pickle.load(handle)
+        split_records.append(
+            {
+                "seed": int(seed),
+                "train_indices": train_idx,
+                "valid_indices": valid_idx,
+                "test_indices": test_idx,
+            }
+        )
+    task_semantics = None
+    if task_name != "classification":
+        dataset_payload = load_dataset_payload(
+            dataset_name=data_name,
+            dataset_source=normalized_dataset_source,
+            dataset_npz=dataset_npz,
+            task=task_name,
+        )
+        task_target, task_mask, target_spec, forecasting_schedule = load_task_targets_npz(
+            dataset=data_name,
+            targets_root=targets_root,
+            task=task_name,
+            horizon=forecast_horizon,
+            num_samples=int(dataset_payload.X.shape[0]),
+            seq_len=int(dataset_payload.X.shape[2]),
+            input_dim=int(dataset_payload.X.shape[1]),
+            input_values=dataset_payload.X,
+            return_forecasting_schedule=True,
+        )
+        task_semantics = build_param_task_semantics(
+            task=task_name,
+            output_dim=int(target_spec["output_dim"]),
+            target=task_target,
+            target_mask=task_mask,
+            forecasting_schedule=forecasting_schedule,
+            split_records=split_records,
+        )
     return build_param_artifact_identity(
         data_name=data_name,
         model_name=model_name,
@@ -249,6 +288,7 @@ def _build_expected_param_artifact_identity(
         forecast_horizon=forecast_horizon,
         dataset_source=normalized_dataset_source,
         split_seeds=split_seeds,
+        task_semantics=task_semantics,
     )
 
 
@@ -281,6 +321,7 @@ def _validate_existing_param_artifact_for_reuse(
     forecast_horizon,
     dataset_source: str,
     split_seeds,
+    task_semantics=None,
     allow_compatibility_search_profile: bool,
 ) -> str:
     existing_profile = validate_param_artifact_metadata(
@@ -302,6 +343,7 @@ def _validate_existing_param_artifact_for_reuse(
             forecast_horizon=forecast_horizon,
             dataset_source=dataset_source,
             split_seeds=split_seeds,
+            task_semantics=task_semantics,
             context=f"Param artifact {existing_param_path}",
         )
     return existing_profile
@@ -2696,6 +2738,7 @@ def main():
                             forecast_horizon=expected_artifact_identity["forecast_horizon"],
                             dataset_source=expected_artifact_identity["dataset_source"],
                             split_seeds=expected_artifact_identity["split_seeds"],
+                            task_semantics=expected_artifact_identity.get("task_semantics"),
                             allow_compatibility_search_profile=args.allow_compatibility_search_profile,
                         )
                     except (FileNotFoundError, ValueError) as exc:

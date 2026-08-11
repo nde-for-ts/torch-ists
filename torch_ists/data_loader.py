@@ -24,6 +24,13 @@ def _validate_numpy_target(y: np.ndarray, task: str) -> np.ndarray:
         if not np.equal(y, np.floor(y)).all():
             raise ValueError("classification targets must be integer-like")
         return y.astype(np.int64, copy=False)
+    if task_name == "regression":
+        if (
+            not np.issubdtype(y.dtype, np.number)
+            or np.issubdtype(y.dtype, np.complexfloating)
+            or not np.isfinite(y).all()
+        ):
+            raise ValueError("regression targets must be finite numeric values")
     return y
 
 
@@ -167,7 +174,7 @@ class DataLoader:
             ts[i, :cur_len] = g[time_col].to_numpy(dtype=np.float64)
 
         raw_targets = np.asarray(target_values)
-        if task_name == "classification":
+        if task_name in {"classification", "regression"}:
             y = _validate_numpy_target(raw_targets, task_name)
         else:
             if not np.issubdtype(raw_targets.dtype, np.number):

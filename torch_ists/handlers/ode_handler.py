@@ -27,10 +27,18 @@ class ODEHandler(BaseHandler):
     name: str = "ode"
 
     ODE_MODELS: Dict[str, Dict[str, Any]] = {
-        "gru-dt": {"family": "gru_dt", "use_intensity": True},
-        "gru-d": {"family": "gru_d", "use_intensity": True},
-        "ode-rnn-spline": {"family": "ode_rnn", "use_intensity": True},
-        "gru-ode": {"family": "gru_ode", "use_intensity": False},
+        "gru-dt": {"family": "gru_dt", "use_intensity": True, "consumes_sample_times": True},
+        "gru-d": {"family": "gru_d", "use_intensity": True, "consumes_sample_times": True},
+        "ode-rnn-spline": {
+            "family": "ode_rnn",
+            "use_intensity": True,
+            "consumes_sample_times": True,
+        },
+        "gru-ode": {
+            "family": "gru_ode",
+            "use_intensity": False,
+            "consumes_sample_times": False,
+        },
     }
     ODE_ALLOWED_METHODS = {"euler", "midpoint", "rk4", "dopri5"}
     ODE_METHOD_ALIASES = {
@@ -237,7 +245,10 @@ class ODEHandler(BaseHandler):
             call_kwargs["atol"] = solver["atol"]
         if solver["adjoint"] is not None:
             call_kwargs["adjoint"] = solver["adjoint"]
-        if kwargs.get("sample_times") is not None:
+        model_spec = self.ODE_MODELS.get(str(model_name), {})
+        if kwargs.get("sample_times") is not None and bool(
+            model_spec.get("consumes_sample_times", False)
+        ):
             call_kwargs["sample_times"] = data["seq_ts"]
 
         # Only pass solver kwargs that the concrete model forward supports.

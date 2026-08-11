@@ -41,6 +41,7 @@ from _common import (
     CONSTRAINED_CAPACITY_POLICY_NAME,
     CONSTRAINED_MATCHED_CAPACITY_TARGET_NAME,
     DEFAULT_SEARCH_PROFILE,
+    build_param_task_semantics,
     build_model_kwargs_from_config,
     configure_runtime_paths,
     default_method_for_model,
@@ -271,6 +272,7 @@ def _expected_param_target_identity(
         if param_repeat == AGGREGATED_SEARCH_REPEAT
         else [int(model_config.get("search_algorithm_seed", 42))]
     )
+    split_records = []
     for split_seed in split_seeds:
         split_path = resolve_task_split_path(
             split_root,
@@ -280,6 +282,43 @@ def _expected_param_target_identity(
         )
         if not split_path.exists():
             raise FileNotFoundError(f"Split artifact not found: {split_path}")
+        with open(split_path, "rb") as handle:
+            train_idx, valid_idx, test_idx = pickle.load(handle)
+        split_records.append(
+            {
+                "seed": int(split_seed),
+                "train_indices": train_idx,
+                "valid_indices": valid_idx,
+                "test_indices": test_idx,
+            }
+        )
+    task_semantics = None
+    if task_name != "classification":
+        dataset_payload = load_dataset_payload(
+            dataset_name=data_name,
+            dataset_source=normalized_dataset_source,
+            dataset_npz=dataset_npz,
+            task=task_name,
+        )
+        task_target, task_mask, target_spec, forecasting_schedule = load_task_targets_npz(
+            dataset=data_name,
+            targets_root=targets_root,
+            task=task_name,
+            horizon=forecast_horizon,
+            num_samples=int(dataset_payload.X.shape[0]),
+            seq_len=int(dataset_payload.X.shape[2]),
+            input_dim=int(dataset_payload.X.shape[1]),
+            input_values=dataset_payload.X,
+            return_forecasting_schedule=True,
+        )
+        task_semantics = build_param_task_semantics(
+            task=task_name,
+            output_dim=int(target_spec["output_dim"]),
+            target=task_target,
+            target_mask=task_mask,
+            forecasting_schedule=forecasting_schedule,
+            split_records=split_records,
+        )
     return {
         "target_source": source,
         "forecast_horizon": (
@@ -289,6 +328,7 @@ def _expected_param_target_identity(
         ),
         "dataset_source": normalized_dataset_source,
         "split_seeds": split_seeds,
+        "task_semantics": task_semantics,
     }
 
 
@@ -357,6 +397,7 @@ def _validate_param_search_profile(
     expected_forecast_horizon,
     expected_dataset_source: str,
     expected_split_seeds,
+    expected_task_semantics=None,
     param_path: str,
     allow_compatibility_search_profile: bool = False,
 ) -> str:
@@ -403,6 +444,7 @@ def _validate_param_search_profile(
             forecast_horizon=expected_forecast_horizon,
             dataset_source=expected_dataset_source,
             split_seeds=expected_split_seeds,
+            task_semantics=expected_task_semantics,
             context=f"Param artifact {param_path}",
         )
     return actual
@@ -1679,6 +1721,7 @@ def _validate_output_payload(
             expected_forecast_origin=expected_forecast_origin,
             output_path=output_path,
         )
+        _validate_stored_task_metrics(evaluation, task=task, output_path=output_path)
         if regime == "robustness" and evaluation.get("test_missing_type") == "CHANNEL_DROP":
             expected_plan = build_channel_drop_plan(
                 channel_count=channel_count,
@@ -2019,6 +2062,8 @@ def _compute_task_metrics(
     target = np.asarray(target, dtype=np.float64)
     if pred.shape != target.shape:
         raise ValueError(f"shape mismatch for task metrics: {pred.shape} != {target.shape}")
+    if not np.isfinite(pred).all() or not np.isfinite(target).all():
+        raise ValueError(f"{task} metrics require finite prediction and target values")
     supervised_count = int(pred.size)
     if target_mask is not None or task == "imputation":
         pred, target, supervised_count = _masked_metric_arrays(
@@ -2095,6 +2140,70 @@ def _compute_binary_detection_metrics(
         "predicted_positive_count": predicted_positive_count,
         "supervised_element_count": supervised_count,
     }
+
+
+def _stored_metric_matches(actual, expected) -> bool:
+    if isinstance(expected, dict):
+        return isinstance(actual, dict) and set(actual) == set(expected) and all(
+            _stored_metric_matches(actual[key], value) for key, value in expected.items()
+        )
+    if expected is None:
+        return actual is None
+    if isinstance(expected, (bool, np.bool_)):
+        return isinstance(actual, (bool, np.bool_)) and bool(actual) is bool(expected)
+    if isinstance(actual, (bool, np.bool_)):
+        return False
+    if isinstance(expected, (float, np.floating)):
+        try:
+            value = float(actual)
+        except (TypeError, ValueError):
+            return False
+        return bool(np.isfinite(value) and np.isclose(value, float(expected), rtol=1e-6, atol=1e-8))
+    if isinstance(expected, (int, np.integer)):
+        return isinstance(actual, (int, np.integer)) and int(actual) == int(expected)
+    return actual == expected
+
+
+def _validate_stored_task_metrics(evaluation, *, task: str, output_path) -> None:
+    if task == "classification":
+        return
+    predictions = evaluation.get("predictions")
+    if not isinstance(predictions, dict) or predictions.get("storage") != "full":
+        return
+    stored = evaluation.get("metrics")
+    if not isinstance(stored, dict):
+        raise OutputArtifactContractError(
+            f"Output artifact {output_path} cannot be reused: stored task metrics are missing."
+        )
+    pred = np.asarray(predictions["pred"])
+    target = np.asarray(predictions["target"])
+    target_mask = predictions.get("target_mask")
+    if task in {"outlier_detection", "change_detection"}:
+        expected = _compute_binary_detection_metrics(
+            pred,
+            target,
+            accuracy_key=("outlier_acc" if task == "outlier_detection" else "change_acc"),
+            target_mask=target_mask,
+            task=task,
+        )
+    else:
+        expected = _compute_task_metrics(
+            pred,
+            target,
+            target_mask=target_mask,
+            task=task,
+        )
+    if set(stored) != set(expected):
+        raise OutputArtifactContractError(
+            f"Output artifact {output_path} cannot be reused: stored metric fields "
+            "do not match the recomputed task metrics."
+        )
+    for key, expected_value in expected.items():
+        if key not in stored or not _stored_metric_matches(stored[key], expected_value):
+            raise OutputArtifactContractError(
+                f"Output artifact {output_path} cannot be reused: stored metric {key!r} "
+                "does not match the stored full predictions."
+            )
 
 
 def _prediction_identity_fields(sample_indices, *, include_indices: bool, expected_n: int | None = None) -> dict:
@@ -3258,14 +3367,22 @@ def run_model(
                     mask,
                     delta,
                 ], dim=1).to(device)
-                output = model(
-                    seq,
-                    batch['coeffs'].to(device),
-                    sample_times=(
+                runtime_kwargs = {
+                    "sample_times": (
                         None
                         if "sample_times" not in batch
                         else batch["sample_times"].to(device)
-                    ),
+                    )
+                }
+                if task == "forecasting":
+                    runtime_kwargs.update(
+                        future_timestamps=batch["future_timestamps"].to(device),
+                        forecast_origin=batch["forecast_origin"].to(device),
+                    )
+                output = model(
+                    seq,
+                    batch['coeffs'].to(device),
+                    **runtime_kwargs,
                 )
                 pred = output[0] if isinstance(output, tuple) else output
                 target = batch["target"].to(device).float()
@@ -3704,14 +3821,22 @@ def _evaluate_robustness(
                                     delta,
                                 ], dim=1).to(device)
 
-                                output = model(
-                                    seq,
-                                    batch['coeffs'].to(device),
-                                    sample_times=(
+                                runtime_kwargs = {
+                                    "sample_times": (
                                         None
                                         if "sample_times" not in batch
                                         else batch["sample_times"].to(device)
-                                    ),
+                                    )
+                                }
+                                if task == "forecasting":
+                                    runtime_kwargs.update(
+                                        future_timestamps=batch["future_timestamps"].to(device),
+                                        forecast_origin=batch["forecast_origin"].to(device),
+                                    )
+                                output = model(
+                                    seq,
+                                    batch['coeffs'].to(device),
+                                    **runtime_kwargs,
                                 )
                                 pred = output[0] if isinstance(output, tuple) else output
                                 target = batch["target"].to(device).float()
@@ -3906,6 +4031,7 @@ def main():
                         expected_forecast_horizon=expected_target_identity["forecast_horizon"],
                         expected_dataset_source=expected_target_identity["dataset_source"],
                         expected_split_seeds=expected_target_identity["split_seeds"],
+                        expected_task_semantics=expected_target_identity.get("task_semantics"),
                         param_path=str(param_path),
                         allow_compatibility_search_profile=args.allow_compatibility_search_profile,
                     )
@@ -4112,6 +4238,7 @@ def main():
                             expected_forecast_horizon=expected_target_identity["forecast_horizon"],
                             expected_dataset_source=expected_target_identity["dataset_source"],
                             expected_split_seeds=expected_target_identity["split_seeds"],
+                            expected_task_semantics=expected_target_identity.get("task_semantics"),
                             param_path=str(param_path),
                             allow_compatibility_search_profile=args.allow_compatibility_search_profile,
                         )
