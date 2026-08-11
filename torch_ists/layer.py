@@ -38,7 +38,7 @@ from .config.model_data_policy import (
 from .config import default_method_for_model as resolve_default_method_for_model
 from .config.models import SDE_MODEL_ALIASES
 from .config.runtime_fault_policy import (
-    handle_auxiliary_loss_nan,
+    handle_auxiliary_loss_nonfinite,
     raise_for_nonfinite_tensor,
 )
 from .preprocessing import SUPPORTED_IMPUTATION_STRATEGIES
@@ -366,9 +366,9 @@ class ists_layer(nn.Module):
             tensor_name="layer hidden state",
             model_name=self.model_name,
         )
-        if loss is not None and torch.isnan(loss).any():
+        if loss is not None and not torch.isfinite(loss).all():
             self.aux_nan_event_count += 1
-            loss = handle_auxiliary_loss_nan(
+            loss = handle_auxiliary_loss_nonfinite(
                 loss,
                 model_name=self.model_name,
                 event_count=self.aux_nan_event_count,

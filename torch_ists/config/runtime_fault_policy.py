@@ -11,11 +11,11 @@ import warnings
 
 import torch
 
-PAPER_MODE_ENV = "TORCH_ISTS_PAPER_MODE"
+STRICT_AUXILIARY_LOSS_ENV = "TORCH_ISTS_STRICT_AUXILIARY_LOSS"
 
 
-def is_paper_mode_enabled() -> bool:
-    value = os.environ.get(PAPER_MODE_ENV, "0").strip().lower()
+def is_strict_auxiliary_loss_enabled() -> bool:
+    value = os.environ.get(STRICT_AUXILIARY_LOSS_ENV, "0").strip().lower()
     return value in {"1", "true", "yes", "on"}
 
 
@@ -36,13 +36,14 @@ def raise_for_nonfinite_tensor(
     )
 
 
-def handle_auxiliary_loss_nan(loss: torch.Tensor, *, model_name: str, event_count: int) -> torch.Tensor:
-    if is_paper_mode_enabled():
+def handle_auxiliary_loss_nonfinite(loss: torch.Tensor, *, model_name: str, event_count: int) -> torch.Tensor:
+    if is_strict_auxiliary_loss_enabled():
         raise RuntimeError(
-            f"Auxiliary loss contains NaN for model '{model_name}' while {PAPER_MODE_ENV}=1."
+            f"Auxiliary loss contains non-finite values for model '{model_name}' while "
+            f"{STRICT_AUXILIARY_LOSS_ENV}=1."
         )
     warnings.warn(
-        f"Auxiliary loss contains NaN for model '{model_name}'. "
+        f"Auxiliary loss contains non-finite values for model '{model_name}'. "
         f"Applying nan_to_num fallback (event={event_count}).",
         RuntimeWarning,
         stacklevel=3,
@@ -51,8 +52,8 @@ def handle_auxiliary_loss_nan(loss: torch.Tensor, *, model_name: str, event_coun
 
 
 __all__ = [
-    "PAPER_MODE_ENV",
-    "handle_auxiliary_loss_nan",
-    "is_paper_mode_enabled",
+    "STRICT_AUXILIARY_LOSS_ENV",
+    "handle_auxiliary_loss_nonfinite",
+    "is_strict_auxiliary_loss_enabled",
     "raise_for_nonfinite_tensor",
 ]

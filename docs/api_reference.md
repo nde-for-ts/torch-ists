@@ -889,6 +889,8 @@ Source ODE model parameters:
 
 The defaults above keep method-specific losses on a practical scale when they are added to a task objective. Applications may tune the weights with the rest of the training configuration.
 
+Non-finite auxiliary losses emit a `RuntimeWarning` and are converted to finite values by default. Set `TORCH_ISTS_STRICT_AUXILIARY_LOSS=1` to raise immediately instead; the strict check covers both NaN and infinite values.
+
 LatentSDE model parameters:
 
 | `model_params` | Default | Runtime behavior |
