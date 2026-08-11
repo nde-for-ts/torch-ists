@@ -170,7 +170,7 @@ class FlowHandler(BaseHandler):
         flow_backend = self._resolve_flow_backend(
             config,
             model_params,
-            default="auto",
+            default="native",
         )
 
         if model_name in self._NEURALFLOW_MODELS:

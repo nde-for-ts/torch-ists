@@ -669,10 +669,69 @@ def _is_flowpath_model_name(model_name: str) -> bool:
     return _canonical_model_name(model_name).startswith("flowpath-")
 
 
+def resolve_param_control_value_transform(
+    model_name: str,
+    model_config: dict,
+    requested_transform: str,
+) -> tuple[str, bool, dict | None]:
+    """Resolve transform use, including the corrected FlowPath metadata interpretation."""
+    from torch_ists.handlers import resolve_model_control_value_transform
+    from torch_ists.preprocessing import normalize_control_value_transform
+
+    effective, consumes_coefficients = resolve_model_control_value_transform(
+        model_name,
+        requested_transform,
+    )
+    stored = normalize_control_value_transform(
+        model_config.get("control_value_transform", "identity")
+    )
+    if stored == effective:
+        return effective, bool(consumes_coefficients), None
+
+    identity = model_config.get("artifact_identity")
+    metadata = model_config.get("control_value_transform_metadata")
+    method_definition = (
+        str(identity.get("method_definition") or "").strip().lower()
+        if isinstance(identity, dict)
+        else ""
+    )
+    corrected_flowpath = (
+        not consumes_coefficients
+        and stored == "standardize"
+        and effective == "identity"
+        and isinstance(identity, dict)
+        and _canonical_model_name(identity.get("model_name", ""))
+        == _canonical_model_name(model_name)
+        and method_definition == "flowpath-input-x-learned-control"
+        and _method_definition_for_model(model_name) == method_definition
+        and isinstance(metadata, dict)
+        and normalize_control_value_transform(metadata.get("method")) == "standardize"
+        and metadata.get("fit_scope") == "train_observed"
+        and normalize_control_value_transform(metadata.get("requested_transform"))
+        == "standardize"
+        and normalize_control_value_transform(metadata.get("effective_transform"))
+        == "standardize"
+        and metadata.get("consumes_coefficients") is True
+    )
+    if corrected_flowpath:
+        return effective, False, {
+            "stored_transform": stored,
+            "effective_transform": effective,
+            "basis": "coefficient_invariant_method",
+            "method_definition": method_definition,
+        }
+
+    raise ValueError(
+        "Parameter artifact control-value transform mismatch: "
+        f"stored={stored!r}, requested={effective!r}. "
+        "Run parameter search with the same --control-value-transform setting."
+    )
+
+
 def _normalize_flow_backend_for_output(value: object) -> str:
     backend = str(value).strip().lower()
     aliases = {
-        "default": "auto",
+        "default": "native",
         "auto": "auto",
         "native": "native",
         "stribor": "stribor",
@@ -729,7 +788,7 @@ def prepare_flow_backend_config(
                 "the parameter artifact or provide an explicitly recorded native "
                 "or stribor backend."
             )
-        request = normalized_configured or "auto"
+        request = normalized_configured or "native"
         selection = resolve_flow_backend_once(request)
     else:
         expected = FlowBackendSelection(
@@ -1008,7 +1067,7 @@ def resolve_effective_param_config(
         num_layers = 1
         num_hidden_layers = depth_level
         head_depth = depth_level
-        model_params.setdefault("flow_backend", "auto")
+        model_params.setdefault("flow_backend", "native")
     elif _is_flow_model_name(normalized_model):
         if _is_model_native_profile(profile):
             raw_flow_depth = config.get(
@@ -1024,7 +1083,7 @@ def resolve_effective_param_config(
         num_layers = 1
         num_hidden_layers = depth_level
         head_depth = depth_level
-        model_params.setdefault("flow_backend", "auto")
+        model_params.setdefault("flow_backend", "native")
     elif normalized_model in _SAND_MODELS:
         flow_depth = _default_flow_depth_for_model(normalized_model)
         num_layers = 1

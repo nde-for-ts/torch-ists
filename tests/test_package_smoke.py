@@ -318,7 +318,7 @@ def test_latent_sde_uses_each_sample_terminal_kl_and_holds_tail(monkeypatch):
     assert torch.allclose(path[1, :, 0], torch.tensor([0.0, 1.0, 2.0, 3.0]))
 
 
-def test_distributed_flow_backend_uses_stribor_first_with_native_fallback():
+def test_distributed_flow_backend_defaults_native_and_keeps_explicit_selection():
     from torch_ists.module.flow import resolve_flow_backend, resolve_flow_backend_once
     from torch_ists.module.flow.nfe_reference import (
         PINNED_NFE_COMMIT,
@@ -328,8 +328,8 @@ def test_distributed_flow_backend_uses_stribor_first_with_native_fallback():
     from torch_ists.module.flow.operators_stribor import StriborBackendUnavailableError
 
     flow_root = Path(torch_ists.__file__).resolve().parent / "module" / "flow"
-    assert resolve_flow_backend(None) == "auto"
-    assert resolve_flow_backend("default") == "auto"
+    assert resolve_flow_backend(None) == "native"
+    assert resolve_flow_backend("default") == "native"
     assert resolve_flow_backend("nfe") == "stribor"
     assert not (flow_root / "_nfe_guard.py").exists()
     assert not (flow_root / "_neural_flows").exists()

@@ -57,6 +57,7 @@ from _common import (
     omit_none_runtime_baseline_id,
     assert_flow_backend_execution_context,
     prepare_flow_backend_config,
+    resolve_param_control_value_transform,
     resolve_dataset_fixed_batch_policy,
     resolve_effective_param_config,
     resolve_learning_rate_policy,
@@ -90,14 +91,14 @@ def _configure_import_paths() -> None:
 _configure_import_paths()
 
 
-def _strict_flow_search_config(model_name: str, model_config: dict) -> dict:
-    """Pin canonical parameter search to Stribor without changing runtime defaults."""
+def _prepare_flow_search_config(model_name: str, model_config: dict) -> dict:
+    """Resolve and freeze the native default or an explicit flow request."""
     from torch_ists.config.alias_policy import is_flow_family_name
 
     config = dict(model_config)
     if is_flow_family_name(model_name):
         model_params = dict(config.get("model_params") or {})
-        model_params["flow_backend"] = "stribor"
+        model_params.setdefault("flow_backend", "native")
         config["model_params"] = model_params
     return prepare_flow_backend_config(model_name, config)
 
@@ -2101,7 +2102,7 @@ def optimize(
             model_config,
             constrained_capacity_config,
         )
-        model_config = _strict_flow_search_config(model_name, model_config)
+        model_config = _prepare_flow_search_config(model_name, model_config)
         split_root_local = split_root
 
         if search_repeat == SINGLE_SEARCH_REPEAT:
@@ -2338,7 +2339,7 @@ def optimize(
             model_config,
             constrained_capacity_config,
         )
-    model_config = _strict_flow_search_config(model_name, model_config)
+    model_config = _prepare_flow_search_config(model_name, model_config)
 
     scheduler = ASHAScheduler(
         max_t=max_num_epochs,
@@ -2686,15 +2687,18 @@ def main():
                     existing_contract = describe_search_profile(existing_profile)
                     existing_search_policy = _infer_cli_search_policy(existing_cfg)
                     existing_search_repeat = _infer_cli_search_repeat(existing_cfg, out_name)
-                    existing_control_transform = normalize_control_value_transform(
-                        existing_cfg.get("control_value_transform", "identity")
-                    )
-                    if existing_control_transform != effective_control_transform:
-                        reason = (
-                            "param artifact control-value transform mismatch "
-                            f"(found={existing_control_transform!r}, "
-                            f"expected={effective_control_transform!r})"
+                    try:
+                        (
+                            reuse_control_transform,
+                            _reuse_consumes_coefficients,
+                            parameter_artifact_interpretation,
+                        ) = resolve_param_control_value_transform(
+                            model_name,
+                            existing_cfg,
+                            args.control_value_transform,
                         )
+                    except ValueError as exc:
+                        reason = str(exc)
                         LOGGER.error("[FAIL] %s/%s: %s", data_name, model_name, reason)
                         skipped.append({"dataset": data_name, "model": model_name, "task": args.task, "reason": reason})
                         policy_violations.append(f"{data_name}/{model_name}: {reason}")
@@ -2702,7 +2706,7 @@ def main():
                     existing_control_metadata = existing_cfg.get(
                         "control_value_transform_metadata"
                     )
-                    if effective_control_transform == "standardize" and (
+                    if reuse_control_transform == "standardize" and (
                         not isinstance(existing_control_metadata, dict)
                         or normalize_control_value_transform(
                             existing_control_metadata.get("method")
@@ -2714,6 +2718,21 @@ def main():
                         skipped.append({"dataset": data_name, "model": model_name, "task": args.task, "reason": reason})
                         policy_violations.append(f"{data_name}/{model_name}: {reason}")
                         continue
+                    reused_control_metadata = (
+                        copy.deepcopy(existing_control_metadata)
+                        if isinstance(existing_control_metadata, dict)
+                        else {
+                            "method": "identity",
+                            "fit_scope": "none",
+                            "fallback_channel_count": 0,
+                            "fallback_channels": [],
+                            "consumes_coefficients": bool(consumes_coefficients),
+                        }
+                    )
+                    if parameter_artifact_interpretation is not None:
+                        reused_control_metadata["parameter_artifact_interpretation"] = copy.deepcopy(
+                            parameter_artifact_interpretation
+                        )
                     if existing_profile != args.search_profile:
                         reason = (
                             "param artifact search_profile mismatch "
@@ -2802,17 +2821,7 @@ def main():
                             "param_path": portable_artifact_reference(existing_param_path),
                             "runtime_baseline_id": existing_cfg.get("runtime_baseline_id", runtime_baseline_id),
                             "reason": "param artifact already exists",
-                            "control_value_transform": (
-                                existing_control_metadata
-                                if isinstance(existing_control_metadata, dict)
-                                else {
-                                    "method": "identity",
-                                    "fit_scope": "none",
-                                    "fallback_channel_count": 0,
-                                    "fallback_channels": [],
-                                    "consumes_coefficients": bool(consumes_coefficients),
-                                }
-                            ),
+                            "control_value_transform": reused_control_metadata,
                         }
                     )
                 continue

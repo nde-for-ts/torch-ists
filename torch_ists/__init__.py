@@ -31,7 +31,7 @@ __all__ = [
     "get_model_capabilities",
 ]
 
-__version__ = "0.7.5"
+__version__ = "0.7.6"
 
 _LAZY_EXPORTS = {
     "ists_layer": (".layer", "ists_layer"),

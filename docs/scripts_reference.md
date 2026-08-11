@@ -181,9 +181,13 @@ This is a bounded smoke run; the full defaults (`--num-samples 50 --max-num-epoc
 
 The default search uses model-specific axes where relevant, such as attention `n_heads`, flow `flow_depth`, and fixed Neural RDE depth by model name. Batch size and learning rate are resolved outside architecture search.
 
+Flow families use `native` when no backend is supplied. An explicit `stribor` or `auto` request is resolved once before trials and the effective backend is frozen into the saved parameters; backend selection is not a search axis.
+
 Parameter search runs the standard search without synthetic missingness injection (`missing_rate=0.0`). Provided datasets may still contain existing `NaN` values. Missing-rate sweeps are evaluation axes handled by `model_run.py --missing-rates` or `model_run.py --robustness-mode`, not by parameter search.
 
 Use the same `--control-value-transform` setting for parameter search and evaluation. Existing parameter artifacts without this field are interpreted as `identity`; the new default therefore requires fresh parameters for coefficient-driven models instead of silently reusing incompatible scales. Pass `--control-value-transform identity` for migration parity, and use a fresh parameter root when comparing both settings side by side.
+
+FlowPath builds its learned control from the direct value/time path and does not consume interpolation coefficients. A stored FlowPath parameter artifact that records `standardize` may therefore be interpreted as effective `identity` only when its model and method identity match that coefficient-invariant implementation. The reader records this interpretation without rewriting the artifact. Coefficient-consuming models retain strict transform matching.
 
 ### Output
 

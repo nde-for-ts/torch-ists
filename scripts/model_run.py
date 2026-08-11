@@ -51,6 +51,7 @@ from _common import (
     normalize_search_profile,
     omit_none_runtime_baseline_id,
     prepare_flow_backend_config,
+    resolve_param_control_value_transform,
     resolve_dataset_fixed_batch_policy,
     resolve_learning_rate_policy,
     SINGLE_SEARCH_REPEAT,
@@ -1190,6 +1191,7 @@ def _build_output_contract(
     training_loop_policy=None,
     control_value_transform="standardize",
     requested_control_value_transform=None,
+    parameter_artifact_interpretation=None,
     control_time_source="auto",
 ):
     task_name = str(task)
@@ -1203,7 +1205,7 @@ def _build_output_contract(
             "dataset_target_required": True,
             "supervision_mask_required": task_name in {"imputation", "change_detection"},
         }
-    return {
+    contract = {
         "dataset": str(data_name),
         "dataset_source": str(dataset_source),
         "data_shape": [int(value) for value in data_shape],
@@ -1238,6 +1240,11 @@ def _build_output_contract(
         ),
         "control_time_source": str(control_time_source),
     }
+    if parameter_artifact_interpretation is not None:
+        contract["parameter_artifact_interpretation"] = copy.deepcopy(
+            parameter_artifact_interpretation
+        )
+    return contract
 
 
 def _read_output_payload(output_path):
@@ -1683,6 +1690,7 @@ def _validate_existing_output_contract(
         "robustness_axes",
         "training_loop_policy",
         "control_value_transform",
+        "parameter_artifact_interpretation",
     )
     mismatches = []
     for field in semantic_fields:
@@ -1694,6 +1702,10 @@ def _validate_existing_output_contract(
                 expected_contract.get(field, "identity")
             )
             if actual_transform != expected_transform:
+                mismatches.append(field)
+            continue
+        if field == "parameter_artifact_interpretation":
+            if actual_contract.get(field) != expected_contract.get(field):
                 mismatches.append(field)
             continue
         if field not in actual_contract:
@@ -2332,19 +2344,15 @@ def run_model(
         require_recorded=True,
     )
     flow_backend_selection = _flow_backend_manifest_fields(model_config)
-    effective_control_transform, consumes_coefficients = resolve_model_control_value_transform(
+    (
+        effective_control_transform,
+        consumes_coefficients,
+        parameter_artifact_interpretation,
+    ) = resolve_param_control_value_transform(
         model_name,
+        model_config,
         control_value_transform,
     )
-    configured_control_transform = normalize_control_value_transform(
-        model_config.get("control_value_transform", "identity")
-    )
-    if configured_control_transform != effective_control_transform:
-        raise ValueError(
-            "Parameter artifact control-value transform mismatch: "
-            f"stored={configured_control_transform!r}, requested={effective_control_transform!r}. "
-            "Run parameter search with the same --control-value-transform setting."
-        )
     if effective_control_transform == "standardize":
         configured_metadata = model_config.get("control_value_transform_metadata")
         if not isinstance(configured_metadata, dict):
@@ -2536,6 +2544,7 @@ def run_model(
         training_loop_policy=training_loop_policy,
         control_value_transform=effective_control_transform,
         requested_control_value_transform=control_value_transform,
+        parameter_artifact_interpretation=parameter_artifact_interpretation,
         control_time_source="auto",
     )
     if flow_backend_selection:
@@ -2618,6 +2627,10 @@ def run_model(
     )
     control_transform_metadata["effective_transform"] = effective_control_transform
     control_transform_metadata["consumes_coefficients"] = bool(consumes_coefficients)
+    if parameter_artifact_interpretation is not None:
+        control_transform_metadata["parameter_artifact_interpretation"] = copy.deepcopy(
+            parameter_artifact_interpretation
+        )
     control_time_metadata = control_time_transform_metadata(control_time_state)
     sample_times = (
         apply_control_time_transform(

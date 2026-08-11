@@ -23,11 +23,9 @@ _FLOW_OPTION_TO_NATIVE_CLASS = {
 _FLOW_BACKEND_ALIASES = {
     "native": "native",
     "stribor": "stribor",
-    # The common default tries the supported Stribor runtime first and falls
-    # back to the package-authored native operator when that optional runtime is
-    # absent or uses an unsupported version. ``default`` and an unset backend
-    # both resolve to ``auto``.
-    "default": "auto",
+    # Omission is deterministic across environments. ``auto`` remains an
+    # explicit Stribor-first request with the documented narrow fallback.
+    "default": "native",
     "auto": "auto",
     # Compatibility-only spellings. Runtime state and serialized configuration
     # use the public backend name ``stribor``.
@@ -39,7 +37,7 @@ _FLOW_BACKEND_ALIASES = {
 
 def resolve_flow_backend(value: object | None) -> str:
     if value is None:
-        return "auto"
+        return "native"
     backend = str(value).strip().lower()
     normalized = _FLOW_BACKEND_ALIASES.get(backend)
     if normalized is None:
@@ -103,9 +101,9 @@ def build_flow_operator(
         # numerical implementation is never silently changed.
         return _build_stribor(option, dim, n_layers, hidden_dims)
 
-    # ``auto`` (the common default): try the supported Stribor backend and fall
-    # back only for an expected bootstrap availability condition. Constructor,
-    # numerical, and training failures are intentionally not caught here.
+    # Explicit ``auto`` tries the supported Stribor backend and falls back only
+    # for an expected bootstrap availability condition. Constructor, numerical,
+    # and training failures are intentionally not caught here.
     from .operators_stribor import StriborBackendUnavailableError
 
     try:

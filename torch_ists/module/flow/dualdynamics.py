@@ -30,7 +30,7 @@ class DualDynamics(nn.Module):
         flow_depth: int | None = None,
         input_option: str = "x",
         flow_option: str = "c",
-        flow_backend: str = "auto",
+        flow_backend: str = "native",
     ):
         super().__init__()
         if input_option != "x":

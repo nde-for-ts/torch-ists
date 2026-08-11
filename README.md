@@ -1,6 +1,6 @@
 # torch-ists
 
-[![Version](https://img.shields.io/badge/version-0.7.5-blue)](pyproject.toml) [![Python](https://img.shields.io/badge/python-%3E%3D3.10-blue)](pyproject.toml) [![PyTorch](https://img.shields.io/badge/PyTorch-%3E%3D2.0-ee4c2c)](pyproject.toml) [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![Package status](https://img.shields.io/badge/status-preview-orange)](#project-status)
+[![Version](https://img.shields.io/badge/version-0.7.6-blue)](pyproject.toml) [![Python](https://img.shields.io/badge/python-%3E%3D3.10-blue)](pyproject.toml) [![PyTorch](https://img.shields.io/badge/PyTorch-%3E%3D2.0-ee4c2c)](pyproject.toml) [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![Package status](https://img.shields.io/badge/status-preview-orange)](#project-status)
 
 **PyTorch toolkit for irregularly sampled multivariate time series with continuous-time methods (Neural ODE/CDE/SDE) and discrete-time baselines.**
 
@@ -48,14 +48,14 @@ python -m pip install -e .[cde]
 # SDE backends
 python -m pip install -e .[sde]
 
-# Direct Stribor flow backend (otherwise auto falls back to native)
+# Optional Stribor flow backend
 python -m pip install -e .[flow]
 
 # Full optional stack, including data loading and continuous-time model backends
 python -m pip install -e .[all]
 ```
 
-Flow models request `auto` by default. A core-only install uses the package-authored native fallback; `.[flow]` installs the supported MIT `stribor==0.1.0` runtime so `auto` selects the direct Stribor adapter without a Git checkout. Explicit `stribor` is fail-closed, while explicit `native` skips the optional-runtime probe. Only expected absence or supported-version incompatibility can trigger fallback; constructor, numerical, memory, and training failures remain errors.
+Flow models use the package-authored `native` backend by default, so installing an optional dependency does not change the default computation. `.[flow]` installs the supported MIT `stribor==0.1.0` runtime for an explicit `stribor` request. Explicit `stribor` is fail-closed; explicit `auto` tries Stribor first and falls back to `native` only for expected absence or supported-version incompatibility. Constructor, numerical, memory, and training failures remain errors.
 
 The external Neural Flows checkout is optional and used only for exact-reference comparisons. It is not required by `.[flow]`, included in `.[all]`, or bundled in wheels and source distributions. Its pinned source does not publish a LICENSE file. To run those optional comparisons:
 
@@ -65,7 +65,7 @@ python -m pip install --no-deps "git+https://github.com/mbilos/neural-flows-expe
 python -c "from torch_ists.module.flow.nfe_reference import require_nfe_installation; print(require_nfe_installation()['valid'])"
 ```
 
-The final command validates the reference repository URL, commit, dependency versions, import location, and source files without importing its model code. The selector applies to `neuralflow`, `flowpath`, `fusioncde`, and `dualdynamics`. Search resolves the requested backend once before trials, records `requested_backend` and `effective_backend`, and freezes the effective value through model-run; a changed execution environment is rejected. Results produced with Stribor must record `effective_backend="stribor"`. `"nfe"` and related compatibility spellings are input-only aliases and serialize as `stribor`.
+The final command validates the reference repository URL, commit, dependency versions, import location, and source files without importing its model code. The selector applies to `neuralflow`, `flowpath`, `fusioncde`, and `dualdynamics`. Search uses `native` when no backend is supplied, resolves any explicit request once before trials, records `requested_backend` and `effective_backend`, and freezes the effective value through model-run; a changed execution environment is rejected. Results produced with Stribor must record `effective_backend="stribor"`. `"nfe"` and related compatibility spellings are input-only aliases and serialize as `stribor`.
 
 **Source-checkout scripts require `torchcde`.** The `scripts/set_splits.py` -> `scripts/param_search.py` -> `scripts/model_run.py` pipeline shares one preprocessing path that builds interpolation coefficients with `torchcde`. This applies to sequence baselines too. Install `.[all]` (recommended) or at least `.[tune,cde]`.
 
