@@ -270,7 +270,7 @@ class ists_layer(nn.Module):
         )
         self.returns_loss = has_auxiliary_loss(self.model_name)
         self.uses_filled = getattr(handler, "uses_filled", False)
-        self.aux_nan_event_count = 0
+        self.aux_nonfinite_event_count = 0
 
         self.seq_layer.to(runtime_device)
 
@@ -284,6 +284,11 @@ class ists_layer(nn.Module):
         raise RuntimeError(
             "ists_layer has no parameter or buffer from which to derive a runtime device"
         )
+
+    @property
+    def aux_nan_event_count(self) -> int:
+        """Backward-compatible view of the non-finite auxiliary-loss counter."""
+        return self.aux_nonfinite_event_count
 
     def forward(self, seq: torch.Tensor, coeffs: Optional[torch.Tensor] = None, **kwargs):
         if seq.ndim != 4:
@@ -367,11 +372,11 @@ class ists_layer(nn.Module):
             model_name=self.model_name,
         )
         if loss is not None and not torch.isfinite(loss).all():
-            self.aux_nan_event_count += 1
+            self.aux_nonfinite_event_count += 1
             loss = handle_auxiliary_loss_nonfinite(
                 loss,
                 model_name=self.model_name,
-                event_count=self.aux_nan_event_count,
+                event_count=self.aux_nonfinite_event_count,
             )
 
         if self.returns_loss:

@@ -305,7 +305,7 @@ Before hyperparameter search, the workflow validates the selected model/task com
 
 ### Output
 
-- **Prediction file** (pickle): standard/missingness `<out-root>/<dataset>/<missing_rate>/<dataset>_<missing_rate>_<model>_<seed>`; robustness `<out-root>/<dataset>/robustness/<dataset>_robustness_<model>_<seed>__rates_<...>__types_<...>__sync_<...>`. The robustness path has **no** `<missing_rate>` segment — the test axes are encoded in the filename suffix. Output metadata includes the output contract, prediction identity, and task metrics; `runtime_baseline_id` appears only when explicitly supplied.
+- **Prediction file** (pickle): standard/missingness `<out-root>/<dataset>/<missing_rate>/<dataset>_<missing_rate>_<model>_<seed>`; robustness `<out-root>/<dataset>/robustness/<dataset>_robustness_<model>_<seed>__rates_<...>__types_<...>__sync_<...>`. The robustness path has **no** `<missing_rate>` segment — the test axes are encoded in the filename suffix. Output metadata includes the output contract, prediction identity, task metrics, non-finite auxiliary-loss event count, and the applicable method definition and search provenance; `runtime_baseline_id` appears only when explicitly supplied.
 - **Run log**: `<contract-dir>/<run-id>/run.manifest.json`. Executed records include resolved batch size, output-contract checks, and `runtime_baseline_id` only when explicitly supplied.
 
 ### Workflow Dependencies
@@ -319,6 +319,7 @@ Requires:
 - Classification split paths and bytes remain unchanged. Preview tasks use task-suffixed paths and never reuse an unsuffixed classification split.
 - Param artifacts are matched by dataset, model, task, search policy, repeat policy, search seed, target source, forecasting horizon, and split seed set. Stored checksums from older artifacts are optional metadata and are not reuse requirements. Compatible classification artifacts remain reusable; experimental-task artifacts that predate the explicit target contract must be regenerated.
 - Output artifacts are reused when `model_run.py --check` matches the stored semantic details and directly validates prediction contents, sample indices, Preview targets, supervision masks, and the forecasting origin/future-time grid. Stored contract checksums are not required. For a 100-condition result, validation also covers the exact ordered axes, uniqueness, full predictions, and complete channel-outage provenance. Structurally incomplete payloads are recomputed with `--no-check`.
+- Compact summary artifacts remain reusable for classification. Preview summaries do not contain the target and supervision arrays needed for task validation, so regression, forecasting, imputation, outlier-detection, and change-detection runs reject them and require a fresh execution.
 - Package version alone is not a reuse key. Upgrading does not require deleting all prior artifacts: reuse is decided from the semantic fields and directly validated payload structure above.
 
 ---

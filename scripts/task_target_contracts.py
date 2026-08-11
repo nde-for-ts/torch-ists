@@ -584,7 +584,7 @@ def load_task_targets_npz(
     if validated_inputs is not None:
         valid_time = np.isfinite(validated_inputs).any(axis=1)
         valid_time_policy = "any_finite_input_channel"
-        if target_mask is not None:
+        if target_mask is not None and task_name in {"imputation", "change_detection"}:
             supervised_time = np.asarray(target_mask > 0.5).any(axis=2)
             if np.any(supervised_time & ~valid_time):
                 raise ValueError(

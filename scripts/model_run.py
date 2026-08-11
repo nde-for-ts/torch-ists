@@ -99,22 +99,6 @@ def _normalize_param_mode(raw: str) -> str:
     raise argparse.ArgumentTypeError("parameter mode must be one of {'default', 'cv'}.")
 
 
-def _normalize_dataset_source_arg(raw: str) -> str:
-    try:
-        return normalize_dataset_source(raw)
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError(str(exc)) from exc
-
-
-def _normalize_param_mode(raw: str) -> str:
-    normalized = str(raw).strip().lower()
-    if normalized == "default":
-        return "default"
-    if normalized in {"cv", "improved"}:
-        return "cv"
-    raise argparse.ArgumentTypeError("parameter mode must be one of {'default', 'cv'}.")
-
-
 def _abspath_or_none(path):
     if path is None:
         return None
@@ -331,6 +315,31 @@ def _requires_flow_raw_input(model_name: str) -> bool:
     from torch_ists.config.alias_policy import is_flow_strict_raw_name
 
     return is_flow_strict_raw_name(str(model_name))
+
+
+def _validate_model_method_identity(model_name: str, model_config: dict) -> str | None:
+    from torch_ists.config.alias_policy import normalize_flow_alias
+
+    normalized = normalize_flow_alias(str(model_name).strip().lower())
+    expected = None
+    if normalized.startswith("flowpath-"):
+        expected = "flowpath-input-x-learned-control"
+    elif normalized.startswith("fusioncde-"):
+        expected = "fusioncde-raw-fixed-control-fusion"
+    if expected is None:
+        return None
+    identity = model_config.get("artifact_identity") if isinstance(model_config, dict) else None
+    actual = (
+        str(identity.get("method_definition") or "").strip().lower()
+        if isinstance(identity, dict)
+        else ""
+    )
+    if actual != expected:
+        raise ValueError(
+            "Parameter artifact method_definition mismatch: "
+            f"found={actual or None!r}, expected={expected!r} for model={normalized!r}."
+        )
+    return expected
 
 
 def _validate_param_search_profile(
@@ -1209,6 +1218,9 @@ def _build_output_contract(
     requested_control_value_transform=None,
     parameter_artifact_interpretation=None,
     control_time_source="auto",
+    method_definition=None,
+    search_algorithm_seed=None,
+    search_policy=None,
 ):
     task_name = str(task)
     task_target = None
@@ -1261,6 +1273,12 @@ def _build_output_contract(
         contract["parameter_artifact_interpretation"] = copy.deepcopy(
             parameter_artifact_interpretation
         )
+    if method_definition is not None:
+        contract["method_definition"] = str(method_definition)
+    if search_algorithm_seed is not None:
+        contract["search_algorithm_seed"] = int(search_algorithm_seed)
+    if search_policy is not None:
+        contract["search_policy"] = str(search_policy)
     return contract
 
 
@@ -1520,6 +1538,12 @@ def _validate_prediction_payload(
                         f"Output artifact {output_path} cannot be reused: forecast origin does not match current context."
                     )
     else:
+        if task != "classification":
+            raise OutputArtifactContractError(
+                f"Output artifact {output_path} cannot be reused: non-classification summary "
+                "artifacts cannot be reused because target and supervision values are not stored. "
+                "Run the selected Preview task again."
+            )
         if any(predictions.get(key) is not None for key in ("y_true", "y_pred", "logit_list")):
             raise OutputArtifactContractError(
                 f"Output artifact {output_path} cannot be reused: summary predictions contain full arrays."
@@ -2349,7 +2373,7 @@ def _build_result_payload(
     robustness_axes=None,
     output_contract=None,
     timestamp_summary=None,
-    aux_nan_event_count=0,
+    aux_nonfinite_event_count=0,
     runtime_baseline_id=None,
     training_loop=None,
     coeff_cache=None,
@@ -2373,7 +2397,7 @@ def _build_result_payload(
         "lr_policy": lr_policy,
         "robustness_axes": robustness_axes,
         "timestamp_summary": timestamp_summary,
-        "aux_nan_event_count": int(aux_nan_event_count),
+        "aux_nonfinite_event_count": int(aux_nonfinite_event_count),
         "runtime_baseline_id": runtime_baseline_id,
         "training_loop": training_loop,
         "coeff_cache": coeff_cache,
@@ -2397,8 +2421,10 @@ def _build_result_payload(
     })
 
 
-def _get_aux_nan_event_count(model):
+def _get_aux_nonfinite_event_count(model):
     seq_layer = getattr(model, "seq_layer", None)
+    if hasattr(seq_layer, "aux_nonfinite_event_count"):
+        return int(seq_layer.aux_nonfinite_event_count)
     return int(getattr(seq_layer, "aux_nan_event_count", 0))
 
 
@@ -2434,6 +2460,7 @@ def run_model(
 ):
     task = str(task).strip().lower()
     validate_model_task_capability(model_name, task)
+    method_definition = _validate_model_method_identity(model_name, model_config)
     model_config = prepare_flow_backend_config(
         model_name,
         model_config,
@@ -2645,6 +2672,9 @@ def run_model(
         requested_control_value_transform=control_value_transform,
         parameter_artifact_interpretation=parameter_artifact_interpretation,
         control_time_source="auto",
+        method_definition=method_definition,
+        search_algorithm_seed=model_config.get("search_algorithm_seed"),
+        search_policy=_infer_cli_search_policy(model_config),
     )
     if flow_backend_selection:
         output_contract["flow_backend"] = dict(flow_backend_selection)
@@ -3007,7 +3037,7 @@ def run_model(
             robustness_axes=robustness_axes,
             output_contract=output_contract,
             timestamp_summary=timestamp_summary,
-            aux_nan_event_count=_get_aux_nan_event_count(model),
+            aux_nonfinite_event_count=_get_aux_nonfinite_event_count(model),
             runtime_baseline_id=runtime_baseline_id,
             training_loop=training_loop_metadata,
             coeff_cache=coeff_cache_summary,
@@ -3311,7 +3341,7 @@ def run_model(
         lr_policy=lr_policy,
         output_contract=output_contract,
         timestamp_summary=timestamp_summary,
-        aux_nan_event_count=_get_aux_nan_event_count(model),
+        aux_nonfinite_event_count=_get_aux_nonfinite_event_count(model),
         runtime_baseline_id=runtime_baseline_id,
         training_loop=training_loop_metadata,
         coeff_cache=coeff_cache_summary,

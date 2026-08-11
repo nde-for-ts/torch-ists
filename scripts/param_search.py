@@ -126,22 +126,6 @@ def _normalize_search_mode(raw: str) -> str:
     raise argparse.ArgumentTypeError("search mode must be one of {'default', 'cv'}.")
 
 
-def _normalize_dataset_source_arg(raw: str) -> str:
-    try:
-        return normalize_dataset_source(raw)
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError(str(exc)) from exc
-
-
-def _normalize_search_mode(raw: str) -> str:
-    normalized = str(raw).strip().lower()
-    if normalized == "default":
-        return "default"
-    if normalized in {"cv", "improved"}:
-        return "cv"
-    raise argparse.ArgumentTypeError("search mode must be one of {'default', 'cv'}.")
-
-
 def _abspath_or_none(path):
     if path is None:
         return None

@@ -889,7 +889,7 @@ Source ODE model parameters:
 
 The defaults above keep method-specific losses on a practical scale when they are added to a task objective. Applications may tune the weights with the rest of the training configuration.
 
-Non-finite auxiliary losses emit a `RuntimeWarning` and are converted to finite values by default. Set `TORCH_ISTS_STRICT_AUXILIARY_LOSS=1` to raise immediately instead; the strict check covers both NaN and infinite values.
+Non-finite auxiliary losses emit a `RuntimeWarning` and replace NaN and positive or negative infinity with zero by default. The runtime exposes `aux_nonfinite_event_count`, and model-run output metadata records the same field. Set `TORCH_ISTS_STRICT_AUXILIARY_LOSS=1` to raise immediately instead; the strict check covers both NaN and infinite values.
 
 LatentSDE model parameters:
 
@@ -964,6 +964,7 @@ Current defaults:
 - `neuralflow` uses the residual-flow variant by default as a flow-only row. `dualdynamics` and `flowpath` are CDE/control-path rows. FlowPath builds its learned control from the raw value/time path and accepts but does not consume interpolation coefficients.
 - `flow_backend="native"` is the runtime and search default for all flow models. Installing `.[flow]` provides `stribor==0.1.0` for an explicit `stribor` or `auto` request without changing omitted/default behavior. Explicit `stribor` is fail-closed; explicit `auto` tries Stribor first with a narrow native fallback; explicit `native` bypasses the optional-runtime probe. Runtime objects expose `requested_flow_backend`, effective `flow_backend`, `used_flow_backend_fallback`, and the enumerated fallback reason when applicable. Older `nfe` spellings are input-only aliases and normalize to `stribor`. Search resolves once before trials, freezes the effective backend, and model-run rejects a recorded/runtime mismatch.
 - `fusioncde-r/g/c` provide the coefficient-augmented flow/CDE dataflow under a distinct descriptive name. They consume interpolation coefficients and therefore use train-observed value standardization by default in packaged workflows.
+- FlowPath and FusionCDE parameter artifacts carry distinct method definitions. Direct model-run calls reject a missing or mismatched method definition before training, preventing parameters for one dataflow from being interpreted as the other.
 - Model names use residual-flow defaults: `neuralflow`, `dualdynamics`, `flowpath`, and `fusioncde`. Explicit `-r/-g/-c` variants remain accepted variants.
 
 Compatibility mapping:

@@ -48,7 +48,7 @@ def handle_auxiliary_loss_nonfinite(loss: torch.Tensor, *, model_name: str, even
         RuntimeWarning,
         stacklevel=3,
     )
-    return torch.nan_to_num(loss)
+    return torch.nan_to_num(loss, nan=0.0, posinf=0.0, neginf=0.0)
 
 
 __all__ = [

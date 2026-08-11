@@ -1,4 +1,4 @@
-"""Paper-aligned FlowPath model for the packaged runtime."""
+"""FlowPath model using the input-state learned-control formulation."""
 
 from __future__ import annotations
 
