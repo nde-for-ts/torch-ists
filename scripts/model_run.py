@@ -99,6 +99,22 @@ def _normalize_param_mode(raw: str) -> str:
     raise argparse.ArgumentTypeError("parameter mode must be one of {'default', 'cv'}.")
 
 
+def _normalize_dataset_source_arg(raw: str) -> str:
+    try:
+        return normalize_dataset_source(raw)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+
+
+def _normalize_param_mode(raw: str) -> str:
+    normalized = str(raw).strip().lower()
+    if normalized == "default":
+        return "default"
+    if normalized in {"cv", "improved"}:
+        return "cv"
+    raise argparse.ArgumentTypeError("parameter mode must be one of {'default', 'cv'}.")
+
+
 def _abspath_or_none(path):
     if path is None:
         return None
@@ -1203,7 +1219,8 @@ def _build_output_contract(
                 int(forecast_horizon) if task_name == "forecasting" else None
             ),
             "dataset_target_required": True,
-            "supervision_mask_required": task_name in {"imputation", "change_detection"},
+            "supervision_mask_required": task_name
+            in {"forecasting", "imputation", "change_detection"},
         }
     contract = {
         "dataset": str(data_name),
@@ -1437,7 +1454,7 @@ def _validate_prediction_payload(
                     raise OutputArtifactContractError(
                         f"Output artifact {output_path} cannot be reused: {key} must be finite."
                     )
-            if task in {"imputation", "change_detection"}:
+            if task in {"forecasting", "imputation", "change_detection"}:
                 target_mask = predictions.get("target_mask")
                 if target_mask is None:
                     raise OutputArtifactContractError(
@@ -1486,7 +1503,7 @@ def _validate_prediction_payload(
                     raise OutputArtifactContractError(
                         f"Output artifact {output_path} cannot be reused: {key} shape is invalid."
                     )
-            if task in {"imputation", "change_detection"}:
+            if task in {"forecasting", "imputation", "change_detection"}:
                 if predictions.get("task_mask_shape") != expected_shape:
                     raise OutputArtifactContractError(
                         f"Output artifact {output_path} cannot be reused: task_mask_shape is invalid."
@@ -2447,9 +2464,10 @@ def run_model(
     task_targets = None
     target_masks = None
     target_spec = None
+    forecasting_schedule = None
     preprocess_X = X
     if task != "classification" and target_source == "dataset":
-        task_targets, target_masks, target_spec = load_task_targets_npz(
+        task_targets, target_masks, target_spec, forecasting_schedule = load_task_targets_npz(
             dataset=data_name,
             targets_root=targets_root,
             task=task,
@@ -2458,6 +2476,8 @@ def run_model(
             seq_len=int(seq_len),
             input_dim=int(num_dim),
             input_values=X,
+            input_timestamps=timestamps,
+            return_forecasting_schedule=True,
         )
         target_spec = dict(target_spec)
         target_spec["split_supervision"] = validate_task_splits(
@@ -2687,6 +2707,12 @@ def run_model(
         targets=task_targets,
         target_masks=target_masks,
         sample_times=sample_times,
+        future_timestamps=(
+            None if forecasting_schedule is None else forecasting_schedule["future_timestamps"]
+        ),
+        forecast_origin=(
+            None if forecasting_schedule is None else forecasting_schedule["forecast_origin"]
+        ),
     )
     valid_dataset = ists_dataset(
         Y,
@@ -2699,6 +2725,12 @@ def run_model(
         targets=task_targets,
         target_masks=target_masks,
         sample_times=sample_times,
+        future_timestamps=(
+            None if forecasting_schedule is None else forecasting_schedule["future_timestamps"]
+        ),
+        forecast_origin=(
+            None if forecasting_schedule is None else forecasting_schedule["forecast_origin"]
+        ),
     )
     test_dataset = ists_dataset(
         Y,
@@ -2711,6 +2743,12 @@ def run_model(
         targets=task_targets,
         target_masks=target_masks,
         sample_times=sample_times,
+        future_timestamps=(
+            None if forecasting_schedule is None else forecasting_schedule["future_timestamps"]
+        ),
+        forecast_origin=(
+            None if forecasting_schedule is None else forecasting_schedule["forecast_origin"]
+        ),
     )
 
     train_batch = DataLoader(
@@ -2825,6 +2863,7 @@ def run_model(
             task=task,
             task_targets=task_targets,
             target_masks=target_masks,
+            forecasting_schedule=forecasting_schedule,
             batch_size=batch_size,
             timestamps=timestamps,
             timestamp_delta_scale=timestamp_delta_scale,
@@ -2992,14 +3031,22 @@ def run_model(
                     delta,
                 ], dim=1).to(device)
 
-                output = model(
-                    seq,
-                    batch['coeffs'].to(device),
-                    sample_times=(
+                runtime_kwargs = {
+                    "sample_times": (
                         None
                         if "sample_times" not in batch
                         else batch["sample_times"].to(device)
-                    ),
+                    )
+                }
+                if task == "forecasting":
+                    runtime_kwargs.update(
+                        future_timestamps=batch["future_timestamps"].to(device),
+                        forecast_origin=batch["forecast_origin"].to(device),
+                    )
+                output = model(
+                    seq,
+                    batch['coeffs'].to(device),
+                    **runtime_kwargs,
                 )
                 logit = output[0] if isinstance(output, tuple) else output
                 y_true.append(y.cpu().numpy())
@@ -3059,7 +3106,7 @@ def run_model(
                 pred, target = _align_prediction_target(pred, target, task)
                 pred_list.append(pred.detach().cpu().numpy())
                 target_list.append(target.detach().cpu().numpy())
-                if task in {"imputation", "change_detection"}:
+                if task in {"forecasting", "imputation", "change_detection"}:
                     target_mask = batch.get("target_mask")
                     if target_mask is None or tuple(target_mask.shape) != tuple(target.shape):
                         raise ValueError(f"{task} evaluation requires a target_mask matching target")
@@ -3214,6 +3261,7 @@ def _evaluate_robustness(
     task_targets,
     target_masks,
     batch_size,
+    forecasting_schedule=None,
     timestamps=None,
     timestamp_delta_scale=None,
     coeff_cache_dir=None,
@@ -3398,6 +3446,16 @@ def _evaluate_robustness(
                         targets=task_targets,
                         target_masks=target_masks,
                         sample_times=sample_times,
+                        future_timestamps=(
+                            None
+                            if forecasting_schedule is None
+                            else forecasting_schedule["future_timestamps"]
+                        ),
+                        forecast_origin=(
+                            None
+                            if forecasting_schedule is None
+                            else forecasting_schedule["forecast_origin"]
+                        ),
                     )
                     test_batch = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, drop_last=False)
 
@@ -3415,14 +3473,22 @@ def _evaluate_robustness(
                                     delta,
                                 ], dim=1).to(device)
 
-                                output = model(
-                                    seq,
-                                    batch['coeffs'].to(device),
-                                    sample_times=(
+                                runtime_kwargs = {
+                                    "sample_times": (
                                         None
                                         if "sample_times" not in batch
                                         else batch["sample_times"].to(device)
-                                    ),
+                                    )
+                                }
+                                if task == "forecasting":
+                                    runtime_kwargs.update(
+                                        future_timestamps=batch["future_timestamps"].to(device),
+                                        forecast_origin=batch["forecast_origin"].to(device),
+                                    )
+                                output = model(
+                                    seq,
+                                    batch['coeffs'].to(device),
+                                    **runtime_kwargs,
                                 )
                                 logit = output[0] if isinstance(output, tuple) else output
 
@@ -3474,7 +3540,7 @@ def _evaluate_robustness(
                                 pred, target = _align_prediction_target(pred, target, task)
                                 pred_list.append(pred.detach().cpu().numpy())
                                 target_list.append(target.detach().cpu().numpy())
-                                if task in {"imputation", "change_detection"}:
+                                if task in {"forecasting", "imputation", "change_detection"}:
                                     target_mask = batch.get("target_mask")
                                     if target_mask is None or tuple(target_mask.shape) != tuple(target.shape):
                                         raise ValueError(

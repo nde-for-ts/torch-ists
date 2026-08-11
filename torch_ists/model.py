@@ -104,10 +104,11 @@ class ists_model(nn.Module):
         elif self.task == "regression":
             self.head = nn.Linear(hidden_dim, self.output_dim)
         elif self.task == "forecasting":
-            self.head = nn.Linear(
-                hidden_dim,
-                int(self.forecast_horizon) * self.output_dim,
+            self.future_time_encoder = nn.Sequential(
+                nn.Linear(1, hidden_dim),
+                nn.Tanh(),
             )
+            self.head = nn.Linear(hidden_dim, self.output_dim)
         elif self.task == "imputation":
             self.head = nn.Linear(hidden_dim, self.input_dim)
         elif self.task == "outlier_detection":
@@ -135,11 +136,11 @@ class ists_model(nn.Module):
 
     @staticmethod
     def _map_checkpoint_keys(state_dict):
-        """Remap checkpoint keys from historical layouts to the current layout.
+        """Remap checkpoint keys from older layouts to the current layout.
 
         Handles three checkpoint layouts:
-        - fc.* / seq_layer.*  (earlier classifier checkpoints)
-        - _model.head.* / _model.seq_layer.*  (earlier wrapped classifier checkpoints)
+        - fc.* / seq_layer.*  (historical classifier checkpoints)
+        - _model.head.* / _model.seq_layer.*  (pre-v1.1 ists_classifier wrapper)
         - head.* / seq_layer.*  (current format, pass-through)
         """
         mapped = OrderedDict()
@@ -192,6 +193,8 @@ class ists_model(nn.Module):
         *,
         return_aux_loss: bool = False,
         sample_times: Optional[torch.Tensor] = None,
+        future_timestamps: Optional[torch.Tensor] = None,
+        forecast_origin: Optional[torch.Tensor] = None,
     ):
         # Inline backbone unpacking (was _run_backbone)
         result = self.seq_layer(seq, coeffs, sample_times=sample_times)
@@ -218,11 +221,47 @@ class ists_model(nn.Module):
         elif self.task == "regression":
             pred = self.head(sample_summary)
         elif self.task == "forecasting":
-            pred = self.head(sample_summary).reshape(
-                sample_summary.shape[0],
-                int(self.forecast_horizon),
-                self.output_dim,
+            if future_timestamps is None or forecast_origin is None:
+                raise ValueError(
+                    "forecasting requires future_timestamps and forecast_origin"
+                )
+            future_timestamps = torch.as_tensor(
+                future_timestamps,
+                device=sample_summary.device,
+                dtype=sample_summary.dtype,
             )
+            forecast_origin = torch.as_tensor(
+                forecast_origin,
+                device=sample_summary.device,
+                dtype=sample_summary.dtype,
+            ).reshape(-1)
+            expected_shape = (
+                int(sample_summary.shape[0]),
+                int(self.forecast_horizon),
+            )
+            if tuple(future_timestamps.shape) != expected_shape:
+                raise ValueError(
+                    "future_timestamps shape mismatch: "
+                    f"expected {expected_shape}, got {tuple(future_timestamps.shape)}"
+                )
+            if tuple(forecast_origin.shape) != (expected_shape[0],):
+                raise ValueError(
+                    "forecast_origin shape mismatch: "
+                    f"expected {(expected_shape[0],)}, got {tuple(forecast_origin.shape)}"
+                )
+            if not torch.isfinite(future_timestamps).all() or not torch.isfinite(
+                forecast_origin
+            ).all():
+                raise ValueError("future_timestamps and forecast_origin must be finite")
+            elapsed = future_timestamps - forecast_origin.unsqueeze(1)
+            if not torch.all(elapsed > 0):
+                raise ValueError("future_timestamps must be later than forecast_origin")
+            if elapsed.shape[1] > 1 and not torch.all(
+                future_timestamps[:, 1:] > future_timestamps[:, :-1]
+            ):
+                raise ValueError("future_timestamps must be strictly increasing")
+            time_features = self.future_time_encoder(torch.log1p(elapsed).unsqueeze(-1))
+            pred = self.head(sample_summary.unsqueeze(1) + time_features)
         elif self.task == "imputation":
             pred = self.head(out)
         elif self.task == "outlier_detection":

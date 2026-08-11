@@ -103,7 +103,7 @@ The packaged defaults are Euler for `ode-rnn`, GRU-ODE-Bayes, and NJ-ODE, and ad
 
 For variable-length batches, ODE-RNN evolves fixed-step intervals in batch, Latent ODE ignores padding-only timestamps during recognition and decoding, and both methods use each sample's final valid index for their returned representation. LatentSDE likewise evaluates path KL at each sample's own terminal step and holds the returned latent path constant across padding.
 
-The package's six task heads are shared adapters around these backbones. In particular, the NJ-ODE forecasting head projects the context representation to a fixed output horizon; it is not the paper's native future-time filtering path because the current forecasting target does not include a future timestamp grid.
+The package's six task heads are shared adapters around these backbones. The common forecasting adapter conditions each backbone's context representation on a validated future timestamp grid. This is a package-level future-time decoder and does not claim to reproduce every model paper's native forecasting procedure.
 
 ---
 

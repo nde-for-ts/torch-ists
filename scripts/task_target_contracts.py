@@ -1,4 +1,4 @@
-"""Task target helpers for packaged runs."""
+"""Task target contracts for non-classification package workflows."""
 
 from __future__ import annotations
 
@@ -23,6 +23,9 @@ TASK_TARGET_KEYS = {
 
 IMPUTATION_MASK_KEY = "imputation_loss_mask"
 CHANGE_DETECTION_MASK_KEY = "change_detection_loss_mask"
+FORECASTING_TIMESTAMPS_KEY = "forecasting_timestamps"
+FORECASTING_ORIGIN_KEY = "forecasting_origin"
+FORECASTING_MASK_KEY = "forecasting_loss_mask"
 
 
 def resolve_task_split_path(
@@ -125,23 +128,23 @@ def mask_imputation_inputs(
         hidden.masked_fill_(mask.permute(0, 2, 1) > 0.5, float("nan"))
         return hidden
 
-    array = np.asarray(inputs)
-    if array.ndim != 3:
+    values = np.asarray(inputs)
+    if values.ndim != 3:
         raise ValueError("imputation inputs must have shape [N,D,L]")
-    if not np.issubdtype(array.dtype, np.floating):
+    if not np.issubdtype(values.dtype, np.floating):
         raise ValueError("imputation inputs must use a floating dtype")
     if torch.is_tensor(supervision_mask):
         mask_array = supervision_mask.detach().cpu().numpy()
     else:
         mask_array = np.asarray(supervision_mask)
-    expected_shape = (int(array.shape[0]), int(array.shape[2]), int(array.shape[1]))
+    expected_shape = (int(values.shape[0]), int(values.shape[2]), int(values.shape[1]))
     if tuple(mask_array.shape) != expected_shape:
         raise ValueError(
             "imputation supervision mask/input shape mismatch: "
             f"expected mask {expected_shape}, got {tuple(mask_array.shape)}"
         )
-    hidden = array.copy()
-    hidden[np.transpose(mask_array > 0.5, (0, 2, 1))] = np.nan
+    hidden = values.copy()
+    hidden[np.transpose(mask_array, (0, 2, 1)) > 0.5] = np.nan
     return hidden
 
 
@@ -161,7 +164,7 @@ def validate_task_splits(
             raise ValueError(f"{split_name} split is empty")
         split_target = target.index_select(0, indices)
         supervised = split_target.reshape(-1)
-        if task_name in {"imputation", "change_detection"}:
+        if task_name in {"forecasting", "imputation", "change_detection"}:
             if target_mask is None:
                 raise ValueError(f"{task_name} requires target_mask")
             split_mask = target_mask.to(target.device).index_select(0, indices).bool()
@@ -254,9 +257,89 @@ def _validate_forecasting_target(
         raise ValueError(
             f"forecasting_target feature dim mismatch: expected {input_dim}, got {target.shape[2]}"
         )
-    if not np.isfinite(target).all():
-        raise ValueError("forecasting_target must be finite")
     return target
+
+
+def _validate_forecasting_schedule(
+    *,
+    timestamps: np.ndarray,
+    origin: np.ndarray,
+    mask: np.ndarray,
+    target: np.ndarray,
+    num_samples: int,
+    horizon: int,
+    input_dim: int,
+    input_values: Optional[np.ndarray],
+    input_timestamps: Any,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, str]:
+    expected_target_shape = (num_samples, horizon, input_dim)
+    if tuple(mask.shape) != expected_target_shape:
+        raise ValueError(
+            f"forecasting_loss_mask shape mismatch: expected {expected_target_shape}, got {mask.shape}"
+        )
+    if not np.isfinite(mask).all() or not set(np.unique(mask).tolist()).issubset({0, 0.0, 1, 1.0}):
+        raise ValueError("forecasting_loss_mask must be finite binary 0/1")
+    supervised = mask > 0.5
+    if not supervised.reshape(num_samples, -1).any(axis=1).all():
+        raise ValueError("forecasting_loss_mask must supervise at least one value per sample")
+    if not np.isfinite(target[supervised]).all():
+        raise ValueError("forecasting_target must be finite at supervised positions")
+
+    if tuple(timestamps.shape) != (num_samples, horizon):
+        raise ValueError(
+            "forecasting_timestamps must have shape "
+            f"[{num_samples},{horizon}], got {timestamps.shape}"
+        )
+    if not np.isfinite(timestamps).all():
+        raise ValueError("forecasting_timestamps must be finite")
+    if not np.all(np.diff(timestamps, axis=1) > 0):
+        raise ValueError("forecasting_timestamps must be strictly increasing per sample")
+
+    origin = np.asarray(origin).reshape(-1)
+    if tuple(origin.shape) != (num_samples,):
+        raise ValueError(
+            f"forecasting_origin must have shape [{num_samples}], got {origin.shape}"
+        )
+    if not np.isfinite(origin).all():
+        raise ValueError("forecasting_origin must be finite")
+    if not np.all(timestamps[:, 0] > origin):
+        raise ValueError("forecasting_timestamps must be later than forecast origin")
+
+    origin_policy = "declared_origin_only"
+    if input_values is not None:
+        valid_context = np.isfinite(input_values).any(axis=1)
+        if not valid_context.any(axis=1).all():
+            raise ValueError("forecasting context must contain an observed value per sample")
+        if input_timestamps is None:
+            context_times = np.broadcast_to(
+                np.arange(input_values.shape[2], dtype=np.float64),
+                (num_samples, input_values.shape[2]),
+            )
+            origin_policy = "last_valid_index_time"
+        else:
+            if torch.is_tensor(input_timestamps):
+                input_timestamps = input_timestamps.detach().cpu().numpy()
+            context_times = np.asarray(input_timestamps, dtype=np.float64)
+            expected_context_shape = (num_samples, input_values.shape[2])
+            if tuple(context_times.shape) != expected_context_shape:
+                raise ValueError(
+                    "input_timestamps must have shape "
+                    f"{expected_context_shape}, got {context_times.shape}"
+                )
+            if not np.isfinite(context_times[valid_context]).all():
+                raise ValueError("input_timestamps must be finite at observed context positions")
+            origin_policy = "last_valid_context_timestamp"
+        last_indices = np.where(
+            valid_context,
+            np.arange(valid_context.shape[1])[None, :],
+            -1,
+        ).max(axis=1)
+        context_origin = context_times[np.arange(num_samples), last_indices]
+        if not np.allclose(origin, context_origin, rtol=1e-7, atol=1e-9):
+            raise ValueError("forecasting_origin must equal the last valid context timestamp")
+
+    cleaned_target = np.where(supervised, target, 0.0).astype(np.float32)
+    return cleaned_target, mask.astype(np.float32), origin.astype(np.float64), origin_policy
 
 
 def _validate_imputation_target(
@@ -356,7 +439,9 @@ def _validate_change_detection_target(
     seq_len: int,
 ) -> np.ndarray:
     if target.ndim != 3:
-        raise ValueError(f"change_detection_target must be 3D [N,L,1], got {target.shape}")
+        raise ValueError(
+            f"change_detection_target must be 3D [N,L,1], got {target.shape}"
+        )
     _validate_first_dim("change_detection_target", target, num_samples)
     if target.shape[1] != seq_len:
         raise ValueError(
@@ -387,7 +472,10 @@ def load_task_targets_npz(
     seq_len: int,
     input_dim: int,
     input_values: Any = None,
-) -> tuple[torch.Tensor, Optional[torch.Tensor], Dict[str, Any]]:
+    input_timestamps: Any = None,
+    return_forecasting_schedule: bool = False,
+):
+    """Load and validate dataset-provided targets for non-classification tasks."""
     task_name = str(task).strip().lower()
     if task_name not in SUPPORTED_TARGET_TASKS:
         raise ValueError(
@@ -403,7 +491,9 @@ def load_task_targets_npz(
     )
     target_path = Path(targets_root) / f"{dataset}.npz"
     if not target_path.exists():
-        raise FileNotFoundError(f"Target bundle not found for dataset={dataset}: {target_path}")
+        raise FileNotFoundError(
+            f"Target bundle not found for dataset={dataset}: {target_path}"
+        )
 
     with np.load(target_path, allow_pickle=False) as payload:
         target_key = TASK_TARGET_KEYS[task_name]
@@ -411,6 +501,8 @@ def load_task_targets_npz(
 
         target_mask: Optional[np.ndarray] = None
         target_horizon: Optional[int] = None
+        forecasting_schedule = None
+        forecasting_origin_policy = None
         if task_name == "regression":
             target = _validate_regression_target(raw_target, num_samples=num_samples)
         elif task_name == "forecasting":
@@ -425,6 +517,32 @@ def load_task_targets_npz(
                 horizon=target_horizon,
                 input_dim=input_dim,
             )
+            raw_times = _require_key(
+                payload, FORECASTING_TIMESTAMPS_KEY, dataset=dataset, task=task_name
+            )
+            raw_origin = _require_key(
+                payload, FORECASTING_ORIGIN_KEY, dataset=dataset, task=task_name
+            )
+            raw_mask = _require_key(
+                payload, FORECASTING_MASK_KEY, dataset=dataset, task=task_name
+            )
+            target, target_mask, forecast_origin, forecasting_origin_policy = (
+                _validate_forecasting_schedule(
+                    timestamps=np.asarray(raw_times, dtype=np.float64),
+                    origin=np.asarray(raw_origin, dtype=np.float64),
+                    mask=np.asarray(raw_mask),
+                    target=target,
+                    num_samples=num_samples,
+                    horizon=target_horizon,
+                    input_dim=input_dim,
+                    input_values=validated_inputs,
+                    input_timestamps=input_timestamps,
+                )
+            )
+            forecasting_schedule = {
+                "future_timestamps": torch.as_tensor(raw_times, dtype=torch.float64),
+                "forecast_origin": torch.as_tensor(forecast_origin, dtype=torch.float64),
+            }
         elif task_name == "imputation":
             target = _validate_imputation_target(
                 raw_target,
@@ -505,7 +623,9 @@ def load_task_targets_npz(
         ),
         "forecast_horizon": target_horizon if task_name == "forecasting" else None,
         "mask_key": (
-            IMPUTATION_MASK_KEY
+            FORECASTING_MASK_KEY
+            if task_name == "forecasting"
+            else IMPUTATION_MASK_KEY
             if task_name == "imputation"
             else CHANGE_DETECTION_MASK_KEY
             if task_name == "change_detection"
@@ -513,5 +633,15 @@ def load_task_targets_npz(
         ),
         "mask_shape": [int(x) for x in mask_tensor.shape] if mask_tensor is not None else None,
         "mask_dtype": str(mask_tensor.dtype) if mask_tensor is not None else None,
+        "forecasting_timestamps_key": (
+            FORECASTING_TIMESTAMPS_KEY if task_name == "forecasting" else None
+        ),
+        "forecasting_origin_key": (
+            FORECASTING_ORIGIN_KEY if task_name == "forecasting" else None
+        ),
+        "forecasting_origin_policy": forecasting_origin_policy,
     }
-    return target_tensor, mask_tensor, target_spec
+    result = (target_tensor, mask_tensor, target_spec)
+    if return_forecasting_schedule:
+        return (*result, forecasting_schedule)
+    return result

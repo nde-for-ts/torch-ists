@@ -862,7 +862,7 @@ Broader task surface:
 - `regression/forecasting/imputation/outlier_detection/change_detection` are available through `ists_model`.
 - `classification` is the stable packaged path.
 
-The five non-classification outputs are shared package task-head adapters. A model's original paper may define a narrower prediction problem; for example, the NJ-ODE forecasting adapter does not reproduce paper-native future-time filtering because the current target contract does not carry a future timestamp grid.
+The five non-classification outputs are shared package task-head adapters. Forecasting conditions its decoder on `future_timestamps [N,H]` relative to `forecast_origin [N]`; both are required by `forward` and the future grid must be finite, strictly ordered, and later than the origin. Dataset-owned future target values are not model inputs.
 
 The source-checkout workflow accepts X-only dataset NPZ files for preview tasks, stores their deterministic splits at task-suffixed paths, and infers regression `output_dim` from `[N,R]` dataset targets. Target values stay in dataset-native units; shape, dtype, mask, valid-time, and horizon checks run before training.
 
@@ -875,7 +875,7 @@ Behavior notes:
 - Some continuous-time rows honor `method` only at model creation.
 - Some compatibility models accept solver-shaped inputs only for backward compatibility and may emit a runtime warning.
 - Unsupported solver knobs raise `ValueError` instead of silently changing model behavior.
-- `output_dim` defaults to `1`. Forecasting requires a positive `forecast_horizon`; omitting it or passing a non-positive value raises `ValueError`.
+- `output_dim` defaults to `1`. Forecasting requires a positive `forecast_horizon`; omitting it or passing a non-positive value raises `ValueError`. Forecasting calls also require `future_timestamps` and `forecast_origin`.
 - `forward(..., return_aux_loss=True)` returns `(prediction, aux_loss)` for auxiliary-loss backbones.
 - Non-finite predictions raise `RuntimeError`.
 

@@ -1,6 +1,6 @@
 # torch-ists
 
-[![Version](https://img.shields.io/badge/version-0.7.6-blue)](pyproject.toml) [![Python](https://img.shields.io/badge/python-%3E%3D3.10-blue)](pyproject.toml) [![PyTorch](https://img.shields.io/badge/PyTorch-%3E%3D2.0-ee4c2c)](pyproject.toml) [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![Package status](https://img.shields.io/badge/status-preview-orange)](#project-status)
+[![Version](https://img.shields.io/badge/version-0.7.7-blue)](pyproject.toml) [![Python](https://img.shields.io/badge/python-%3E%3D3.10-blue)](pyproject.toml) [![PyTorch](https://img.shields.io/badge/PyTorch-%3E%3D2.0-ee4c2c)](pyproject.toml) [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![Package status](https://img.shields.io/badge/status-preview-orange)](#project-status)
 
 **PyTorch toolkit for irregularly sampled multivariate time series with continuous-time methods (Neural ODE/CDE/SDE) and discrete-time baselines.**
 
@@ -230,7 +230,7 @@ Tutorial: <https://nde-for-ts.github.io/> (CIKM 2025).
 
 This is a **preview** release:
 
-- Classification is the stable workflow. Regression, forecasting, imputation, outlier detection, and change detection are available through `ists_model` and the source-checkout scripts as preview workflows with dataset-owned targets and task-isolated artifacts.
+- Classification is the stable workflow. Regression, forecasting, imputation, outlier detection, and change detection are available through `ists_model` and the source-checkout scripts as preview workflows with dataset-owned targets and task-isolated artifacts. Forecasting uses an explicit per-sample origin and an ordered future timestamp grid; future target values are used only for supervised loss and evaluation.
 - Synthetic missingness (`MCAR`/`MAR`/`MNAR`/`BLOCK`/`BURST`/`CHANNEL_DROP`) is experimental. The optional 100-condition robustness workflow applies to classification only.
 - Broad benchmark parity and performance claims remain future work; this package is still a preview release.
 

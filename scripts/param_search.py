@@ -126,6 +126,22 @@ def _normalize_search_mode(raw: str) -> str:
     raise argparse.ArgumentTypeError("search mode must be one of {'default', 'cv'}.")
 
 
+def _normalize_dataset_source_arg(raw: str) -> str:
+    try:
+        return normalize_dataset_source(raw)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+
+
+def _normalize_search_mode(raw: str) -> str:
+    normalized = str(raw).strip().lower()
+    if normalized == "default":
+        return "default"
+    if normalized in {"cv", "improved"}:
+        return "cv"
+    raise argparse.ArgumentTypeError("search mode must be one of {'default', 'cv'}.")
+
+
 def _abspath_or_none(path):
     if path is None:
         return None
@@ -749,9 +765,10 @@ def _collect_task_metadata(
     target_masks = None
     task_targets = None
     target_spec = None
+    forecasting_schedule = None
     preprocess_X = X
     if task != "classification" and target_source == "dataset":
-        task_targets, target_masks, target_spec = load_task_targets_npz(
+        task_targets, target_masks, target_spec, forecasting_schedule = load_task_targets_npz(
             dataset=data_name,
             targets_root=targets_root,
             task=task,
@@ -760,6 +777,8 @@ def _collect_task_metadata(
             seq_len=seq_len,
             input_dim=num_dim,
             input_values=X,
+            input_timestamps=timestamps,
+            return_forecasting_schedule=True,
         )
         target_spec = dict(target_spec)
         target_spec["split_supervision"] = validate_task_splits(
@@ -1612,9 +1631,10 @@ def _train_single_seed(
     task_targets = None
     target_masks = None
     target_spec = None
+    forecasting_schedule = None
     preprocess_X = X
     if task != "classification" and target_source == "dataset":
-        task_targets, target_masks, target_spec = load_task_targets_npz(
+        task_targets, target_masks, target_spec, forecasting_schedule = load_task_targets_npz(
             dataset=data_name,
             targets_root=targets_root,
             task=task,
@@ -1623,6 +1643,8 @@ def _train_single_seed(
             seq_len=int(seq_len),
             input_dim=int(num_dim),
             input_values=X,
+            input_timestamps=timestamps,
+            return_forecasting_schedule=True,
         )
         target_spec = dict(target_spec)
         target_spec["split_supervision"] = validate_task_splits(
@@ -1735,6 +1757,12 @@ def _train_single_seed(
         targets=task_targets,
         target_masks=target_masks,
         sample_times=sample_times,
+        future_timestamps=(
+            None if forecasting_schedule is None else forecasting_schedule["future_timestamps"]
+        ),
+        forecast_origin=(
+            None if forecasting_schedule is None else forecasting_schedule["forecast_origin"]
+        ),
     )
     valid_dataset = ists_dataset(
         Y,
@@ -1747,6 +1775,12 @@ def _train_single_seed(
         targets=task_targets,
         target_masks=target_masks,
         sample_times=sample_times,
+        future_timestamps=(
+            None if forecasting_schedule is None else forecasting_schedule["future_timestamps"]
+        ),
+        forecast_origin=(
+            None if forecasting_schedule is None else forecasting_schedule["forecast_origin"]
+        ),
     )
     train_batch = DataLoader(
         train_dataset,

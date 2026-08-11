@@ -73,7 +73,7 @@ For a non-classification task, pass `--target-source dataset --targets-root <tar
 | Task | Required target-bundle entries | Shape | Value contract |
 |---|---|---|---|
 | regression | `regression_target` | `[N]` or `[N,R]`, `R >= 1` | finite dataset-native values, loaded as `float32` |
-| forecasting | `forecasting_target` | `[N,H,D]` | finite numeric values; `--forecast-horizon H` is required |
+| forecasting | `forecasting_target`, `forecasting_timestamps`, `forecasting_origin`, `forecasting_loss_mask` | `[N,H,D]`, `[N,H]`, `[N]`, `[N,H,D]` | supervised targets are finite; mask is binary; future times are finite, strictly ordered, and later than the per-sample context origin; `--forecast-horizon H` is required |
 | imputation | `imputation_target`, `imputation_loss_mask` | both `[N,L,D]` | finite target and binary `0/1` mask, loaded as `float32` |
 | outlier detection | `outlier_detection_target` | `[N]` or `[N,1]` | binary `0/1`, loaded as `float32` |
 | change detection | `change_detection_target`, `change_detection_loss_mask` | both `[N,L,1]` | binary `0/1` target and mask, loaded as `float32` |
@@ -81,7 +81,7 @@ For a non-classification task, pass `--target-source dataset --targets-root <tar
 A bounded bundle matching the README toy data can be created with:
 
 ```bash
-python -c "import numpy as np, pathlib; n,l,d,h=40,24,3,4; p=pathlib.Path('/tmp/torch_ists_demo/targets'); p.mkdir(parents=True,exist_ok=True); np.savez(p/'Demo.npz', regression_target=np.zeros((n,1),'float32'), forecasting_target=np.zeros((n,h,d),'float32'), imputation_target=np.zeros((n,l,d),'float32'), imputation_loss_mask=np.ones((n,l,d),'float32'), outlier_detection_target=(np.arange(n)%4==0).astype('float32')[:,None], change_detection_target=np.zeros((n,l,1),'float32'), change_detection_loss_mask=np.ones((n,l,1),'float32'))"
+python -c "import numpy as np, pathlib; n,l,d,h=40,24,3,4; p=pathlib.Path('/tmp/torch_ists_demo/targets'); p.mkdir(parents=True,exist_ok=True); np.savez(p/'Demo.npz', regression_target=np.zeros((n,1),'float32'), forecasting_target=np.zeros((n,h,d),'float32'), forecasting_timestamps=np.tile(np.arange(l,l+h,dtype='float64'),(n,1)), forecasting_origin=np.full(n,l-1,dtype='float64'), forecasting_loss_mask=np.ones((n,h,d),'float32'), imputation_target=np.zeros((n,l,d),'float32'), imputation_loss_mask=np.ones((n,l,d),'float32'), outlier_detection_target=(np.arange(n)%4==0).astype('float32')[:,None], change_detection_target=np.zeros((n,l,1),'float32'), change_detection_loss_mask=np.ones((n,l,1),'float32'))"
 ```
 
 Non-classification artifacts append the task name. Split, parameter, and standard-run paths are `<split-root>/<dataset>/<dataset>_<seed>__task_<task>`, `<param-root>/<dataset>/<dataset>_<model>__task_<task>`, and `<out-root>/<dataset>/<missing_rate>/<dataset>_<missing_rate>_<model>_<seed>__task_<task>`. Preview splits are deterministic and label-independent; an unsuffixed classification split is never reused for a preview task.

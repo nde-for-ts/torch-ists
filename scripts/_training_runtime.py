@@ -21,7 +21,23 @@ SUPPORTED_TASKS = frozenset(
     }
 )
 LOGGER = logging.getLogger("torch_ists.script_runtime")
-MASKED_SUPERVISION_TASKS = frozenset({"imputation", "change_detection"})
+MASKED_SUPERVISION_TASKS = frozenset(
+    {"forecasting", "imputation", "change_detection"}
+)
+
+
+def _load_flow_policy_helpers():
+    try:
+        from torch_ists.config.alias_policy import is_flow_strict_raw_name
+    except ModuleNotFoundError as exc:
+        raise ImportError(
+            "Failed to import torch_ists.config.alias_policy. "
+            "Set TORCH_ISTS_RUNTIME_ROOT to a package root that contains torch_ists/."
+        ) from exc
+    return is_flow_strict_raw_name
+
+
+_is_flow_strict_raw_name = _load_flow_policy_helpers()
 
 
 def _resolve_task(task: str) -> str:
@@ -159,20 +175,6 @@ def _align_prediction_target(
     return pred, target
 
 
-def _load_flow_policy_helpers():
-    try:
-        from torch_ists.config.alias_policy import is_flow_strict_raw_name
-    except ModuleNotFoundError as exc:
-        raise ImportError(
-            "Failed to import torch_ists.config.alias_policy. "
-            "Set TORCH_ISTS_RUNTIME_ROOT to a package root that contains torch_ists/."
-        ) from exc
-    return is_flow_strict_raw_name
-
-
-_is_flow_strict_raw_name = _load_flow_policy_helpers()
-
-
 def _is_flow_model_name(model_name: str) -> bool:
     return _is_flow_strict_raw_name(str(model_name))
 
@@ -182,6 +184,83 @@ def _resolve_raw_missing_policy(model_name: str, model) -> bool:
     return _is_flow_strict_raw_name(str(model_name)) or _is_flow_strict_raw_name(str(runtime_model_name))
 
 
+class ists_dataset(Dataset):
+    def __init__(
+        self,
+        y,
+        x_missing,
+        x_mask,
+        x_delta,
+        coeffs,
+        split,
+        task: str = "classification",
+        targets=None,
+        target_masks=None,
+        sample_times=None,
+        future_timestamps=None,
+        forecast_origin=None,
+    ):
+        self.task = _resolve_task(task)
+        self.Y = None if y is None else y[split]
+        self.X_missing = x_missing[split, ...]
+        self.X_mask = x_mask[split, ...]
+        self.X_delta = x_delta[split, ...]
+        self.Coeffs = coeffs[split, ...]
+        self.SampleTimes = None if sample_times is None else sample_times[split, ...]
+        self.FutureTimestamps = (
+            None if future_timestamps is None else future_timestamps[split, ...]
+        )
+        self.ForecastOrigin = (
+            None if forecast_origin is None else forecast_origin[split, ...]
+        )
+        if targets is None:
+            if self.Y is None:
+                raise ValueError("classification labels are required when task targets are absent")
+            self.Targets = self.Y
+        else:
+            self.Targets = targets[split, ...]
+        self.TargetMasks = None if target_masks is None else target_masks[split, ...]
+
+    def __len__(self) -> int:
+        return len(self.X_missing)
+
+    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
+        sample = {
+            "target": self.Targets[idx],
+            "x_missing": self.X_missing[idx],
+            "x_mask": self.X_mask[idx],
+            "x_delta": self.X_delta[idx],
+            "coeffs": self.Coeffs[idx],
+        }
+        if self.Y is not None:
+            sample["label"] = self.Y[idx]
+        if self.TargetMasks is not None:
+            sample["target_mask"] = self.TargetMasks[idx]
+        if self.SampleTimes is not None:
+            sample["sample_times"] = self.SampleTimes[idx]
+        if self.FutureTimestamps is not None:
+            sample["future_timestamps"] = self.FutureTimestamps[idx]
+        if self.ForecastOrigin is not None:
+            sample["forecast_origin"] = self.ForecastOrigin[idx]
+        return sample
+
+
+def _align_target_mask(mask: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+    if mask.dim() == 1 and target.dim() == 2:
+        mask = mask.unsqueeze(-1)
+    if mask.dim() == 2 and target.dim() == 3:
+        mask = mask.unsqueeze(-1)
+    if mask.dim() != target.dim():
+        raise ValueError(
+            f"target_mask rank mismatch: mask={tuple(mask.shape)} target={tuple(target.shape)}"
+        )
+    if tuple(mask.shape) != tuple(target.shape):
+        raise ValueError(
+            f"Target mask shape mismatch: mask={tuple(mask.shape)} target={tuple(target.shape)}"
+        )
+    return mask
+
+
 def _forward_with_optional_aux(
     model,
     seq: torch.Tensor,
@@ -189,10 +268,16 @@ def _forward_with_optional_aux(
     *,
     request_aux: bool,
     sample_times: Optional[torch.Tensor] = None,
+    future_timestamps: Optional[torch.Tensor] = None,
+    forecast_origin: Optional[torch.Tensor] = None,
 ):
     runtime_kwargs = {}
     if sample_times is not None:
         runtime_kwargs["sample_times"] = sample_times
+    if future_timestamps is not None:
+        runtime_kwargs["future_timestamps"] = future_timestamps
+    if forecast_origin is not None:
+        runtime_kwargs["forecast_origin"] = forecast_origin
     if request_aux:
         try:
             return model(seq, coeffs, return_aux_loss=True, **runtime_kwargs)
@@ -224,8 +309,9 @@ def _masked_task_loss_components(
     if not torch.all((mask == 0) | (mask == 1)):
         raise ValueError(f"{task} target_mask must be binary 0/1")
     weight = mask.to(dtype=target.dtype)
-    if task == "imputation":
-        element_loss = (pred - target) ** 2
+    if task in {"forecasting", "imputation"}:
+        safe_target = torch.where(mask > 0, target, pred.detach())
+        element_loss = (pred - safe_target) ** 2
     elif task == "change_detection":
         element_loss = torch.nn.functional.binary_cross_entropy_with_logits(
             pred,
@@ -235,71 +321,6 @@ def _masked_task_loss_components(
     else:  # pragma: no cover - guarded by caller
         raise ValueError(f"masked supervision is unsupported for task={task!r}")
     return (element_loss * weight).sum(), weight.sum()
-
-
-class ists_dataset(Dataset):
-    def __init__(
-        self,
-        y,
-        x_missing,
-        x_mask,
-        x_delta,
-        coeffs,
-        split,
-        task: str = "classification",
-        targets=None,
-        target_masks=None,
-        sample_times=None,
-    ):
-        self.task = _resolve_task(task)
-        self.Y = None if y is None else y[split]
-        self.X_missing = x_missing[split, ...]
-        self.X_mask = x_mask[split, ...]
-        self.X_delta = x_delta[split, ...]
-        self.Coeffs = coeffs[split, ...]
-        self.SampleTimes = None if sample_times is None else sample_times[split, ...]
-        if targets is None:
-            if self.Y is None:
-                raise ValueError("classification labels are required when task targets are absent")
-            self.Targets = self.Y
-        else:
-            self.Targets = targets[split, ...]
-        self.TargetMasks = None if target_masks is None else target_masks[split, ...]
-
-    def __len__(self) -> int:
-        return len(self.X_missing)
-
-    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
-        sample = {
-            "target": self.Targets[idx],
-            "x_missing": self.X_missing[idx],
-            "x_mask": self.X_mask[idx],
-            "x_delta": self.X_delta[idx],
-            "coeffs": self.Coeffs[idx],
-        }
-        if self.Y is not None:
-            sample["label"] = self.Y[idx]
-        if self.TargetMasks is not None:
-            sample["target_mask"] = self.TargetMasks[idx]
-        if self.SampleTimes is not None:
-            sample["sample_times"] = self.SampleTimes[idx]
-        return sample
-
-
-def _align_target_mask(mask: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-    if mask.dim() == 1 and target.dim() == 2:
-        mask = mask.unsqueeze(-1)
-    if mask.dim() == 2 and target.dim() == 3:
-        mask = mask.unsqueeze(-1)
-    if mask.dim() != target.dim():
-        raise ValueError(
-            f"target_mask rank mismatch: mask={tuple(mask.shape)} target={tuple(target.shape)}"
-        )
-    if tuple(mask.shape) != tuple(target.shape):
-        raise ValueError(
-            f"Target mask shape mismatch: mask={tuple(mask.shape)} target={tuple(target.shape)}"
-        )
-    return mask
 
 
 def train(
@@ -340,6 +361,16 @@ def train(
             request_aux=True,
             sample_times=(
                 None if "sample_times" not in batch else batch["sample_times"].to(device)
+            ),
+            future_timestamps=(
+                None
+                if "future_timestamps" not in batch
+                else batch["future_timestamps"].to(device)
+            ),
+            forecast_origin=(
+                None
+                if "forecast_origin" not in batch
+                else batch["forecast_origin"].to(device)
             ),
         )
 
@@ -433,6 +464,16 @@ def evaluate(
                 request_aux=True,
                 sample_times=(
                     None if "sample_times" not in batch else batch["sample_times"].to(device)
+                ),
+                future_timestamps=(
+                    None
+                    if "future_timestamps" not in batch
+                    else batch["future_timestamps"].to(device)
+                ),
+                forecast_origin=(
+                    None
+                    if "forecast_origin" not in batch
+                    else batch["forecast_origin"].to(device)
                 ),
             )
             if task == "classification":
