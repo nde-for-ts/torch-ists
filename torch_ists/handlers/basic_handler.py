@@ -111,6 +111,10 @@ class BasicHandler(BaseHandler):
                 hidden_dim=hidden_dim,
                 num_layers=num_layers,
                 dropout=dropout,
+                kernel_size=config.get('model_params', {}).get(
+                    'kernel_size',
+                    config.get('kernel_size', 3),
+                ),
             )
 
         elif model_type == 'rnn':

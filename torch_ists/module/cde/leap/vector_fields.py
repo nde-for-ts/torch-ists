@@ -24,12 +24,17 @@ class SingleHiddenLayer(torch.nn.Module):
         return z
         
 class ODEFunc_ff(torch.nn.Module): # func_f
-    def __init__(self, input_channels, hidden_channels):
+    def __init__(self, input_channels, hidden_channels, intermediate_width=128):
         super(ODEFunc_ff, self).__init__()
+        if isinstance(intermediate_width, bool) or not isinstance(intermediate_width, int):
+            raise ValueError("intermediate_width must be a positive integer")
+        if intermediate_width < 1:
+            raise ValueError("intermediate_width must be a positive integer")
         self.input_channels = input_channels
         self.hidden_channels = hidden_channels
-        self.linear1 = torch.nn.Linear(hidden_channels, 128)
-        self.linear2 = torch.nn.Linear(128,  hidden_channels)
+        self.intermediate_width = intermediate_width
+        self.linear1 = torch.nn.Linear(hidden_channels, intermediate_width)
+        self.linear2 = torch.nn.Linear(intermediate_width, hidden_channels)
 
     def forward(self, t, z):
         

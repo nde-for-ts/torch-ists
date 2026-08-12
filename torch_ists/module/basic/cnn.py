@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import torch
 import torch.nn as nn
+from numbers import Integral
 
 
 class CNNBackbone(nn.Module):
@@ -26,9 +27,15 @@ class CNNBackbone(nn.Module):
         kernel_size: int = 3
     ):
         super().__init__()
+        if isinstance(kernel_size, bool) or not isinstance(kernel_size, Integral):
+            raise ValueError("kernel_size must be a positive odd integer")
+        kernel_size = int(kernel_size)
+        if kernel_size <= 0 or kernel_size % 2 == 0:
+            raise ValueError("kernel_size must be a positive odd integer")
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
         self.num_layers = num_layers
+        self.kernel_size = kernel_size
 
         padding = kernel_size // 2
         self.cnn_in = nn.Linear(input_dim, hidden_dim)

@@ -94,7 +94,11 @@ def cdeint(dX_dt, z0, func, t, adjoint=True, **kwargs):
         # The current packaged handler now aligns LEAP forward times to
         # the normalized coeff time base, so this fixed step_size only describes
         # the upstream-style branch, not the active runtime time scale.
-        kwargs["options"].setdefault("step_size", 1.0)
+        if (
+            "step_size" not in kwargs["options"]
+            and "grid_constructor" not in kwargs["options"]
+        ):
+            kwargs["options"]["step_size"] = 1.0
 
     control_gradient = dX_dt(torch.zeros(1, dtype=z0.dtype, device=z0.device))
     if control_gradient.shape[:-1] != z0.shape[:-1]:
@@ -164,7 +168,11 @@ def cdeint_Learnable(
         # The current packaged handler now aligns LEAP forward times to
         # the normalized coeff time base, so this fixed step_size only describes
         # the upstream-style branch, not the active runtime time scale.
-        kwargs["options"].setdefault("step_size", 1.0)
+        if (
+            "step_size" not in kwargs["options"]
+            and "grid_constructor" not in kwargs["options"]
+        ):
+            kwargs["options"]["step_size"] = 1.0
 
     if kwargs["method"] == "sym12async":
         for i in range(len(t) - 1):

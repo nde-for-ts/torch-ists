@@ -819,6 +819,11 @@ Behavior notes:
   Ordinary defaults are respectively Transformer 4x hidden width, SAnD 4x `d_model`, MIAM 1x hidden
   width with component dropout inherited from the top-level request, and mTAN hidden-width latent
   head with `time_scale=48.0`. Head widths must be divisible by `n_heads` where applicable.
+- Additional resolved construction settings use the same `model_params` boundary: CNN accepts a
+  positive odd `kernel_size` (default `3`); LEAP accepts a positive `leap_intermediate_width`
+  (default `128`); and EXIT accepts non-negative finite `kinetic_energy_coef` and
+  `jacobian_norm2_coef` values plus a positive integer `div_samples` (defaults `1.0`, `1.0`, and
+  `1`). These settings are recorded as architecture identity and are not parameter-search axes.
 - Under the scripts' train-only z-score normalization, the zero-fill path becomes per-channel mean imputation in raw value space.
 - `imputation_strategy` selects how missing entries are filled for compatible direct value-channel backbones: `"zero"` (default), `"last_observed"`, and `"channel_mean"`. Strict raw-missing rows (`neuralflow-*`, `flowpath-*`) keep raw `NaN` until method-defined mask-aware zero filling and reject nonzero strategies; coefficient-driven rows consume the `coeffs` built by `preprocess(...)`.
 - Non-finite backbone outputs, hidden states, or logits raise `RuntimeError`; the package does not silently zero-fill them.

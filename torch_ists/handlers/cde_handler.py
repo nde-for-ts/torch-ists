@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+import math
 from typing import Any, Dict, Tuple
 
 import torch
@@ -88,6 +89,28 @@ class CDEHandler(BaseHandler):
     @staticmethod
     def _control_channels(input_dim: int, use_intensity: bool) -> int:
         return 1 + input_dim * (2 if use_intensity else 1)
+
+    @staticmethod
+    def _require_nonnegative_float(value: Any, *, field: str) -> float:
+        try:
+            resolved = float(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{field} must be a non-negative finite value.") from exc
+        if not math.isfinite(resolved) or resolved < 0.0:
+            raise ValueError(f"{field} must be a non-negative finite value.")
+        return resolved
+
+    @staticmethod
+    def _require_positive_int(value: Any, *, field: str) -> int:
+        if isinstance(value, bool):
+            raise ValueError(f"{field} must be a positive integer.")
+        try:
+            resolved = int(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{field} must be a positive integer.") from exc
+        if resolved < 1 or resolved != value:
+            raise ValueError(f"{field} must be a positive integer.")
+        return resolved
 
     @staticmethod
     def _resolve_neuralrde_window_length(model_params: Dict[str, Any], *, default: int | None = None) -> int:
@@ -228,6 +251,18 @@ class CDEHandler(BaseHandler):
                 hidden_hidden_channels=hidden_dim,
                 num_hidden_layers=num_layers,
             )
+            kinetic_energy_coef = self._require_nonnegative_float(
+                model_params.get("kinetic_energy_coef", 1.0),
+                field="kinetic_energy_coef",
+            )
+            jacobian_norm2_coef = self._require_nonnegative_float(
+                model_params.get("jacobian_norm2_coef", 1.0),
+                field="jacobian_norm2_coef",
+            )
+            div_samples = self._require_positive_int(
+                model_params.get("div_samples", 1),
+                field="div_samples",
+            )
             model = NeuralCDE_IDEA4(
                 func=func_k,
                 func_f=func_f,
@@ -235,9 +270,9 @@ class CDEHandler(BaseHandler):
                 input_channels=control_channels,
                 hidden_channels=hidden_dim,
                 output_channels=hidden_dim,
-                kinetic_energy_coef=1,
-                jacobian_norm2_coef=1,
-                div_samples=1,
+                kinetic_energy_coef=kinetic_energy_coef,
+                jacobian_norm2_coef=jacobian_norm2_coef,
+                div_samples=div_samples,
                 initial=True,
             )
         elif family == "leap":
@@ -260,6 +295,10 @@ class CDEHandler(BaseHandler):
             func_f = LEAPODEFuncFF(
                 input_channels=control_channels,
                 hidden_channels=hidden_dim,
+                intermediate_width=self._require_positive_int(
+                    model_params.get("leap_intermediate_width", 128),
+                    field="leap_intermediate_width",
+                ),
             )
             mapping = LEAPMappingF(
                 input_channels=control_channels,

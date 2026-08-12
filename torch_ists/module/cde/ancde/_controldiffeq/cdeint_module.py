@@ -106,14 +106,16 @@ def _configure_solver_kwargs(kwargs):
         # Upstream ANCDE assumes integer-grid controls, so this low-level
         # `step_size=1.0` fallback is preserved only for provenance. The
         # current packaged wrappers prefill a data-driven step size.
-        options.setdefault("step_size", 1.0)
+        if "step_size" not in options and "grid_constructor" not in options:
+            options["step_size"] = 1.0
     elif method == "euler":
         kwargs.setdefault("options", {})
         options = kwargs["options"]
         # Preserve the upstream oversampling fallback for provenance; the
         # current packaged wrappers now inject the exact min-gap
         # step size before this branch is reached.
-        options.setdefault("step_size", 1e-3)
+        if "step_size" not in options and "grid_constructor" not in options:
+            options["step_size"] = 1e-3
     return kwargs
 
 

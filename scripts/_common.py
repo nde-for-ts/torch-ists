@@ -1177,6 +1177,16 @@ def _require_positive_float(value, *, field: str) -> float:
     return resolved
 
 
+def _require_nonnegative_float(value, *, field: str) -> float:
+    try:
+        resolved = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field} must be a non-negative finite value, got {value!r}") from exc
+    if not math.isfinite(resolved) or resolved < 0.0:
+        raise ValueError(f"{field} must be a non-negative finite value, got {resolved}")
+    return resolved
+
+
 def _resolve_attention_architecture(
     model_name: str,
     *,
@@ -1239,6 +1249,60 @@ def _resolve_attention_architecture(
         identity.update(latent_head_dim=head, time_scale=time_scale)
 
     return params, identity
+
+
+def _resolve_fixed_construction_architecture(
+    model_name: str,
+    *,
+    config: dict,
+    model_params: dict,
+) -> tuple[dict, dict]:
+    normalized = _canonical_model_name(model_name)
+    params = dict(model_params)
+    identity: dict[str, int | float] = {}
+
+    if normalized == "cnn":
+        kernel_size = _require_positive_int(
+            config.get("kernel_size", params.get("kernel_size", 3)),
+            field="kernel_size",
+        )
+        if kernel_size % 2 == 0:
+            raise ValueError("kernel_size must be a positive odd integer")
+        params["kernel_size"] = kernel_size
+        identity["kernel_size"] = kernel_size
+    elif normalized == "leap":
+        width = _require_positive_int(
+            config.get(
+                "leap_intermediate_width",
+                params.get("leap_intermediate_width", 128),
+            ),
+            field="leap_intermediate_width",
+        )
+        params["leap_intermediate_width"] = width
+        identity["leap_intermediate_width"] = width
+    elif normalized == "exit":
+        for field in ("kinetic_energy_coef", "jacobian_norm2_coef"):
+            value = _require_nonnegative_float(
+                config.get(field, params.get(field, 1.0)),
+                field=field,
+            )
+            params[field] = value
+            identity[field] = value
+        div_samples = _require_positive_int(
+            config.get("div_samples", params.get("div_samples", 1)),
+            field="div_samples",
+        )
+        params["div_samples"] = div_samples
+        identity["div_samples"] = div_samples
+
+    return params, identity
+
+
+_FIXED_CONSTRUCTION_FIELDS = {
+    "cnn": frozenset({"kernel_size"}),
+    "leap": frozenset({"leap_intermediate_width"}),
+    "exit": frozenset({"kinetic_energy_coef", "jacobian_norm2_coef", "div_samples"}),
+}
 
 
 _ATTENTION_ARCHITECTURE_FIELDS = {
@@ -1372,14 +1436,15 @@ def resolve_effective_param_config(
         )
 
     required_attention_fields = _ATTENTION_ARCHITECTURE_FIELDS.get(normalized_model)
+    required_integrity_fields = required_attention_fields or _FIXED_CONSTRUCTION_FIELDS.get(normalized_model)
     stored_effective = config.get("effective_params")
     stored_effective_model_params = (
         dict(stored_effective.get("model_params") or {})
         if isinstance(stored_effective, dict)
         else {}
     )
-    if required_attention_fields is not None:
-        for field in required_attention_fields:
+    if required_integrity_fields is not None:
+        for field in required_integrity_fields:
             if field not in stored_effective_model_params:
                 continue
             effective_value = stored_effective_model_params[field]
@@ -1434,6 +1499,12 @@ def resolve_effective_param_config(
         config=config,
         model_params=model_params,
     )
+    model_params, fixed_identity = _resolve_fixed_construction_architecture(
+        normalized_model,
+        config=config,
+        model_params=model_params,
+    )
+    architecture_identity.update(fixed_identity)
     if isinstance(stored_architecture_identity, dict):
         if architecture_identity != stored_architecture_identity:
             raise ValueError(
@@ -1525,9 +1596,10 @@ def build_model_kwargs_from_config(model_name: str, model_config: dict) -> dict:
         raise ValueError("architecture_identity must be a mapping when present")
     normalized_model = _canonical_model_name(model_name)
     required_attention_fields = _ATTENTION_ARCHITECTURE_FIELDS.get(normalized_model)
+    required_integrity_fields = required_attention_fields or _FIXED_CONSTRUCTION_FIELDS.get(normalized_model)
     top_level_model_params = dict(model_config.get("model_params") or {})
-    if required_attention_fields is not None:
-        for field in required_attention_fields:
+    if required_integrity_fields is not None:
+        for field in required_integrity_fields:
             if field not in top_level_model_params:
                 continue
             if field in model_params and model_params[field] != top_level_model_params[field]:
@@ -1552,6 +1624,12 @@ def build_model_kwargs_from_config(model_name: str, model_config: dict) -> dict:
             config=stored_architecture_identity,
             model_params=model_params,
         )
+        model_params, fixed_identity = _resolve_fixed_construction_architecture(
+            model_name,
+            config=stored_architecture_identity,
+            model_params=model_params,
+        )
+        resolved_identity.update(fixed_identity)
         if resolved_identity != stored_architecture_identity:
             raise ValueError(
                 "Parameter artifact architecture identity mismatch: "
@@ -1579,6 +1657,11 @@ def build_model_kwargs_from_config(model_name: str, model_config: dict) -> dict:
         model_params, _ = _resolve_attention_architecture(
             model_name,
             hidden_dim=hidden_dim,
+            config={},
+            model_params=model_params,
+        )
+        model_params, _ = _resolve_fixed_construction_architecture(
+            model_name,
             config={},
             model_params=model_params,
         )

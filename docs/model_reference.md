@@ -40,6 +40,9 @@ Use the API reference for class signatures and call patterns; use this document 
 
 These models use the sequence stack directly with `coeffs=None`; `NaN` is replaced by `0.0` at the backbone input.
 
+**CNN construction.** `kernel_size` is an explicit positive odd integer in `model_params`; the
+default is `3`. The resolved value is part of architecture identity and is not a search axis.
+
 **PLSTM numerical note.** The packaged `plstm` clamps the phased time-gate denominator factors at `1e-3`. This intentionally differs from the unclamped reference implementation to avoid float32 sub-normal denominator underflow observed in long final-training runs.
 
 **Limitation.** `cnn`, `rnn`, `lstm`, `gru`, and `bilstm` do not use the mask channel. After zero-fill, they cannot distinguish a true zero from a missing value. When missingness awareness matters, prefer rows that use mask, delta, or interpolation coefficients.
@@ -156,6 +159,11 @@ Fixed CDE grids contain the instantiated control knots in both forward and rever
 - **Solver and dependencies**: all three use `rk4` with a fixed-grid step size from input times; install `.[cde]` or `.[all]`.
 - **Preprocessing**: use `preprocess(X, model_name=...)` to obtain matching natural-cubic-spline coefficients.
 - **LEAP time scale**: `leap` uses normalized `[0, 1]` control-path time, which may differ from runs that used an integer-grid path.
+- **Resolved construction settings**: LEAP accepts a positive `leap_intermediate_width` with the
+  reference default `128`. EXIT accepts non-negative finite `kinetic_energy_coef` and
+  `jacobian_norm2_coef` values plus a positive integer `div_samples`; their defaults remain
+  `1.0`, `1.0`, and `1`. These resolved values are recorded as architecture identity and are not
+  parameter-search axes.
 
 ---
 
