@@ -90,16 +90,29 @@ class MIAMFeedForward(nn.Module):
 
 
 class MIAMEncoderLayer(nn.Module):
-    def __init__(self, d_model, max_length, heads, d_ff, dropout=0):
+    def __init__(
+        self,
+        d_model,
+        max_length,
+        heads,
+        d_ff,
+        dropout=0,
+        *,
+        attention_dropout=0.2,
+        ffn_dropout=0.1,
+        residual_dropout=None,
+    ):
         super().__init__()
         del max_length
+        if residual_dropout is None:
+            residual_dropout = dropout
         self.norm_q = MIAMNorm(d_model)
         self.norm_k = MIAMNorm(d_model)
         self.norm_q_attn = MIAMNorm(d_model)
-        self.attn = MIAMMultiHeadAttention(heads, d_model)
-        self.ff = MIAMFeedForward(d_model, d_ff)
-        self.dropout_1 = nn.Dropout(dropout)
-        self.dropout_2 = nn.Dropout(dropout)
+        self.attn = MIAMMultiHeadAttention(heads, d_model, dropout=attention_dropout)
+        self.ff = MIAMFeedForward(d_model, d_ff, dropout=ffn_dropout)
+        self.dropout_1 = nn.Dropout(residual_dropout)
+        self.dropout_2 = nn.Dropout(residual_dropout)
 
     def forward(self, q, k, mask):
         q2 = self.norm_q(q)
@@ -111,10 +124,30 @@ class MIAMEncoderLayer(nn.Module):
 
 
 class MIAMEncodingBlock(nn.Module):
-    def __init__(self, d_model, max_length, num_heads, d_ff, num_stack):
+    def __init__(
+        self,
+        d_model,
+        max_length,
+        num_heads,
+        d_ff,
+        num_stack,
+        *,
+        attention_dropout=0.2,
+        ffn_dropout=0.1,
+        residual_dropout=0.0,
+    ):
         super().__init__()
         self.n = num_stack
-        self.layers = get_clones(MIAMEncoderLayer(d_model, max_length, num_heads, d_ff), num_stack)
+        layer = MIAMEncoderLayer(
+            d_model,
+            max_length,
+            num_heads,
+            d_ff,
+            attention_dropout=attention_dropout,
+            ffn_dropout=ffn_dropout,
+            residual_dropout=residual_dropout,
+        )
+        self.layers = get_clones(layer, num_stack)
         self.norm = MIAMNorm(d_model)
 
     def forward(self, q, k, attn_mask):
@@ -178,6 +211,10 @@ class AttentionMIAMModel(nn.Module):
         n_heads: int = 1,
         n_iter: int = 1,
         dropout: float = 0.1,
+        dim_feedforward: int | None = None,
+        attention_dropout: float | None = None,
+        ffn_dropout: float | None = None,
+        residual_dropout: float | None = None,
         model_name: str = "miam",
     ):
         super().__init__()
@@ -187,7 +224,24 @@ class AttentionMIAMModel(nn.Module):
         self.n_iter = n_iter
 
         d_model = hidden_dim
-        d_ff = hidden_dim
+        d_ff = int(dim_feedforward) if dim_feedforward is not None else int(hidden_dim)
+        if d_ff <= 0:
+            raise ValueError(f"dim_feedforward must be a positive integer, got {d_ff}")
+        self.dim_feedforward = d_ff
+        self.attention_dropout = float(
+            dropout if attention_dropout is None else attention_dropout
+        )
+        self.ffn_dropout = float(dropout if ffn_dropout is None else ffn_dropout)
+        self.residual_dropout = float(
+            dropout if residual_dropout is None else residual_dropout
+        )
+        for name, value in (
+            ("attention_dropout", self.attention_dropout),
+            ("ffn_dropout", self.ffn_dropout),
+            ("residual_dropout", self.residual_dropout),
+        ):
+            if not 0.0 <= value < 1.0:
+                raise ValueError(f"{name} must be in [0, 1), got {value}")
 
         self.obs_embed = MIAMEmbedder(input_dim, d_model)
         self.mask_embed = MIAMEmbedder(input_dim, d_model)
@@ -195,11 +249,26 @@ class AttentionMIAMModel(nn.Module):
 
         self.pe = MIAMPositionalEncoder(d_model, seq_len)
 
-        self.obs_encoding_block = MIAMEncodingBlock(d_model, seq_len, n_heads, d_ff, num_stack)
-        self.mask_encoding_block = MIAMEncodingBlock(d_model, seq_len, n_heads, d_ff, num_stack)
-        self.deltas_encoding_block = MIAMEncodingBlock(d_model, seq_len, n_heads, d_ff, num_stack)
-        self.comb_encoding_block = MIAMEncodingBlock(d_model, seq_len, n_heads, d_ff, num_stack)
-        self.missing_comb_encoding_block = MIAMEncodingBlock(d_model, seq_len, n_heads, d_ff, num_stack)
+        block_kwargs = {
+            "attention_dropout": self.attention_dropout,
+            "ffn_dropout": self.ffn_dropout,
+            "residual_dropout": self.residual_dropout,
+        }
+        self.obs_encoding_block = MIAMEncodingBlock(
+            d_model, seq_len, n_heads, d_ff, num_stack, **block_kwargs
+        )
+        self.mask_encoding_block = MIAMEncodingBlock(
+            d_model, seq_len, n_heads, d_ff, num_stack, **block_kwargs
+        )
+        self.deltas_encoding_block = MIAMEncodingBlock(
+            d_model, seq_len, n_heads, d_ff, num_stack, **block_kwargs
+        )
+        self.comb_encoding_block = MIAMEncodingBlock(
+            d_model, seq_len, n_heads, d_ff, num_stack, **block_kwargs
+        )
+        self.missing_comb_encoding_block = MIAMEncodingBlock(
+            d_model, seq_len, n_heads, d_ff, num_stack, **block_kwargs
+        )
 
         obs_embed_weight = self.obs_embed.embed.weight
         n, v = obs_embed_weight.size()

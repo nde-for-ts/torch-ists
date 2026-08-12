@@ -1147,6 +1147,151 @@ def _coerce_int_choice(value, *, default: int, allowed: list[int] | None = None)
     return int(coerced)
 
 
+def _require_positive_int(value, *, field: str) -> int:
+    try:
+        resolved = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field} must be a positive integer, got {value!r}") from exc
+    if resolved <= 0:
+        raise ValueError(f"{field} must be a positive integer, got {resolved}")
+    return resolved
+
+
+def _require_dropout(value, *, field: str) -> float:
+    try:
+        resolved = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field} must be in [0, 1), got {value!r}") from exc
+    if not math.isfinite(resolved) or not 0.0 <= resolved < 1.0:
+        raise ValueError(f"{field} must be in [0, 1), got {resolved}")
+    return resolved
+
+
+def _require_positive_float(value, *, field: str) -> float:
+    try:
+        resolved = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field} must be a positive finite value, got {value!r}") from exc
+    if not math.isfinite(resolved) or resolved <= 0.0:
+        raise ValueError(f"{field} must be a positive finite value, got {resolved}")
+    return resolved
+
+
+def _resolve_attention_architecture(
+    model_name: str,
+    *,
+    hidden_dim: int,
+    config: dict,
+    model_params: dict,
+) -> tuple[dict, dict]:
+    normalized = _canonical_model_name(model_name)
+    params = dict(model_params)
+    identity: dict[str, int | float] = {}
+
+    if normalized in _TRANSFORMER_MODELS:
+        default_width = 4 * int(hidden_dim)
+        width = _require_positive_int(
+            config.get("dim_feedforward", params.get("dim_feedforward", default_width)),
+            field="dim_feedforward",
+        )
+        params["dim_feedforward"] = width
+        identity["dim_feedforward"] = width
+    elif normalized in _SAND_MODELS:
+        d_model = _require_positive_int(params.get("d_model", hidden_dim), field="d_model")
+        width = _require_positive_int(
+            config.get("dim_feedforward", params.get("dim_feedforward", 4 * d_model)),
+            field="dim_feedforward",
+        )
+        params["dim_feedforward"] = width
+        identity["dim_feedforward"] = width
+    elif normalized in _MIAM_MODELS:
+        width = _require_positive_int(
+            config.get("dim_feedforward", params.get("dim_feedforward", hidden_dim)),
+            field="dim_feedforward",
+        )
+        top_level_dropout = _require_dropout(config.get("dropout", 0.1), field="dropout")
+        defaults = {
+            "attention_dropout": top_level_dropout,
+            "ffn_dropout": top_level_dropout,
+            "residual_dropout": top_level_dropout,
+        }
+        params["dim_feedforward"] = width
+        identity["dim_feedforward"] = width
+        for field, default in defaults.items():
+            value = _require_dropout(
+                config.get(field, params.get(field, default)),
+                field=field,
+            )
+            params[field] = value
+            identity[field] = value
+    elif normalized in _MTAN_MODELS:
+        default_head = int(hidden_dim)
+        head = _require_positive_int(
+            config.get("latent_head_dim", params.get("latent_head_dim", default_head)),
+            field="latent_head_dim",
+        )
+        time_scale = _require_positive_float(
+            config.get("time_scale", params.get("time_scale", 48.0)),
+            field="time_scale",
+        )
+        params["latent_head_dim"] = head
+        params["time_scale"] = time_scale
+        identity.update(latent_head_dim=head, time_scale=time_scale)
+
+    return params, identity
+
+
+_ATTENTION_ARCHITECTURE_FIELDS = {
+    "transformer": frozenset({"dim_feedforward"}),
+    "transformer-mask": frozenset({"dim_feedforward"}),
+    "sand": frozenset({"dim_feedforward"}),
+    "miam": frozenset(
+        {
+            "dim_feedforward",
+            "attention_dropout",
+            "ffn_dropout",
+            "residual_dropout",
+        }
+    ),
+    "mtan": frozenset({"latent_head_dim", "time_scale"}),
+}
+
+
+def normalize_attention_model_parameters_for_comparison(
+    model_name: str,
+    model_parameters: dict,
+) -> dict:
+    """Return a non-mutating comparison view for attention output lineage."""
+    normalized = _canonical_model_name(model_name)
+    required = _ATTENTION_ARCHITECTURE_FIELDS.get(normalized)
+    result = copy.deepcopy(model_parameters)
+    if required is None:
+        return result
+
+    model_params = dict(result.get("model_params") or {})
+    present = required.intersection(model_params)
+    if not present:
+        raise ValueError(
+            "fieldless attention output artifact is ambiguous; provide all "
+            "resolved architecture fields in a read-only compatibility view"
+        )
+    if present and present != required:
+        missing = ", ".join(sorted(required - present))
+        raise ValueError(
+            "incomplete attention architecture fields in stored output "
+            f"model parameters: missing {missing}"
+        )
+    hidden_dim = _require_positive_int(result.get("hidden_dim"), field="hidden_dim")
+    model_params, _ = _resolve_attention_architecture(
+        normalized,
+        hidden_dim=hidden_dim,
+        config={},
+        model_params=model_params,
+    )
+    result["model_params"] = model_params
+    return result
+
+
 def resolve_effective_param_config(
     model_name: str,
     model_config: dict,
@@ -1226,6 +1371,77 @@ def resolve_effective_param_config(
             model_params["flow_backend"]
         )
 
+    required_attention_fields = _ATTENTION_ARCHITECTURE_FIELDS.get(normalized_model)
+    stored_effective = config.get("effective_params")
+    stored_effective_model_params = (
+        dict(stored_effective.get("model_params") or {})
+        if isinstance(stored_effective, dict)
+        else {}
+    )
+    if required_attention_fields is not None:
+        for field in required_attention_fields:
+            if field not in stored_effective_model_params:
+                continue
+            effective_value = stored_effective_model_params[field]
+            if field in model_params and model_params[field] != effective_value:
+                raise ValueError(
+                    "Parameter artifact architecture identity mismatch: "
+                    f"model_params.{field}={model_params[field]!r}, "
+                    f"effective_params.model_params.{field}={effective_value!r}."
+                )
+            model_params[field] = effective_value
+
+    stored_architecture_identity = config.get("architecture_identity")
+    if "architecture_identity" in config and not isinstance(
+        stored_architecture_identity,
+        dict,
+    ):
+        raise ValueError("architecture_identity must be a mapping when present")
+    if isinstance(stored_architecture_identity, dict):
+        for key, value in stored_architecture_identity.items():
+            if key in model_params and model_params[key] != value:
+                raise ValueError(
+                    "Parameter artifact architecture identity mismatch: "
+                    f"model_params.{key}={model_params[key]!r}, "
+                    f"architecture_identity.{key}={value!r}."
+                )
+            model_params[key] = value
+    semantic_without_identity = (
+        not isinstance(stored_architecture_identity, dict)
+        and _is_semantic_param_artifact(config)
+    )
+    if semantic_without_identity and required_attention_fields is not None:
+        required_fields = required_attention_fields
+        present_fields = {
+            field
+            for field in required_fields
+            if config.get(field, model_params.get(field)) is not None
+        }
+        if not present_fields:
+            raise ValueError(
+                "fieldless attention parameter artifact is ambiguous; provide all "
+                "resolved architecture fields in a read-only compatibility view"
+            )
+        if present_fields != required_fields:
+            missing = ", ".join(sorted(required_fields - present_fields))
+            raise ValueError(
+                "incomplete attention architecture fields in stored parameter "
+                f"artifact: missing {missing}"
+            )
+    model_params, architecture_identity = _resolve_attention_architecture(
+        normalized_model,
+        hidden_dim=hidden_dim,
+        config=config,
+        model_params=model_params,
+    )
+    if isinstance(stored_architecture_identity, dict):
+        if architecture_identity != stored_architecture_identity:
+            raise ValueError(
+                "Parameter artifact architecture identity mismatch: "
+                f"stored={stored_architecture_identity!r}, "
+                f"resolved={architecture_identity!r}."
+            )
+
     saved = dict(config)
     saved["search_profile"] = profile
     saved.update(describe_search_profile(profile))
@@ -1241,6 +1457,8 @@ def resolve_effective_param_config(
     saved["flow_num_layers"] = int(flow_depth)
     saved["flow_depth"] = int(flow_depth)
     saved["model_params"] = model_params
+    if architecture_identity:
+        saved["architecture_identity"] = architecture_identity
     for key, value in space.get("default_extra_params", {}).items():
         if key != "flow_depth" and key in model_params:
             saved[key] = model_params[key]
@@ -1298,6 +1516,72 @@ def build_model_kwargs_from_config(model_name: str, model_config: dict) -> dict:
             search_profile=infer_param_search_profile(model_config),
         )
     hidden_dim = int(effective["hidden_dim"])
+    model_params = dict(effective.get("model_params") or {})
+    stored_architecture_identity = model_config.get("architecture_identity")
+    if "architecture_identity" in model_config and not isinstance(
+        stored_architecture_identity,
+        dict,
+    ):
+        raise ValueError("architecture_identity must be a mapping when present")
+    normalized_model = _canonical_model_name(model_name)
+    required_attention_fields = _ATTENTION_ARCHITECTURE_FIELDS.get(normalized_model)
+    top_level_model_params = dict(model_config.get("model_params") or {})
+    if required_attention_fields is not None:
+        for field in required_attention_fields:
+            if field not in top_level_model_params:
+                continue
+            if field in model_params and model_params[field] != top_level_model_params[field]:
+                raise ValueError(
+                    "Parameter artifact architecture identity mismatch: "
+                    f"model_params.{field}={top_level_model_params[field]!r}, "
+                    f"effective_params.model_params.{field}={model_params[field]!r}."
+                )
+            model_params[field] = top_level_model_params[field]
+    if isinstance(stored_architecture_identity, dict):
+        for key, value in stored_architecture_identity.items():
+            if key in model_params and model_params[key] != value:
+                raise ValueError(
+                    "Parameter artifact architecture identity mismatch: "
+                    f"model_params.{key}={model_params[key]!r}, "
+                    f"architecture_identity.{key}={value!r}."
+                )
+            model_params[key] = value
+        model_params, resolved_identity = _resolve_attention_architecture(
+            model_name,
+            hidden_dim=hidden_dim,
+            config=stored_architecture_identity,
+            model_params=model_params,
+        )
+        if resolved_identity != stored_architecture_identity:
+            raise ValueError(
+                "Parameter artifact architecture identity mismatch: "
+                f"stored={stored_architecture_identity!r}, "
+                f"resolved={resolved_identity!r}."
+            )
+    elif _is_semantic_param_artifact(model_config):
+        if required_attention_fields is not None:
+            present_fields = {
+                field
+                for field in required_attention_fields
+                if model_params.get(field) is not None
+            }
+            if not present_fields:
+                raise ValueError(
+                    "fieldless attention parameter artifact is ambiguous; provide all "
+                    "resolved architecture fields in a read-only compatibility view"
+                )
+            if present_fields != required_attention_fields:
+                missing = ", ".join(sorted(required_attention_fields - present_fields))
+                raise ValueError(
+                    "incomplete attention architecture fields in stored parameter "
+                    f"artifact: missing {missing}"
+                )
+        model_params, _ = _resolve_attention_architecture(
+            model_name,
+            hidden_dim=hidden_dim,
+            config={},
+            model_params=model_params,
+        )
     return {
         "hidden_dim": hidden_dim,
         "hidden_hidden_dim": hidden_dim,
@@ -1306,7 +1590,7 @@ def build_model_kwargs_from_config(model_name: str, model_config: dict) -> dict:
         "head_depth": int(effective["head_depth"]),
         "flow_num_layers": int(effective["flow_num_layers"]),
         "flow_depth": int(effective["flow_depth"]),
-        "model_params": dict(effective.get("model_params") or {}),
+        "model_params": model_params,
     }
 
 

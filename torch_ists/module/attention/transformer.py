@@ -32,6 +32,8 @@ class PositionalEncoding(nn.Module):
 class TransformerBackbone(nn.Module):
     """Simple Transformer model for sequences."""
 
+    DEFAULT_FEEDFORWARD_RATIO = 4
+
     def __init__(
         self,
         input_dim: int,
@@ -40,10 +42,21 @@ class TransformerBackbone(nn.Module):
         num_layers: int = 2,
         dropout: float = 0.1,
         n_heads: int = 4,
+        dim_feedforward: int | None = None,
     ):
         super().__init__()
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
+        self.dim_feedforward = (
+            int(dim_feedforward)
+            if dim_feedforward is not None
+            else int(hidden_dim) * self.DEFAULT_FEEDFORWARD_RATIO
+        )
+        if self.dim_feedforward <= 0:
+            raise ValueError(
+                "dim_feedforward must be a positive integer, "
+                f"got {self.dim_feedforward}"
+            )
 
         self.transformer_in = nn.Linear(input_dim, hidden_dim)
         self.positional_encoding = PositionalEncoding(hidden_dim, seq_len)
@@ -51,6 +64,7 @@ class TransformerBackbone(nn.Module):
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=hidden_dim,
             nhead=n_heads,
+            dim_feedforward=self.dim_feedforward,
             dropout=dropout,
             batch_first=True,
         )

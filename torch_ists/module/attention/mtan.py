@@ -79,6 +79,8 @@ class MTANEncoder(nn.Module):
         embed_time: int = 16,
         num_heads: int = 1,
         learn_emb: bool = False,
+        latent_head_dim: int | None = None,
+        time_scale: float = 48.0,
         device: str = "cpu",
     ):
         super().__init__()
@@ -87,12 +89,26 @@ class MTANEncoder(nn.Module):
         self.dim = input_dim
         self.register_buffer("query", query.clone().detach())
         self.learn_emb = learn_emb
+        self.latent_head_dim = (
+            int(latent_head_dim) if latent_head_dim is not None else int(nhidden)
+        )
+        self.time_scale = float(time_scale)
+        if self.latent_head_dim <= 0:
+            raise ValueError(
+                "latent_head_dim must be a positive integer, "
+                f"got {self.latent_head_dim}"
+            )
+        if not math.isfinite(self.time_scale) or self.time_scale <= 0:
+            raise ValueError(
+                "time_scale must be a positive finite value, "
+                f"got {self.time_scale}"
+            )
         self.att = MultiTimeAttention(2 * input_dim, nhidden, embed_time, num_heads)
         self.gru_rnn = nn.GRU(nhidden, nhidden, bidirectional=True, batch_first=True)
         self.hiddens_to_z0 = nn.Sequential(
-            nn.Linear(2 * nhidden, 50),
+            nn.Linear(2 * nhidden, self.latent_head_dim),
             nn.ReLU(),
-            nn.Linear(50, latent_dim * 2),
+            nn.Linear(self.latent_head_dim, latent_dim * 2),
         )
         if learn_emb:
             self.periodic = nn.Linear(1, embed_time - 1)
@@ -107,7 +123,7 @@ class MTANEncoder(nn.Module):
     def fixed_time_embedding(self, pos):
         d_model = self.embed_time
         pe = torch.zeros(pos.shape[0], pos.shape[1], d_model, device=pos.device)
-        position = 48.0 * pos.unsqueeze(2)
+        position = self.time_scale * pos.unsqueeze(2)
         div_term = torch.exp(torch.arange(0, d_model, 2, device=pos.device).float() * -(np.log(10.0) / d_model))
         pe[:, :, 0::2] = torch.sin(position * div_term)
         pe[:, :, 1::2] = torch.cos(position * div_term)
@@ -138,6 +154,8 @@ class AttentionMTANModel(nn.Module):
         num_stack: int = 2,
         n_heads: int = 1,
         embed_time: int = 16,
+        latent_head_dim: int | None = None,
+        time_scale: float = 48.0,
         dropout: float = 0.1,
         device: str = "cpu",
         model_name: str = "mtan",
@@ -155,6 +173,8 @@ class AttentionMTANModel(nn.Module):
             embed_time=embed_time,
             num_heads=n_heads,
             learn_emb=False,
+            latent_head_dim=latent_head_dim,
+            time_scale=time_scale,
             device=device,
         )
 

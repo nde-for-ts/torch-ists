@@ -30,16 +30,30 @@ class PositionalEncoding(nn.Module):
 class SAnDEncoderBlock(nn.Module):
     """Single encoder block for SAnD."""
 
-    def __init__(self, d_model: int, n_heads: int, dropout_rate: float = 0.2):
+    def __init__(
+        self,
+        d_model: int,
+        n_heads: int,
+        dropout_rate: float = 0.2,
+        dim_feedforward: int | None = None,
+    ):
         super().__init__()
+        resolved_feedforward = (
+            int(dim_feedforward) if dim_feedforward is not None else 4 * int(d_model)
+        )
+        if resolved_feedforward <= 0:
+            raise ValueError(
+                "dim_feedforward must be a positive integer, "
+                f"got {resolved_feedforward}"
+            )
         self.attention = nn.MultiheadAttention(d_model, n_heads, dropout=dropout_rate, batch_first=True)
         self.norm1 = nn.LayerNorm(d_model)
         self.norm2 = nn.LayerNorm(d_model)
         self.ffn = nn.Sequential(
-            nn.Linear(d_model, d_model * 4),
+            nn.Linear(d_model, resolved_feedforward),
             nn.ReLU(),
             nn.Dropout(dropout_rate),
-            nn.Linear(d_model * 4, d_model),
+            nn.Linear(resolved_feedforward, d_model),
             nn.Dropout(dropout_rate),
         )
 
@@ -91,16 +105,35 @@ class AttentionSAnDModel(nn.Module):
         factor: int = 16,
         n_layers: int = 1,
         d_model: int = 32,
+        dim_feedforward: int | None = None,
         dropout: float = 0.1,
         model_name: str = "sand",
     ):
         super().__init__()
         self.model_name = model_name
         self.seq_len = seq_len
+        self.dim_feedforward = (
+            int(dim_feedforward) if dim_feedforward is not None else 4 * int(d_model)
+        )
+        if self.dim_feedforward <= 0:
+            raise ValueError(
+                "dim_feedforward must be a positive integer, "
+                f"got {self.dim_feedforward}"
+            )
 
         self.input_embedding = nn.Conv1d(input_dim, d_model, 1)
         self.positional_encoding = PositionalEncoding(d_model, seq_len)
-        self.blocks = nn.ModuleList([SAnDEncoderBlock(d_model, n_heads, dropout) for _ in range(n_layers)])
+        self.blocks = nn.ModuleList(
+            [
+                SAnDEncoderBlock(
+                    d_model,
+                    n_heads,
+                    dropout,
+                    dim_feedforward=self.dim_feedforward,
+                )
+                for _ in range(n_layers)
+            ]
+        )
         self.dense_interpolation = DenseInterpolation(seq_len, factor)
         self.clf = ClassificationModule(d_model, factor, hidden_dim)
 

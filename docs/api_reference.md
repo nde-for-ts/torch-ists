@@ -813,6 +813,12 @@ Behavior notes:
 - For sequence baselines, `transformer`, and `sand`, the packaged runtime applies `torch.nan_to_num(..., nan=0.0)` before the backbone call and does not pass a padding mask into the attention backbone.
 - `transformer-mask` uses the same zero-filled values, but it also applies `src_key_padding_mask` derived from the packaged observation mask. If a sequence is fully masked, the runtime treats that zero-filled row as an unmasked finite fallback so the Transformer encoder returns finite outputs.
 - `mtan` and `miam` consume zero-filled values together with the original sequence stack and normalized timestamps; they do not use interpolation coefficients. mTAN samples its variational latent representation in both training and evaluation mode, so set the random seed for repeatable single-sample inference or aggregate multiple samples. MIAM requires `hidden_dim >= 2`.
+- Attention construction accepts resolved capacity fields through `model_params`: `dim_feedforward`
+  for Transformer, Transformer-mask, SAnD, and MIAM; `attention_dropout`, `ffn_dropout`, and
+  `residual_dropout` for MIAM; and `latent_head_dim` plus positive finite `time_scale` for mTAN.
+  Ordinary defaults are respectively Transformer 4x hidden width, SAnD 4x `d_model`, MIAM 1x hidden
+  width with component dropout inherited from the top-level request, and mTAN hidden-width latent
+  head with `time_scale=48.0`. Head widths must be divisible by `n_heads` where applicable.
 - Under the scripts' train-only z-score normalization, the zero-fill path becomes per-channel mean imputation in raw value space.
 - `imputation_strategy` selects how missing entries are filled for compatible direct value-channel backbones: `"zero"` (default), `"last_observed"`, and `"channel_mean"`. Strict raw-missing rows (`neuralflow-*`, `flowpath-*`) keep raw `NaN` until method-defined mask-aware zero filling and reject nonzero strategies; coefficient-driven rows consume the `coeffs` built by `preprocess(...)`.
 - Non-finite backbone outputs, hidden states, or logits raise `RuntimeError`; the package does not silently zero-fill them.

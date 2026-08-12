@@ -32,6 +32,15 @@ class AttentionHandler(BaseHandler):
     def returns_loss(self) -> bool:
         return False
 
+    @staticmethod
+    def _validate_head_width(*, width_name: str, width: int, n_heads: int) -> None:
+        if n_heads <= 0:
+            raise ValueError(f"n_heads must be a positive integer, got {n_heads}")
+        if width <= 0 or width % n_heads != 0:
+            raise ValueError(
+                f"{width_name}={width} must be divisible by n_heads={n_heads}"
+            )
+
     def create_model(self, model_name: str, config: Dict[str, Any], device: str) -> nn.Module:
         if not self.can_handle(model_name):
             raise ValueError(
@@ -47,37 +56,74 @@ class AttentionHandler(BaseHandler):
         if model_name in {"transformer", "transformer-mask"}:
             from ..module.attention import TransformerBackbone
 
+            raw_dim_feedforward = config.get("dim_feedforward")
+            n_heads = int(config.get("n_heads", 4))
+            self._validate_head_width(
+                width_name="hidden_dim",
+                width=hidden_dim,
+                n_heads=n_heads,
+            )
             model = TransformerBackbone(
                 input_dim=input_dim,
                 hidden_dim=hidden_dim,
-                n_heads=int(config.get("n_heads", 4)),
+                n_heads=n_heads,
                 seq_len=seq_len,
                 num_layers=int(config.get("num_layers", 2)),
                 dropout=dropout,
+                dim_feedforward=(
+                    None if raw_dim_feedforward is None else int(raw_dim_feedforward)
+                ),
             )
         elif model_name == "miam":
             from ..module.attention import AttentionMIAMModel
 
+            n_heads = int(config.get("n_heads", 1))
+            self._validate_head_width(
+                width_name="hidden_dim",
+                width=hidden_dim,
+                n_heads=n_heads,
+            )
             model = AttentionMIAMModel(
                 input_dim=input_dim,
                 hidden_dim=hidden_dim,
                 seq_len=seq_len,
                 num_stack=int(config.get("num_stack", 2)),
-                n_heads=int(config.get("n_heads", 1)),
+                n_heads=n_heads,
                 n_iter=int(config.get("n_iter", 1)),
                 dropout=dropout,
+                dim_feedforward=(
+                    None
+                    if config.get("dim_feedforward") is None
+                    else int(config["dim_feedforward"])
+                ),
+                attention_dropout=config.get("attention_dropout"),
+                ffn_dropout=config.get("ffn_dropout"),
+                residual_dropout=config.get("residual_dropout"),
                 model_name=model_name,
             )
         elif model_name == "mtan":
             from ..module.attention import AttentionMTANModel
 
+            n_heads = int(config.get("n_heads", 1))
+            embed_time = int(config.get("embed_time", 16))
+            self._validate_head_width(
+                width_name="embed_time",
+                width=embed_time,
+                n_heads=n_heads,
+            )
             model = AttentionMTANModel(
                 input_dim=input_dim,
                 hidden_dim=hidden_dim,
                 seq_len=seq_len,
                 num_stack=int(config.get("num_stack", 2)),
-                n_heads=int(config.get("n_heads", 1)),
-                embed_time=int(config.get("embed_time", 16)),
+                n_heads=n_heads,
+                embed_time=embed_time,
+                latent_head_dim=(
+                    None
+                    if config.get("latent_head_dim") is None
+                    else int(config["latent_head_dim"])
+                ),
+                time_scale=float(config.get("time_scale", 48.0)),
                 dropout=dropout,
                 device=device,
                 model_name=model_name,
@@ -85,14 +131,26 @@ class AttentionHandler(BaseHandler):
         else:  # sand
             from ..module.attention import AttentionSAnDModel
 
+            n_heads = int(config.get("n_heads", 4))
+            d_model = int(config.get("d_model", 32))
+            self._validate_head_width(
+                width_name="d_model",
+                width=d_model,
+                n_heads=n_heads,
+            )
             model = AttentionSAnDModel(
                 input_dim=input_dim,
                 hidden_dim=hidden_dim,
                 seq_len=seq_len,
-                n_heads=int(config.get("n_heads", 4)),
+                n_heads=n_heads,
                 factor=int(config.get("factor", 16)),
                 n_layers=int(config.get("n_layers", 1)),
-                d_model=int(config.get("d_model", 32)),
+                d_model=d_model,
+                dim_feedforward=(
+                    None
+                    if config.get("dim_feedforward") is None
+                    else int(config["dim_feedforward"])
+                ),
                 dropout=dropout,
                 model_name=model_name,
             )

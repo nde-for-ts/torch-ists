@@ -60,6 +60,14 @@ These models use the sequence stack directly with `coeffs=None`; `NaN` is replac
 
 **Inference notes.** mTAN remains stochastic under `eval()` because variational latent sampling is part of the method. Set the random seed for repeatable single-sample inference or aggregate multiple samples. MIAM requires `hidden_dim >= 2` for its feature normalization.
 
+**Capacity and dropout settings.** Transformer and Transformer-mask resolve the encoder feedforward
+width to `4 * hidden_dim`; SAnD resolves it to `4 * d_model`; and MIAM resolves it to `hidden_dim`.
+MIAM attention, feedforward, and residual dropout each follow the top-level `dropout` unless an
+explicit component value is supplied. mTAN resolves `latent_head_dim` to `hidden_dim` and retains
+`time_scale=48.0`. Parameter artifacts record these resolved numerical values. Older artifacts that
+do not record the complete field set require an explicit read-only compatibility view rather than
+being interpreted from the current defaults.
+
 ---
 
 ## 3. Neural ODE methods

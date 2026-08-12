@@ -48,6 +48,7 @@ from _common import (
     describe_search_profile,
     infer_param_search_profile,
     is_pre_integrity_param_artifact,
+    normalize_attention_model_parameters_for_comparison,
     normalize_runtime_baseline_id,
     normalize_search_profile,
     omit_none_runtime_baseline_id,
@@ -1845,6 +1846,22 @@ def _validate_existing_output_contract(
     )
     mismatches = []
     for field in semantic_fields:
+        if field == "model_parameters":
+            try:
+                actual_parameters = normalize_attention_model_parameters_for_comparison(
+                    str(expected_contract.get("model", "")),
+                    actual_contract.get(field, {}),
+                )
+                expected_parameters = normalize_attention_model_parameters_for_comparison(
+                    str(expected_contract.get("model", "")),
+                    expected_contract.get(field, {}),
+                )
+            except (TypeError, ValueError):
+                mismatches.append(field)
+                continue
+            if actual_parameters != expected_parameters:
+                mismatches.append(field)
+            continue
         if field == "control_value_transform":
             actual_transform = normalize_control_value_transform(
                 actual_contract.get(field, "identity")
