@@ -221,7 +221,11 @@ def fit_control_value_transform(x_missing, train_indices, method: str = "identit
             "observed_counts": [],
         }
     if train_indices is None:
-        raise ValueError("standardize requires explicit training indices")
+        raise ValueError(
+            "standardize requires explicit training indices; pass "
+            "control_value_train_indices or a fitted control_value_transform_state, "
+            "or select control_value_transform='identity'"
+        )
     indices = torch.as_tensor(train_indices, dtype=torch.long, device=values.device).reshape(-1)
     if indices.numel() <= 0:
         raise ValueError("standardize requires non-empty training indices")

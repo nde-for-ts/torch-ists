@@ -70,9 +70,7 @@ class AttentionHandler(BaseHandler):
                 seq_len=seq_len,
                 num_layers=int(config.get("num_layers", 2)),
                 dropout=dropout,
-                dim_feedforward=(
-                    None if raw_dim_feedforward is None else int(raw_dim_feedforward)
-                ),
+                dim_feedforward=raw_dim_feedforward,
             )
         elif model_name == "miam":
             from ..module.attention import AttentionMIAMModel
@@ -91,11 +89,7 @@ class AttentionHandler(BaseHandler):
                 n_heads=n_heads,
                 n_iter=int(config.get("n_iter", 1)),
                 dropout=dropout,
-                dim_feedforward=(
-                    None
-                    if config.get("dim_feedforward") is None
-                    else int(config["dim_feedforward"])
-                ),
+                dim_feedforward=config.get("dim_feedforward"),
                 attention_dropout=config.get("attention_dropout"),
                 ffn_dropout=config.get("ffn_dropout"),
                 residual_dropout=config.get("residual_dropout"),
@@ -118,11 +112,7 @@ class AttentionHandler(BaseHandler):
                 num_stack=int(config.get("num_stack", 2)),
                 n_heads=n_heads,
                 embed_time=embed_time,
-                latent_head_dim=(
-                    None
-                    if config.get("latent_head_dim") is None
-                    else int(config["latent_head_dim"])
-                ),
+                latent_head_dim=config.get("latent_head_dim"),
                 time_scale=float(config.get("time_scale", 48.0)),
                 dropout=dropout,
                 device=device,
@@ -146,11 +136,7 @@ class AttentionHandler(BaseHandler):
                 factor=int(config.get("factor", 16)),
                 n_layers=int(config.get("n_layers", 1)),
                 d_model=d_model,
-                dim_feedforward=(
-                    None
-                    if config.get("dim_feedforward") is None
-                    else int(config["dim_feedforward"])
-                ),
+                dim_feedforward=config.get("dim_feedforward"),
                 dropout=dropout,
                 model_name=model_name,
             )

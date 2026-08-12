@@ -201,6 +201,35 @@ def test_inherited_runtime_configuration_guards():
         AttentionMIAMModel(input_dim=3, hidden_dim=1, seq_len=8)
 
 
+@pytest.mark.parametrize("invalid", [True, 7.5, "9"])
+def test_attention_integer_settings_fail_closed_without_coercion(invalid):
+    from torch_ists import ists_layer
+
+    with pytest.raises(ValueError, match="dim_feedforward must be a positive integer"):
+        ists_layer(
+            model_name="transformer",
+            input_dim=3,
+            hidden_dim=8,
+            seq_len=8,
+            model_params={"dim_feedforward": invalid},
+            device="cpu",
+        )
+
+
+def test_attention_integer_settings_accept_numpy_integral_values():
+    from torch_ists import ists_layer
+
+    layer = ists_layer(
+        model_name="transformer",
+        input_dim=3,
+        hidden_dim=8,
+        seq_len=8,
+        model_params={"dim_feedforward": np.int64(32)},
+        device="cpu",
+    )
+    assert layer.seq_layer.seq_layer.layers[0].linear1.out_features == 32
+
+
 def test_ito_sde_rejects_heun_configuration():
     pytest.importorskip("torchcde")
     pytest.importorskip("torchsde")

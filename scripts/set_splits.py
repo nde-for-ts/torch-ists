@@ -162,6 +162,7 @@ def main() -> int:
                 seq_len=int(payload.X.shape[2]),
                 input_dim=int(payload.X.shape[1]),
                 input_values=payload.X,
+                input_timestamps=payload.timestamps,
             )
 
         if split_path.exists():

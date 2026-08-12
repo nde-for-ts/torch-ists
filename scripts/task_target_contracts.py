@@ -592,7 +592,12 @@ def load_task_targets_npz(
                 )
         if task_name == "imputation":
             raw_layout = validated_inputs.transpose(0, 2, 1)
-            comparable = (target_mask > 0.5) & np.isfinite(raw_layout)
+            supervised_cells = target_mask > 0.5
+            if np.any(supervised_cells & ~np.isfinite(raw_layout)):
+                raise ValueError(
+                    "imputation supervision mask selects dataset-native missing cells"
+                )
+            comparable = supervised_cells
             raw_unit_comparison_count = int(np.count_nonzero(comparable))
             if raw_unit_comparison_count and not np.allclose(
                 target[comparable],

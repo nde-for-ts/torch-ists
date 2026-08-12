@@ -9,6 +9,7 @@ import json
 import math
 import os
 import sys
+from numbers import Integral
 from pathlib import Path
 
 import numpy as np
@@ -436,10 +437,16 @@ def _stored_split_seeds(identity: dict) -> list[int]:
     return _normalize_split_seeds(seeds)
 
 
+_TASK_DEFINITIONS = {
+    "forecasting": "future-time-conditioned",
+    "imputation": "held-out-observed-cell",
+    "outlier_detection": "positive-label-is-outlier",
+    "change_detection": "positive-label-is-changed-state",
+}
+
+
 def task_definition_for_task(task: str) -> str | None:
-    if str(task).strip().lower() == "forecasting":
-        return "future-time-conditioned"
-    return None
+    return _TASK_DEFINITIONS.get(str(task).strip().lower())
 
 
 def validate_task_definition(
@@ -459,8 +466,8 @@ def validate_task_definition(
     )
     if not actual:
         raise ValueError(
-            f"{context} predates time-conditioned forecasting. "
-            "Run a fresh forecasting parameter search with the current scripts."
+            f"{context} predates the current {str(task).strip().lower()} task definition. "
+            "Run a fresh parameter search for this task with the current scripts."
         )
     if actual != expected:
         raise ValueError(
@@ -653,7 +660,7 @@ def validate_param_artifact_identity(
         compared_fields.extend(("forecast_horizon", "dataset_source", "split_seeds"))
         if task_semantics is not None:
             compared_fields.append("task_semantics")
-        if actual_task == "forecasting":
+        if task_definition_for_task(actual_task) is not None:
             validate_task_definition(model_config, task=actual_task, context=context)
             compared_fields.append("task_definition")
     mismatches = [
@@ -1148,10 +1155,9 @@ def _coerce_int_choice(value, *, default: int, allowed: list[int] | None = None)
 
 
 def _require_positive_int(value, *, field: str) -> int:
-    try:
-        resolved = int(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{field} must be a positive integer, got {value!r}") from exc
+    if isinstance(value, bool) or not isinstance(value, Integral):
+        raise ValueError(f"{field} must be a positive integer, got {value!r}")
+    resolved = int(value)
     if resolved <= 0:
         raise ValueError(f"{field} must be a positive integer, got {resolved}")
     return resolved
@@ -1636,7 +1642,7 @@ def build_model_kwargs_from_config(model_name: str, model_config: dict) -> dict:
                 f"stored={stored_architecture_identity!r}, "
                 f"resolved={resolved_identity!r}."
             )
-    elif _is_semantic_param_artifact(model_config):
+    elif _is_semantic_param_artifact(model_config) or isinstance(stored_effective, dict):
         if required_attention_fields is not None:
             present_fields = {
                 field

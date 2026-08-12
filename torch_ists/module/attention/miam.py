@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import math
 from copy import deepcopy
+from numbers import Integral
 from typing import Tuple
 
 import numpy as np
@@ -14,6 +15,15 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
+
+
+def _require_positive_int(value: object, *, field: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, Integral):
+        raise ValueError(f"{field} must be a positive integer, got {value!r}")
+    resolved = int(value)
+    if resolved <= 0:
+        raise ValueError(f"{field} must be a positive integer, got {resolved}")
+    return resolved
 
 
 def get_clones(module, n):
@@ -224,9 +234,10 @@ class AttentionMIAMModel(nn.Module):
         self.n_iter = n_iter
 
         d_model = hidden_dim
-        d_ff = int(dim_feedforward) if dim_feedforward is not None else int(hidden_dim)
-        if d_ff <= 0:
-            raise ValueError(f"dim_feedforward must be a positive integer, got {d_ff}")
+        d_ff = _require_positive_int(
+            dim_feedforward if dim_feedforward is not None else hidden_dim,
+            field="dim_feedforward",
+        )
         self.dim_feedforward = d_ff
         self.attention_dropout = float(
             dropout if attention_dropout is None else attention_dropout

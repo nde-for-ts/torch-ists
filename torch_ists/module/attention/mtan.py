@@ -3,12 +3,22 @@
 from __future__ import annotations
 
 import math
+from numbers import Integral
 from typing import Tuple
 
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+
+def _require_positive_int(value: object, *, field: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, Integral):
+        raise ValueError(f"{field} must be a positive integer, got {value!r}")
+    resolved = int(value)
+    if resolved <= 0:
+        raise ValueError(f"{field} must be a positive integer, got {resolved}")
+    return resolved
 
 
 class MultiTimeAttention(nn.Module):
@@ -89,15 +99,11 @@ class MTANEncoder(nn.Module):
         self.dim = input_dim
         self.register_buffer("query", query.clone().detach())
         self.learn_emb = learn_emb
-        self.latent_head_dim = (
-            int(latent_head_dim) if latent_head_dim is not None else int(nhidden)
+        self.latent_head_dim = _require_positive_int(
+            latent_head_dim if latent_head_dim is not None else nhidden,
+            field="latent_head_dim",
         )
         self.time_scale = float(time_scale)
-        if self.latent_head_dim <= 0:
-            raise ValueError(
-                "latent_head_dim must be a positive integer, "
-                f"got {self.latent_head_dim}"
-            )
         if not math.isfinite(self.time_scale) or self.time_scale <= 0:
             raise ValueError(
                 "time_scale must be a positive finite value, "

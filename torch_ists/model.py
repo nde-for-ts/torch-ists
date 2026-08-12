@@ -114,7 +114,7 @@ class ists_model(nn.Module):
             self.future_time_encoder = nn.Sequential(
                 nn.Linear(1, hidden_dim),
                 nn.Tanh(),
-            )
+            ).to(self.seq_layer.device)
             self.head = nn.Linear(hidden_dim, self.output_dim)
         elif self.task == "imputation":
             self.head = nn.Linear(hidden_dim, self.input_dim)
@@ -237,12 +237,12 @@ class ists_model(nn.Module):
             future_timestamps = torch.as_tensor(
                 future_timestamps,
                 device=sample_summary.device,
-                dtype=sample_summary.dtype,
+                dtype=torch.float64,
             )
             forecast_origin = torch.as_tensor(
                 forecast_origin,
                 device=sample_summary.device,
-                dtype=sample_summary.dtype,
+                dtype=torch.float64,
             ).reshape(-1)
             expected_shape = (
                 int(sample_summary.shape[0]),
@@ -269,7 +269,8 @@ class ists_model(nn.Module):
                 future_timestamps[:, 1:] > future_timestamps[:, :-1]
             ):
                 raise ValueError("future_timestamps must be strictly increasing")
-            time_features = self.future_time_encoder(torch.log1p(elapsed).unsqueeze(-1))
+            elapsed_features = torch.log1p(elapsed).to(dtype=sample_summary.dtype)
+            time_features = self.future_time_encoder(elapsed_features.unsqueeze(-1))
             pred = self.head(sample_summary.unsqueeze(1) + time_features)
         elif self.task == "imputation":
             pred = self.head(out)

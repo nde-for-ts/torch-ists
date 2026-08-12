@@ -1843,6 +1843,8 @@ def _validate_existing_output_contract(
         "method_definition",
         "control_time_source",
         "task_definition",
+        "search_algorithm_seed",
+        "search_policy",
     )
     mismatches = []
     for field in semantic_fields:
@@ -2182,8 +2184,6 @@ def _stored_metric_matches(actual, expected) -> bool:
 
 
 def _validate_stored_task_metrics(evaluation, *, task: str, output_path) -> None:
-    if task == "classification":
-        return
     predictions = evaluation.get("predictions")
     if not isinstance(predictions, dict) or predictions.get("storage") != "full":
         return
@@ -2192,9 +2192,17 @@ def _validate_stored_task_metrics(evaluation, *, task: str, output_path) -> None
         raise OutputArtifactContractError(
             f"Output artifact {output_path} cannot be reused: stored task metrics are missing."
         )
-    pred = np.asarray(predictions["pred"])
-    target = np.asarray(predictions["target"])
-    target_mask = predictions.get("target_mask")
+    if task == "classification":
+        expected = _compute_metrics(
+            np.asarray(predictions["y_true"]),
+            np.asarray(predictions["y_pred"]),
+            np.asarray(predictions["logit_list"]),
+        )
+    else:
+        pred = np.asarray(predictions["pred"])
+        target = np.asarray(predictions["target"])
+        target_mask = predictions.get("target_mask")
+        expected = None
     if task in {"outlier_detection", "change_detection"}:
         expected = _compute_binary_detection_metrics(
             pred,
@@ -2203,7 +2211,7 @@ def _validate_stored_task_metrics(evaluation, *, task: str, output_path) -> None
             target_mask=target_mask,
             task=task,
         )
-    else:
+    elif task != "classification":
         expected = _compute_task_metrics(
             pred,
             target,

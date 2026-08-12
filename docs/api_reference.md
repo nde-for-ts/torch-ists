@@ -106,6 +106,8 @@ logits = cde_model(seq, coeffs=coeffs)  # [16, 2]
 
 Coefficient-driven rows consume the `coeffs` returned by `preprocess`. Direct sequence, attention, and event-driven rows such as ODE-LSTM, Neural Jump ODE (NJ-ODE), and LatentSDE accept `coeffs=None` and use the sequence stack directly.
 
+Coefficient-driven rows standardize observed values with statistics fitted on the training samples, so `preprocess` needs `control_value_train_indices` or a previously fitted `control_value_transform_state`. Select `control_value_transform="identity"` to keep raw values.
+
 Import package as `torch_ists`.
 
 The installed package version is available as `torch_ists.__version__`. Model discovery is available through `get_active_model_list()` and `get_model_capabilities(...)` without importing optional model backends.
@@ -569,6 +571,7 @@ X_missing, X_mask, X_delta, coeffs = preprocess(
     X,
     missing_rate=0.3,
     model_name="neural_lsde",
+    control_value_train_indices=np.arange(80),
 )
 ```
 
@@ -888,11 +891,18 @@ Broader task surface:
 - `regression/forecasting/imputation/outlier_detection/change_detection` are available through `ists_model`.
 - `classification` is the stable packaged path.
 
-The five non-classification outputs are shared package task-head adapters. Forecasting conditions its decoder on `future_timestamps [N,H]` relative to `forecast_origin [N]`; both are required by `forward` and the future grid must be finite, strictly ordered, and later than the origin. Dataset-owned future target values are not model inputs.
+The five non-classification outputs are shared package task-head adapters. Forecasting conditions its decoder on `future_timestamps [N,H]` relative to `forecast_origin [N]`; both are required by `forward` and the future grid must be finite, strictly ordered, and later than the origin. Elapsed times are computed in 64-bit precision before conversion to the model dtype, so large absolute timestamps retain small future offsets. Dataset-owned future target values are not model inputs.
+
+Preview task labels have fixed package meanings. Imputation supervises only held-out cells that
+were finite in the dataset input. For outlier detection, label `1` means outlier. For change
+detection, label `1` means the sample is in the changed state at that supervised timestep. Binary
+decisions use `sigmoid(logit) >= 0.5`; change-detection metrics are pointwise on the supplied
+supervision mask and apply no onset tolerance. The packaged change-detection workflow is offline
+sequence labeling and does not claim causal or online detection behavior.
 
 The source-checkout workflow accepts X-only dataset NPZ files for preview tasks, stores their deterministic splits at task-suffixed paths, and infers regression `output_dim` from `[N,R]` dataset targets. Target values stay in dataset-native units; shape, dtype, mask, valid-time, and horizon checks run before training.
 
-`torch_ists.task_registry.get_model_task_capabilities(model_name)` returns data-driven capability fields for the selected model. `validate_model_task_capability(model_name, task, ...)` rejects unsupported requirements, including native future-time prediction, ragged suffix handling, and causal guarantees, before hyperparameter search.
+`torch_ists.task_registry.get_model_task_capabilities(model_name)` returns data-driven capability fields for the selected model. Callers can ask `validate_model_task_capability(model_name, task, ...)` to reject unsupported native future-time prediction, ragged suffix handling, or causal behavior before model construction. The packaged scripts validate their declared task requirements; they do not request a causal guarantee for offline change detection.
 
 Behavior notes:
 - If `use_intensity` is omitted (`None`), runtime resolves it from `get_data_config(model_name)` inside `ists_layer`.
@@ -902,6 +912,7 @@ Behavior notes:
 - Some compatibility models accept solver-shaped inputs only for backward compatibility and may emit a runtime warning.
 - Unsupported solver knobs raise `ValueError` instead of silently changing model behavior.
 - `output_dim` defaults to `1`. Forecasting requires a positive `forecast_horizon`; omitting it or passing a non-positive value raises `ValueError`. Forecasting calls also require `future_timestamps` and `forecast_origin`.
+- Imputation supervision may select only finite, dataset-observed input cells. Supervised target values must match those original values; the selected cells are hidden from the model input by the source-checkout scripts.
 - `forward(..., return_aux_loss=True)` returns `(prediction, aux_loss)` for auxiliary-loss backbones.
 - Non-finite predictions raise `RuntimeError`.
 

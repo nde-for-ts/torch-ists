@@ -142,6 +142,11 @@ Neural RDE methods:
 
 ANCDE, EXIT, LEAP, and DualDynamics also use CDE-style control paths and consume interpolation coefficients. FlowPath uses a learned control built directly from the raw value/time path.
 
+Coefficient-consuming models use train-observed value standardization by default. Pass
+`control_value_train_indices` when fitting during `preprocess(...)`, or pass a previously fitted
+`control_value_transform_state`. Select `control_value_transform="identity"` explicitly when no
+value transform is intended.
+
 ---
 
 ## 6. ANCDE, EXIT, and LEAP

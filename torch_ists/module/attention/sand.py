@@ -3,10 +3,20 @@
 from __future__ import annotations
 
 import math
+from numbers import Integral
 from typing import Tuple
 
 import torch
 import torch.nn as nn
+
+
+def _require_positive_int(value: object, *, field: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, Integral):
+        raise ValueError(f"{field} must be a positive integer, got {value!r}")
+    resolved = int(value)
+    if resolved <= 0:
+        raise ValueError(f"{field} must be a positive integer, got {resolved}")
+    return resolved
 
 
 class PositionalEncoding(nn.Module):
@@ -38,14 +48,10 @@ class SAnDEncoderBlock(nn.Module):
         dim_feedforward: int | None = None,
     ):
         super().__init__()
-        resolved_feedforward = (
-            int(dim_feedforward) if dim_feedforward is not None else 4 * int(d_model)
+        resolved_feedforward = _require_positive_int(
+            dim_feedforward if dim_feedforward is not None else 4 * d_model,
+            field="dim_feedforward",
         )
-        if resolved_feedforward <= 0:
-            raise ValueError(
-                "dim_feedforward must be a positive integer, "
-                f"got {resolved_feedforward}"
-            )
         self.attention = nn.MultiheadAttention(d_model, n_heads, dropout=dropout_rate, batch_first=True)
         self.norm1 = nn.LayerNorm(d_model)
         self.norm2 = nn.LayerNorm(d_model)
@@ -112,14 +118,10 @@ class AttentionSAnDModel(nn.Module):
         super().__init__()
         self.model_name = model_name
         self.seq_len = seq_len
-        self.dim_feedforward = (
-            int(dim_feedforward) if dim_feedforward is not None else 4 * int(d_model)
+        self.dim_feedforward = _require_positive_int(
+            dim_feedforward if dim_feedforward is not None else 4 * d_model,
+            field="dim_feedforward",
         )
-        if self.dim_feedforward <= 0:
-            raise ValueError(
-                "dim_feedforward must be a positive integer, "
-                f"got {self.dim_feedforward}"
-            )
 
         self.input_embedding = nn.Conv1d(input_dim, d_model, 1)
         self.positional_encoding = PositionalEncoding(d_model, seq_len)

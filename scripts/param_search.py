@@ -270,6 +270,7 @@ def _build_expected_param_artifact_identity(
             seq_len=int(dataset_payload.X.shape[2]),
             input_dim=int(dataset_payload.X.shape[1]),
             input_values=dataset_payload.X,
+            input_timestamps=dataset_payload.timestamps,
             return_forecasting_schedule=True,
         )
         task_semantics = build_param_task_semantics(
@@ -346,6 +347,7 @@ def _validate_existing_param_artifact_for_reuse(
             task_semantics=task_semantics,
             context=f"Param artifact {existing_param_path}",
         )
+    build_model_kwargs_from_config(model_name, model_config)
     return existing_profile
 
 
@@ -2068,6 +2070,7 @@ def optimize(
             seq_len=int(dataset_payload.X.shape[2]),
             input_dim=int(dataset_payload.X.shape[1]),
             input_values=dataset_payload.X,
+            input_timestamps=dataset_payload.timestamps,
         )
         task_output_dim = infer_task_output_dim(
             task=task,

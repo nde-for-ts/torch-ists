@@ -6,9 +6,19 @@ Canonical location for transformer after Basic -> Attention migration.
 from __future__ import annotations
 
 import math
+from numbers import Integral
 
 import torch
 import torch.nn as nn
+
+
+def _require_positive_int(value: object, *, field: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, Integral):
+        raise ValueError(f"{field} must be a positive integer, got {value!r}")
+    resolved = int(value)
+    if resolved <= 0:
+        raise ValueError(f"{field} must be a positive integer, got {resolved}")
+    return resolved
 
 
 class PositionalEncoding(nn.Module):
@@ -47,16 +57,12 @@ class TransformerBackbone(nn.Module):
         super().__init__()
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
-        self.dim_feedforward = (
-            int(dim_feedforward)
+        self.dim_feedforward = _require_positive_int(
+            dim_feedforward
             if dim_feedforward is not None
-            else int(hidden_dim) * self.DEFAULT_FEEDFORWARD_RATIO
+            else hidden_dim * self.DEFAULT_FEEDFORWARD_RATIO,
+            field="dim_feedforward",
         )
-        if self.dim_feedforward <= 0:
-            raise ValueError(
-                "dim_feedforward must be a positive integer, "
-                f"got {self.dim_feedforward}"
-            )
 
         self.transformer_in = nn.Linear(input_dim, hidden_dim)
         self.positional_encoding = PositionalEncoding(hidden_dim, seq_len)

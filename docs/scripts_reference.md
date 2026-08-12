@@ -301,7 +301,15 @@ The task and metric tables describe both `ists_model` outputs and the correspond
 
 For outlier and change detection, the training split must contain both binary classes. A validation or test split may contain one class; AUROC and AUPRC are then stored as unavailable with an explicit reason, while BCE, accuracy, balanced accuracy, and F1 remain available.
 
-Before hyperparameter search, the workflow validates the selected model/task combination and rejects requests that require unsupported native future-time prediction, ragged suffix handling, or causal guarantees. This happens before trials are launched.
+For outlier detection, `1` denotes an outlier. For change detection, `1` denotes the changed state
+at a supervised timestep. Both tasks classify with `sigmoid(logit) >= 0.5`. Change-detection
+metrics are pointwise on `change_detection_loss_mask` with no onset tolerance. This is an offline
+sequence-labeling contract; the scripts do not claim causal or online detection behavior.
+
+Before hyperparameter search, the workflow validates the selected model/task combination against
+the requirements declared by the script. Callers that require native future-time prediction,
+ragged suffix handling, or causal behavior can request those checks through
+`validate_model_task_capability` before construction.
 
 ### Output
 
@@ -317,8 +325,8 @@ Requires:
 ### Artifact Reuse Boundaries
 
 - Classification split paths and bytes remain unchanged. Preview tasks use task-suffixed paths and never reuse an unsuffixed classification split.
-- Param artifacts are matched by dataset, model, task, search policy, repeat policy, search seed, target source, forecasting horizon, and split seed set. Preview parameters additionally bind the direct target values, supervision mask when present, output width, forecasting schedule when present, and exact search split indices. Unsupervised missing target cells are represented as JSON `null`, so the same artifact remains comparable after serialization. Forecasting parameters also record `task_definition="future-time-conditioned"`; parameters without that definition belong to a different forecasting formulation and require a fresh search. Stored checksums from older artifacts are optional metadata and are not reuse requirements. Compatible classification artifacts remain reusable; Preview-task artifacts that predate the direct task semantics must be regenerated.
-- Output artifacts are reused when `model_run.py --check` matches the stored semantic details and directly validates prediction contents, sample indices, Preview targets, supervision masks, and the forecasting origin/future-time grid. For full Preview outputs, reuse recomputes task metrics from the stored predictions and targets and requires the exact metric field set and value types; missing, additional, or inconsistent metrics are rejected. Reuse also checks the applicable method definition, effective control-time source, and forecasting task definition. Stored contract checksums are not required. For a 100-condition result, validation also covers the exact ordered axes, uniqueness, full predictions, and complete channel-outage provenance. Structurally incomplete payloads are recomputed with `--no-check`.
+- Param artifacts are matched by dataset, model, task, search policy, repeat policy, search seed, target source, forecasting horizon, and split seed set. Preview parameters additionally bind the direct target values, supervision mask when present, output width, forecasting schedule when present, and exact search split indices. Unsupervised missing target cells are represented as JSON `null`, so the same artifact remains comparable after serialization. Parameters record the applicable task definition: `future-time-conditioned`, `held-out-observed-cell`, `positive-label-is-outlier`, or `positive-label-is-changed-state`. Parameters without the applicable definition belong to a different task interpretation and require a fresh search. Stored checksums from older artifacts are optional metadata and are not reuse requirements. Compatible classification artifacts remain reusable; Preview-task artifacts that predate the direct task semantics must be regenerated.
+- Output artifacts are reused when `model_run.py --check` matches the stored semantic details and directly validates prediction contents, sample indices, Preview targets, supervision masks, and the forecasting origin/future-time grid. For full Preview outputs, reuse recomputes task metrics from the stored predictions and targets and requires the exact metric field set and value types; missing, additional, or inconsistent metrics are rejected. Reuse also checks the applicable method definition, effective control-time source, and task definition. Stored contract checksums are not required. For a 100-condition result, validation also covers the exact ordered axes, uniqueness, full predictions, and complete channel-outage provenance. Structurally incomplete payloads are recomputed with `--no-check`.
 - Compact summary artifacts remain reusable for classification. Preview summaries do not contain the target and supervision arrays needed for task validation, so regression, forecasting, imputation, outlier-detection, and change-detection runs reject them and require a fresh execution.
 - Package version alone is not a reuse key. Upgrading does not require deleting all prior artifacts: reuse is decided from the semantic fields and directly validated payload structure above.
 
