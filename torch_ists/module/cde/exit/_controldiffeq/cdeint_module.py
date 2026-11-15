@@ -198,9 +198,8 @@ def cdeint(dX_dt, z0, func, t, adjoint=True, **kwargs):
             kwargs['options'] = {}
         options = kwargs['options']
         if 'step_size' not in options and 'grid_constructor' not in options:
-            # Upstream EXIT assumes integer-grid controls. Keep this low-level
-            # fallback for provenance; the active wrapper now pre-fills a
-            # data-driven step size before this branch is reached.
+            # Integer-grid fallback; the packaged wrapper supplies a step size
+            # derived from the control times.
             time_diffs = 1.0
             options['step_size'] = time_diffs
     control_gradient = dX_dt(torch.zeros(1, dtype=z0.dtype, device=z0.device))
@@ -260,9 +259,8 @@ def ode_cde(dX_dt, z0,h0, func, t, kinetic_energy_coef, jacobian_norm2_coef, div
             kwargs['options'] = {}
         options = kwargs['options']
         if 'step_size' not in options and 'grid_constructor' not in options:
-            # Upstream EXIT assumes integer-grid controls. Keep this low-level
-            # fallback for provenance; the active wrapper now pre-fills a
-            # data-driven step size before this branch is reached.
+            # Integer-grid fallback; the packaged wrapper supplies a step size
+            # derived from the control times.
             time_diffs = 1.0
             options['step_size'] = time_diffs
 
@@ -336,9 +334,7 @@ def ode_cde_forecasting(dX_dt, z0,h0, func, t, kinetic_energy_coef, jacobian_nor
             kwargs['options'] = {}
         options = kwargs['options']
         if 'step_size' not in options and 'grid_constructor' not in options:
-            # This dormant forecasting path still preserves the upstream
-            # integer-grid fallback. If forecasting is reopened, the wrapper
-            # must inject a data-driven step size before this branch.
+            # Integer-grid fallback for direct callers without solver options.
             time_diffs = 1.0
             options['step_size'] = time_diffs
 
@@ -459,9 +455,7 @@ def ode_cde_forecasting2(dX_dt, z0,h0, func, t, kinetic_energy_coef, jacobian_no
             kwargs['options'] = {}
         options = kwargs['options']
         if 'step_size' not in options and 'grid_constructor' not in options:
-            # This dormant forecasting path still preserves the upstream
-            # integer-grid fallback. If forecasting is reopened, the wrapper
-            # must inject a data-driven step size before this branch.
+            # Integer-grid fallback for direct callers without solver options.
             time_diffs = 1.0
             options['step_size'] = time_diffs
 

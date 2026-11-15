@@ -90,10 +90,8 @@ def cdeint(dX_dt, z0, func, t, adjoint=True, **kwargs):
         kwargs.setdefault("rtol", 1e-6)
     elif method == "rk4":
         kwargs.setdefault("options", {})
-        # Preserve the upstream LEAP integer-grid rk4 default for provenance.
-        # The current packaged handler now aligns LEAP forward times to
-        # the normalized coeff time base, so this fixed step_size only describes
-        # the upstream-style branch, not the active runtime time scale.
+        # Direct calls default to an integer-grid rk4 step size.
+        # The packaged handler supplies a step size for normalized control times.
         if (
             "step_size" not in kwargs["options"]
             and "grid_constructor" not in kwargs["options"]
@@ -164,10 +162,8 @@ def cdeint_Learnable(
         kwargs.setdefault("rtol", 1e-7)
     elif method == "rk4":
         kwargs.setdefault("options", {})
-        # Preserve the upstream LEAP integer-grid rk4 default for provenance.
-        # The current packaged handler now aligns LEAP forward times to
-        # the normalized coeff time base, so this fixed step_size only describes
-        # the upstream-style branch, not the active runtime time scale.
+        # Direct calls default to an integer-grid rk4 step size.
+        # The packaged handler supplies a step size for normalized control times.
         if (
             "step_size" not in kwargs["options"]
             and "grid_constructor" not in kwargs["options"]

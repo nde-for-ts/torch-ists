@@ -272,9 +272,7 @@ class BaseHandler(ABC):
         x = seq[:, 0, :, :].permute(0, 2, 1)
 
         # Collapse per-channel observation metadata to a sequence-level view.
-        # Older code used channel 0, but public task heads use any-channel
-        # last-observed readout; keeping these aligned avoids silent truncation
-        # on asynchronous multivariate inputs.
+        # A timestep is observed when any channel has an observation.
         mask_nld = seq[:, 1, :, :].permute(0, 2, 1)
         delta_nld = seq[:, 2, :, :].permute(0, 2, 1)
         seq_mask = (mask_nld > 0).any(dim=-1).to(seq.dtype)
@@ -293,9 +291,7 @@ class BaseHandler(ABC):
             if L > 1 and not bool((seq_ts[:, 1:] > seq_ts[:, :-1]).all()):
                 raise ValueError("sample_times must be strictly increasing within each sample")
 
-        # Use the last observed timestep. This preserves ragged NaN-padding
-        # boundaries while avoiding the old count-1 compression bug under
-        # pre-existing missingness.
+        # Select the last observed timestep while respecting ragged NaN padding.
         final_index = self.get_final_index(seq_mask, L)
 
         return {

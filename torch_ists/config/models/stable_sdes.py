@@ -1,7 +1,4 @@
-"""Stable SDE model configs for the runtime package.
-
-Descriptions are intentionally concise and provenance-gated.
-"""
+"""Stable SDE model configs for the runtime package."""
 
 from typing import Dict
 

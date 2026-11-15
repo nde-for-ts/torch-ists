@@ -196,7 +196,7 @@ class ists_model(nn.Module):
         future_timestamps: Optional[torch.Tensor] = None,
         forecast_origin: Optional[torch.Tensor] = None,
     ):
-        # Inline backbone unpacking (was _run_backbone)
+        # Unpack the backbone output and optional auxiliary loss.
         result = self.seq_layer(seq, coeffs, sample_times=sample_times)
         if isinstance(result, tuple) and len(result) == 3:
             out, _hn, aux_loss = result

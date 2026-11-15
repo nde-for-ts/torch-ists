@@ -43,7 +43,7 @@ These models use the sequence stack directly with `coeffs=None`; `NaN` is replac
 **CNN construction.** `kernel_size` is an explicit positive odd integer in `model_params`; the
 default is `3`. The resolved value is part of architecture identity and is not a search axis.
 
-**PLSTM numerical note.** The packaged `plstm` clamps the phased time-gate denominator factors at `1e-3`. This intentionally differs from the unclamped reference implementation to avoid float32 sub-normal denominator underflow observed in long final-training runs.
+**PLSTM numerical note.** The packaged `plstm` clamps the phased time-gate denominator factors at `1e-3`. This intentionally differs from the unclamped reference implementation to avoid float32 sub-normal denominator underflow.
 
 **Limitation.** `cnn`, `rnn`, `lstm`, `gru`, and `bilstm` do not use the mask channel. After zero-fill, they cannot distinguish a true zero from a missing value. When missingness awareness matters, prefer rows that use mask, delta, or interpolation coefficients.
 
