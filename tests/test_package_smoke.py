@@ -111,6 +111,36 @@ def test_basic_classifier_forward_cpu():
     assert torch.isfinite(logits).all()
 
 
+def _head_output_grads(head_grad_scale):
+    torch.manual_seed(0)
+    model = ists_classifier(
+        model_name="cnn",
+        input_dim=3,
+        seq_len=8,
+        hidden_dim=8,
+        num_class=2,
+        head_grad_scale=head_grad_scale,
+    )
+    model.eval()
+    model(torch.randn(4, 3, 8, 3), None).sum().backward()
+    return model.head[-1].weight.grad.clone(), model.head[-1].bias.grad.clone()
+
+
+def test_classifier_head_grad_scale_default_and_override():
+    default_w, default_b = _head_output_grads(100.0)
+    plain_w, plain_b = _head_output_grads(1.0)
+    half_w, half_b = _head_output_grads(0.5)
+
+    assert torch.allclose(default_w, 100.0 * plain_w)
+    assert torch.allclose(default_b, 100.0 * plain_b)
+    assert torch.allclose(half_w, 0.5 * plain_w)
+    assert torch.allclose(half_b, 0.5 * plain_b)
+    assert ists_classifier(model_name="cnn", input_dim=3, seq_len=8).head_grad_scale == 100.0
+    for invalid in (0.0, -1.0, float("nan"), float("inf")):
+        with pytest.raises(ValueError):
+            ists_classifier(model_name="cnn", input_dim=3, seq_len=8, head_grad_scale=invalid)
+
+
 def test_control_knot_grid_and_adjoint_backward_preserve_direction():
     pytest.importorskip("torchcde")
     torchdiffeq = pytest.importorskip("torchdiffeq")

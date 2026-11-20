@@ -76,9 +76,15 @@ from torch_ists import DataLoader
 X = np.asarray(raw_values, dtype=np.float32)  # [N, D, L]
 y = np.asarray(raw_labels, dtype=np.int64)    # [N]
 
-bundle = DataLoader.from_numpy(X, y)
-np.savez("data/ToyDataset.npz", X=bundle.X.astype(np.float32), y=bundle.y.astype(np.int64))
+bundle = DataLoader.from_numpy(X, y)  # pass timestamps=... ([N, L]) for irregular sampling times
+
+payload = {"X": bundle.X.astype(np.float32), "y": bundle.y.astype(np.int64)}
+if bundle.timestamps is not None:
+    payload["timestamps"] = bundle.timestamps  # keep the observation times
+np.savez("data/ToyDataset.npz", **payload)
 ```
+
+Classification labels are used as given. Encode them as `0..C-1` before training with `torch.nn.CrossEntropyLoss`; for example, labels `1` and `2` need to be mapped to `0` and `1`.
 
 For a preview task, the dataset file may omit `y`; store `X [N,D,L]` in the dataset NPZ and the task target in `<targets-root>/<dataset>.npz`. Regression accepts `[N]` or `[N,R]` targets. Run `set_splits.py --task <task> --targets-root <targets-root>` so the task-isolated split is validated and generated before search.
 
@@ -96,7 +102,7 @@ bundle = DataLoader.from_file(
 )
 ```
 
-`DataLoader.from_dataframe` and CSV/parquet `from_file` return a `DatasetBundle` without writing NPZ. Pass `task="regression"` to preserve finite real-valued fractional targets. Unknown task names, inconsistent targets within a series, non-integer classification labels, and DataFrame tasks requiring structured targets fail closed. Persist `bundle.X` and `bundle.y` when you need a portable array payload.
+`DataLoader.from_dataframe` and CSV/parquet `from_file` return a `DatasetBundle` without writing NPZ. Pass `task="regression"` to preserve finite real-valued fractional targets. Unknown task names, inconsistent targets within a series, non-integer classification labels, and DataFrame tasks requiring structured targets fail closed. Persist `bundle.X`, `bundle.y`, and `bundle.timestamps` (when present) with the NPZ example above when you need a portable array payload.
 
 ## 5. Generate or Reuse Splits
 

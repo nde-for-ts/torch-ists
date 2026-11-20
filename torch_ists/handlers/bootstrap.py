@@ -20,11 +20,11 @@ from .base import BaseHandler
 from .registry import HandlerRegistry
 
 _OPTIONAL_DEPENDENCY_HINTS = {
-    "torchdiffeq": "Install `torchdiffeq` or use `pip install \"torch-ists[all]\"`.",
-    "torchcde": "Install `torchcde` or use `pip install \"torch-ists[all]\"`.",
-    "torchsde": "Install `torchsde` or use `pip install \"torch-ists[all]\"`.",
-    "torchdyn": "Install `torchdyn` or use `pip install \"torch-ists[ode]\"`.",
-    "signatory": "Install from source with `pip install -e .[signatory]`; the PyPI wheel is torch-version-pinned.",
+    "torchdiffeq": "Install `torchdiffeq` directly or, from the source checkout, run `python -m pip install -e \".[all]\"`.",
+    "torchcde": "Install `torchcde` directly or, from the source checkout, run `python -m pip install -e \".[all]\"`.",
+    "torchsde": "Install `torchsde` directly or, from the source checkout, run `python -m pip install -e \".[all]\"`.",
+    "torchdyn": "Install `torchdyn` directly or, from the source checkout, run `python -m pip install -e \".[ode]\"`.",
+    "signatory": "From the source checkout, run `python -m pip install --no-build-isolation -e \".[signatory]\"`; the PyPI wheel is torch-version-pinned.",
     "stribor": "Install `stribor==0.1.0` for the optional direct Stribor flow backend.",
 }
 

@@ -25,6 +25,8 @@ This preview is not published on PyPI. Install it from a source checkout as show
 Install the base package:
 
 ```bash
+git clone https://github.com/nde-for-ts/torch-ists.git
+cd torch-ists
 python -m pip install --upgrade pip
 python -m pip install -e .
 python -c "import torch_ists; print(torch_ists.__version__)"
@@ -34,25 +36,25 @@ Optional dependencies:
 
 ```bash
 # Hyperparameter search (Ray Tune)
-python -m pip install -e .[tune]
+python -m pip install -e ".[tune]"
 
 # Built-in benchmark dataset loader
-python -m pip install -e .[data]
+python -m pip install -e ".[data]"
 
 # ODE backends
-python -m pip install -e .[ode]
+python -m pip install -e ".[ode]"
 
 # CDE backends
-python -m pip install -e .[cde]
+python -m pip install -e ".[cde]"
 
 # SDE backends
-python -m pip install -e .[sde]
+python -m pip install -e ".[sde]"
 
 # Optional Stribor flow backend
-python -m pip install -e .[flow]
+python -m pip install -e ".[flow]"
 
 # Full optional stack, including data loading and continuous-time model backends
-python -m pip install -e .[all]
+python -m pip install -e ".[all]"
 ```
 
 Flow models use the package-authored `native` backend by default, so installing an optional dependency does not change the default computation. `.[flow]` installs the supported MIT `stribor==0.1.0` runtime for an explicit `stribor` request. Explicit `stribor` is fail-closed; explicit `auto` tries Stribor first and falls back to `native` only for expected absence or supported-version incompatibility. Constructor, numerical, memory, and training failures remain errors.
@@ -72,7 +74,7 @@ The final command validates the reference repository URL, commit, dependency ver
 Neural RDE (`neuralrde-1/2/3`) additionally requires `signatory`. It is kept out of `.[all]` because the PyPI wheel is torch-version-pinned; install the source-build extra only when those models are needed:
 
 ```bash
-python -m pip install --no-build-isolation -e .[signatory]
+python -m pip install --no-build-isolation -e ".[signatory]"
 ```
 
 ## Data Loading
@@ -91,7 +93,7 @@ print(bundle.X.shape, bundle.y.shape)
 
 Loader task names are validated. Long-format DataFrame input supports one constant scalar target per series for classification, regression, and outlier detection; regression keeps finite real-valued fractional targets instead of coercing them to class IDs. Bundle summaries report the validated task and actual target shape/dtype.
 
-For a built-in benchmark dataset, choose an explicit data root. Downloads verify each pinned asset before an atomic install, and an attested cache can be reused offline:
+For a built-in benchmark dataset, choose an explicit data root. By default, `download()` fetches the full UCR univariate and UEA multivariate 2018 archives plus their two summary CSVs, even when you read one dataset. Downloads verify each pinned asset before an atomic install, and an attested cache can be reused offline:
 
 ```python
 from torch_ists import benchmark_loader

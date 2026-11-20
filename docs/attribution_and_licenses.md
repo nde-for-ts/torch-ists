@@ -27,11 +27,11 @@ NeuralFlow, DualDynamics, FlowPath, and FusionCDE can use the native flow operat
 | Component | Models | Path | Upstream | License |
 |---|---|---|---|---|
 | Phased LSTM | `plstm` | `basic/plstm.py` | [dannyneil/pytorch_plstm](https://github.com/dannyneil/pytorch_plstm) | MIT |
-| Time-Aware LSTM | `tlstm` | `basic/tlstm.py` | [duskybomb/tlstm](https://github.com/duskybomb/tlstm) | None |
-| Time-Gated LSTM | `tglstm` | `basic/tglstm.py` | [FedericOldani/TGLSTM](https://github.com/FedericOldani/TGLSTM) | None |
+| Time-Aware LSTM | `tlstm` | `basic/tlstm.py` | [duskybomb/tlstm](https://github.com/duskybomb/tlstm) | None (no upstream license) |
+| Time-Gated LSTM | `tglstm` | `basic/tglstm.py` | [FedericOldani/TGLSTM](https://github.com/FedericOldani/TGLSTM) | None (no upstream license) |
 | SAnD | `sand` | `attention/sand.py` | [khirotaka/SAnD](https://github.com/khirotaka/SAnD) | MIT |
 | mTAN | `mtan` | `attention/mtan.py` | [reml-lab/mTAN](https://github.com/reml-lab/mTAN) | MIT |
-| Multi-view Integration Attention Model (MIAM) | `miam` | `attention/miam.py` | [YurimALee/MIAM](https://github.com/YurimALee/MIAM) | None |
+| Multi-view Integration Attention Model (MIAM) | `miam` | `attention/miam.py` | [YurimALee/MIAM](https://github.com/YurimALee/MIAM) | None (no upstream license) |
 | ODE-LSTM | `ode-lstm` | `ode/odelstm.py` | [mlech26l/ode-lstms](https://github.com/mlech26l/ode-lstms) | MIT |
 | GRU-ODE-Bayes | `gru-ode-bayes` | `ode/source_variants.py` | [edebrouwer/gru_ode_bayes](https://github.com/edebrouwer/gru_ode_bayes) | MIT |
 | Latent ODE / ODE-RNN | `latentode`, `ode-rnn` | `ode/source_variants.py` | [YuliaRubanova/latent_ode](https://github.com/YuliaRubanova/latent_ode) | MIT |
@@ -41,7 +41,7 @@ NeuralFlow, DualDynamics, FlowPath, and FusionCDE can use the native flow operat
 | Neural RDE | `neuralrde-1/2/3` | `cde/nrde_model.py` | Adapted from the NeuralCDE metamodel lineage; method paper: [Morrill et al. 2021](https://arxiv.org/abs/2009.08295) | Apache-2.0 lineage for copied structure |
 | ANCDE | `ancde` | `cde/ancde/` | [sheoyon-jhin/ANCDE](https://github.com/sheoyon-jhin/ANCDE) | Apache-2.0 |
 | EXIT | `exit` | `cde/exit/` | [sheoyon-jhin/EXIT](https://github.com/sheoyon-jhin/EXIT) | Apache-2.0 |
-| LEAP | `leap` | `cde/leap/` | [jeongwhanchoi/LEAP](https://github.com/jeongwhanchoi/LEAP); method paper: Jhin et al., *Learnable Path in Neural Controlled Differential Equations* (AAAI 2023) — [arXiv:2301.04333](https://arxiv.org/abs/2301.04333) | None |
+| LEAP | `leap` | `cde/leap/` | [jeongwhanchoi/LEAP](https://github.com/jeongwhanchoi/LEAP); method paper: Jhin et al., *Learnable Path in Neural Controlled Differential Equations* (AAAI 2023) — [arXiv:2301.04333](https://arxiv.org/abs/2301.04333) | None (no upstream license) |
 | TorchDiffEqPack | `exit`, `leap` | `cde/{exit,leap}/_controldiffeq/TorchDiffEqPack/` | [juntang-zhuang/TorchDiffEqPack](https://github.com/juntang-zhuang/TorchDiffEqPack) | MIT |
 
 ## MIT notices for included adaptations
@@ -92,7 +92,7 @@ The above copyright notice and this permission notice shall be included in all c
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-**None** records that no LICENSE file was found in the cited upstream repository at the reviewed revision; the attribution above identifies that provenance without assigning an upstream license.
+**None (no upstream license)** means the cited upstream repository does not include a license; the attribution above identifies that provenance without assigning an upstream license.
 
 ### NeuralFlow reference implementation
 

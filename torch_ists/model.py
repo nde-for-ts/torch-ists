@@ -8,10 +8,12 @@ Behavior notes:
 - ``use_intensity=None`` defers to ``ists_layer`` model policy resolution.
 - Auxiliary-loss backbones stay logits-first; ``return_aux_loss=True`` opt-in exposes the scalar.
 - Non-finite predictions hard-fail with ``RuntimeError`` instead of being silently zero-filled.
+- Classification heads multiply the final ``Linear`` gradients by ``head_grad_scale`` (default 100).
 """
 
 from __future__ import annotations
 
+import math
 from collections import OrderedDict
 from typing import Literal, Optional
 
@@ -59,10 +61,15 @@ class ists_model(nn.Module):
         ] = "classification",
         output_dim: int = 1,
         forecast_horizon: Optional[int] = None,
+        head_grad_scale: float = 100.0,
     ):
         super().__init__()
 
         self.task = _normalize_task(task)
+        head_grad_scale = float(head_grad_scale)
+        if not math.isfinite(head_grad_scale) or head_grad_scale <= 0:
+            raise ValueError("head_grad_scale must be a positive finite number")
+        self.head_grad_scale = head_grad_scale
         self.input_dim = int(input_dim)
         self.hidden_dim = int(hidden_dim)
         self.output_dim = max(1, int(output_dim))
@@ -123,10 +130,12 @@ class ists_model(nn.Module):
         # Xavier init on head (all tasks) – matches ICLR 2024 protocol
         self.head.apply(self._init_weights)
 
-        # 100x gradient scaling on classifier head output layer only
-        if self.task == "classification":
-            self.head[-1].weight.register_hook(lambda grad: 100 * grad)
-            self.head[-1].bias.register_hook(lambda grad: 100 * grad)
+        # Gradient scaling on the classifier head output layer only (default 100x);
+        # head_grad_scale=1.0 leaves the gradients unscaled.
+        if self.task == "classification" and self.head_grad_scale != 1.0:
+            scale = self.head_grad_scale
+            self.head[-1].weight.register_hook(lambda grad: scale * grad)
+            self.head[-1].bias.register_hook(lambda grad: scale * grad)
 
     @staticmethod
     def _init_weights(m):
@@ -303,11 +312,13 @@ def ists_classifier(
     device: str = "cpu",
     model_params: Optional[dict] = None,
     imputation_strategy: str = "zero",
+    head_grad_scale: float = 100.0,
 ) -> ists_model:
     """Classification convenience constructor.
 
     ``use_intensity=None`` resolves from model policy, and non-finite backbone/logit tensors
-    raise ``RuntimeError``.
+    raise ``RuntimeError``. ``head_grad_scale`` multiplies the gradients of the final head
+    ``Linear`` layer (default ``100.0``; ``1.0`` leaves them unscaled).
     """
     return ists_model(
         model_name=model_name,
@@ -330,4 +341,5 @@ def ists_classifier(
         model_params=model_params,
         imputation_strategy=imputation_strategy,
         task="classification",
+        head_grad_scale=head_grad_scale,
     )

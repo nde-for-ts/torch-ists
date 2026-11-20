@@ -49,7 +49,7 @@ For the included command-line scripts, including `scripts/param_search.py`:
 
 ```bash
 cd torch-ists
-python -m pip install -e .[tune]
+python -m pip install -e ".[tune]"
 ```
 
 Environment:
@@ -66,7 +66,7 @@ Environment:
 - `signatory` is intentionally not included in `.[all]` because the PyPI wheel is torch-version-pinned
 
 ```bash
-python -m pip install --no-build-isolation -e .[signatory]
+python -m pip install --no-build-isolation -e ".[signatory]"
 ```
 
 ### 1.2 Basic Usage
@@ -83,14 +83,25 @@ seq = torch.randn(16, 3, 64, 8)  # [batch, channels, length, features]
 output = model(seq, coeffs=None)  # [16, 2]
 ```
 
-To bridge raw arrays into a forward call, run `preprocess` and stack the value, mask, and delta channels:
+To bridge raw arrays into a forward call, run `preprocess` for the same model and stack the value, mask, and delta channels:
 
 ```python
+import numpy as np
 from torch_ists import preprocess
-# X: raw array of shape [N, D, L]
-X_missing, X_mask, X_delta, coeffs = preprocess(X, model_name="neuralcde")
+
+X = np.random.randn(16, 8, 64).astype(np.float32)  # raw array [N, D, L]; NaN marks missing entries
+
+# Direct sequence model (the CNN above): no interpolation coefficients
+X_missing, X_mask, X_delta, _ = preprocess(X, model_name="cnn", build_coeffs=False)
 seq = torch.stack([X_missing, X_mask, X_delta], dim=1)  # [N, 3, L, D]
-logits = model(seq, coeffs=coeffs)
+logits = model(seq, coeffs=None)  # [16, 2]
+
+# Coefficient-driven model (requires the `cde` extra): fit value standardization on training samples only
+train_idx = np.arange(12)
+cde_model = ists_classifier(model_name='neuralcde', num_class=2, input_dim=8, seq_len=64, device='cpu')
+X_missing, X_mask, X_delta, coeffs = preprocess(X, model_name="neuralcde", control_value_train_indices=train_idx)
+seq = torch.stack([X_missing, X_mask, X_delta], dim=1)
+logits = cde_model(seq, coeffs=coeffs)  # [16, 2]
 ```
 
 Coefficient-driven rows consume the `coeffs` returned by `preprocess`. Direct sequence, attention, and event-driven rows such as ODE-LSTM, Neural Jump ODE (NJ-ODE), and LatentSDE accept `coeffs=None` and use the sequence stack directly.
@@ -462,7 +473,7 @@ bundle = DataLoader.from_file(
 
 ### 3.5 `DatasetBundle`
 
-`DatasetBundle` stores `X`, `y`, optional `timestamps`, and a metadata dictionary. `summary()` returns shapes, dtypes, missing-value counts, timestamp availability, task metadata, and `num_classes` for classification targets.
+`DatasetBundle` stores `X`, `y`, optional `timestamps`, and a metadata dictionary. `summary()` returns the sample, feature, and sequence-length counts, timestamp availability, the task, target shape and dtype, and `num_classes` for classification targets.
 
 ---
 
@@ -792,6 +803,7 @@ def ists_classifier(
     device: str = "cpu",
     model_params: Optional[Dict[str, Any]] = None,
     imputation_strategy: str = "zero",
+    head_grad_scale: float = 100.0,
 ) -> ists_model:
 ```
 
@@ -827,6 +839,8 @@ Behavior notes:
 - Under the scripts' train-only z-score normalization, the zero-fill path becomes per-channel mean imputation in raw value space.
 - `imputation_strategy` selects how missing entries are filled for compatible direct value-channel backbones: `"zero"` (default), `"last_observed"`, and `"channel_mean"`. Strict raw-missing rows (`neuralflow-*`, `flowpath-*`) keep raw `NaN` until method-defined mask-aware zero filling and reject nonzero strategies; coefficient-driven rows consume the `coeffs` built by `preprocess(...)`.
 - Non-finite backbone outputs, hidden states, or logits raise `RuntimeError`; the package does not silently zero-fill them.
+- The classification head includes `BatchNorm1d`; call `model.eval()` before predicting a batch of one sample.
+- The classification head multiplies the gradients of its final `Linear` weight and bias by `head_grad_scale` (default `100.0`). Set `head_grad_scale=1.0` for unscaled gradients. The setting applies only to `task="classification"`, must be positive and finite, and does not change forward outputs.
 
 ### 6.2 `ists_model`
 
@@ -856,6 +870,7 @@ class ists_model(nn.Module):
         task: str = "classification",  # classification|regression|forecasting|imputation|outlier_detection|change_detection
         output_dim: int = 1,
         forecast_horizon: Optional[int] = None,
+        head_grad_scale: float = 100.0,
     ):
 ```
 
