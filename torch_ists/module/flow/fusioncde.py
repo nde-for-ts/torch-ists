@@ -25,7 +25,7 @@ class FusionCDE(nn.Module):
         num_hidden_layers: int,
         output_channels: int,
         func: nn.Module,
-        flow_num_layers: int = 2,
+        flow_num_layers: int = 1,
         head_depth: int | None = None,
         flow_depth: int | None = None,
         input_option: str = "x",

@@ -281,8 +281,11 @@ def _forward_with_optional_aux(
     if request_aux:
         try:
             return model(seq, coeffs, return_aux_loss=True, **runtime_kwargs)
-        except TypeError:
-            return model(seq, coeffs, **runtime_kwargs)
+        except TypeError as exc:
+            # Fall back only when the model rejects the keyword itself; any other
+            # TypeError raised inside the model is a real error and propagates.
+            if "return_aux_loss" not in str(exc):
+                raise
     return model(seq, coeffs, **runtime_kwargs)
 
 

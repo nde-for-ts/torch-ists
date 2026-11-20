@@ -808,7 +808,9 @@ def apply_missingness(
     - observed: MAR and MNAR scale over the observed (non-NaN) reference values, so on
       the reference the expected share of observed values removed equals the rate
       before clipping at 0.99 and the one-observation floor. BLOCK sizes and places
-      its gap within each sample's length through its last observed step. With
+      its gap within each sample's length through the last step observed in any
+      channel, so leading gaps, interior gaps and channel-specific padding stay
+      inside it. With
       channel_sync=True, MAR and MNAR average the step probability over the channels
       observed at that step.
     MCAR, BURST and CHANNEL_DROP do not depend on the rate basis.
