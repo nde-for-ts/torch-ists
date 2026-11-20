@@ -386,10 +386,45 @@ def _safe_nanmean_array(x: np.ndarray, axis=None, keepdims: bool = False) -> np.
     return np.asarray(value, dtype=np.float32)
 
 
+SUPPORTED_MISSINGNESS_RATE_BASES = ("grid", "observed")
+
+
+def _resolve_rate_basis(rate_basis: str) -> str:
+    value = str(rate_basis).lower()
+    if value not in SUPPORTED_MISSINGNESS_RATE_BASES:
+        raise ValueError(
+            f"rate_basis must be one of {SUPPORTED_MISSINGNESS_RATE_BASES}; got {rate_basis!r}"
+        )
+    return value
+
+
+def _scale_missingness_probability(
+    probs: np.ndarray,
+    reference_probs: np.ndarray,
+    observed_reference: Optional[np.ndarray],
+    rate: float,
+    rate_basis: str,
+) -> np.ndarray:
+    # Scale probabilities so that their reference mean equals the rate. The grid basis
+    # averages over every reference cell with missing cells counted as zero, so the rate
+    # is relative to the full time grid. The observed basis averages over observed
+    # reference values only, so the rate is the expected share of observed values removed.
+    probs = np.nan_to_num(probs, nan=0.0, posinf=0.99, neginf=0.0)
+    if rate_basis == "observed":
+        scale = _safe_nanmean_scalar(
+            np.where(observed_reference, reference_probs, np.nan), default=1.0
+        )
+    else:
+        reference_probs = np.nan_to_num(reference_probs, nan=0.0, posinf=0.99, neginf=0.0)
+        scale = _safe_nanmean_scalar(reference_probs, default=1.0)
+    return probs / (scale + 1e-8) * rate
+
+
 def _build_mar_probability(
     X: np.ndarray,
     rate: float,
     reference_X: Optional[np.ndarray] = None,
+    rate_basis: str = "grid",
 ) -> np.ndarray:
     # Feature-dependent missingness probability.
     reference = X if reference_X is None else np.asarray(reference_X, dtype=np.float32)
@@ -402,9 +437,15 @@ def _build_mar_probability(
     reference_logits = reference_centered / reference_scale
     probs = _sigmoid(logits)
     reference_probs = _sigmoid(reference_logits)
-    probs = np.nan_to_num(probs, nan=0.0, posinf=0.99, neginf=0.0)
-    reference_probs = np.nan_to_num(reference_probs, nan=0.0, posinf=0.99, neginf=0.0)
-    probs = probs / (_safe_nanmean_scalar(reference_probs, default=1.0) + 1e-8) * rate
+    # Under the observed basis each observed reference value counts once, so channels
+    # with more observations weigh more.
+    probs = _scale_missingness_probability(
+        probs,
+        reference_probs,
+        ~np.isnan(reference) if rate_basis == "observed" else None,
+        rate,
+        rate_basis,
+    )
     return np.clip(probs, 0.0, 0.99)
 
 
@@ -412,6 +453,7 @@ def _build_mnar_probability(
     X: np.ndarray,
     rate: float,
     reference_X: Optional[np.ndarray] = None,
+    rate_basis: str = "grid",
 ) -> np.ndarray:
     # Value-dependent missingness probability.
     reference = X if reference_X is None else np.asarray(reference_X, dtype=np.float32)
@@ -421,9 +463,13 @@ def _build_mnar_probability(
     reference_norm = (reference - reference_mean) / reference_scale
     probs = _sigmoid(norm)
     reference_probs = _sigmoid(reference_norm)
-    probs = np.nan_to_num(probs, nan=0.0, posinf=0.99, neginf=0.0)
-    reference_probs = np.nan_to_num(reference_probs, nan=0.0, posinf=0.99, neginf=0.0)
-    probs = probs / (_safe_nanmean_scalar(reference_probs, default=1.0) + 1e-8) * rate
+    probs = _scale_missingness_probability(
+        probs,
+        reference_probs,
+        np.isfinite(reference_probs) if rate_basis == "observed" else None,
+        rate,
+        rate_basis,
+    )
     return np.clip(probs, 0.0, 0.99)
 
 
@@ -743,6 +789,7 @@ def apply_missingness(
     channel_sync: bool = False,
     reference_X: Optional[np.ndarray] = None,
     return_stats: bool = False,
+    rate_basis: str = "grid",
 ) -> tuple:
     """Apply synthetic missingness to [N, D, L] input data.
 
@@ -752,6 +799,19 @@ def apply_missingness(
     - BLOCK: one contiguous temporal gap per sample/channel (or per sample if channel_sync=True).
     - BURST: several short contiguous temporal gaps per sample/channel (or per sample if channel_sync=True).
     - CHANNEL_DROP: one seed-stable global channel subset; channel_sync is not an axis.
+
+    Rate basis (MAR, MNAR and BLOCK):
+    - grid (default): MAR and MNAR scale their probabilities over every reference
+      cell, counting missing cells as zero, and BLOCK sizes its gap from the full
+      sequence length. On padded or natively missing data the share of observed
+      values removed can therefore differ from the rate.
+    - observed: MAR and MNAR scale over the observed (non-NaN) reference values, so on
+      the reference the expected share of observed values removed equals the rate
+      before clipping at 0.99 and the one-observation floor. BLOCK sizes and places
+      its gap within each sample's length through its last observed step. With
+      channel_sync=True, MAR and MNAR average the step probability over the channels
+      observed at that step.
+    MCAR, BURST and CHANNEL_DROP do not depend on the rate basis.
 
     Returns:
         X_missing: [N, D, L], with missing values as NaN.
@@ -763,6 +823,7 @@ def apply_missingness(
     mechanism = mechanism.upper()
     if mechanism not in SUPPORTED_MISSINGNESS_MECHANISMS:
         raise ValueError(f"Unsupported mechanism: {mechanism}")
+    rate_basis = _resolve_rate_basis(rate_basis)
     if mechanism == "CHANNEL_DROP":
         if channel_sync:
             raise ValueError("CHANNEL_DROP does not define channel_sync; use False")
@@ -796,6 +857,23 @@ def apply_missingness(
                     for j in range(d):
                         removed = rng.choice(l, size=num_remove, replace=False)
                         sampled_missing[i, j, removed] = True
+    elif rate > 0.0 and mechanism == "BLOCK" and rate_basis == "observed":
+        # Size and place the gap within each sample's length through its last observed
+        # step, so trailing padding of variable-length series cannot absorb it.
+        observed_steps = ~existing_missing.all(axis=1)  # [N, L]
+        for i in range(n):
+            steps = np.flatnonzero(observed_steps[i])
+            span = int(steps[-1]) + 1 if steps.size else 0
+            num_remove = int(span * rate)
+            if num_remove <= 0:
+                continue
+            if channel_sync:
+                removed = _sample_block_indices(rng, span, num_remove)
+                sampled_missing[i, :, removed] = True
+            else:
+                for j in range(d):
+                    removed = _sample_block_indices(rng, span, num_remove)
+                    sampled_missing[i, j, removed] = True
     elif rate > 0.0 and mechanism in {"BLOCK", "BURST"}:
         num_remove = int(l * rate)
         sampler = _sample_block_indices if mechanism == "BLOCK" else _sample_burst_indices
@@ -811,11 +889,20 @@ def apply_missingness(
                         sampled_missing[i, j, removed] = True
     elif rate > 0.0:
         if mechanism == "MAR":
-            prob = _build_mar_probability(X, rate, reference_X=reference_X)
+            prob = _build_mar_probability(X, rate, reference_X=reference_X, rate_basis=rate_basis)
         else:
-            prob = _build_mnar_probability(X, rate, reference_X=reference_X)
+            prob = _build_mnar_probability(X, rate, reference_X=reference_X, rate_basis=rate_basis)
 
-        if channel_sync:
+        if channel_sync and rate_basis == "observed":
+            # Average over the channels observed at each step; a missing channel has no
+            # value to remove and must not dilute the step probability.
+            prob_observed = np.where(existing_missing, np.nan, prob)
+            prob_time = np.nan_to_num(
+                np.clip(_safe_nanmean_array(prob_observed, axis=1), 0.0, 0.99), nan=0.0
+            )  # [N, L]
+            sampled_time = rng.random((n, l), dtype=np.float32) < prob_time
+            sampled_missing = np.repeat(sampled_time[:, None, :], d, axis=1)
+        elif channel_sync:
             # Aggregate channel-level probabilities to time-level probabilities.
             prob_time = np.clip(np.nanmean(prob, axis=1), 0.0, 0.99)  # [N, L]
             sampled_time = rng.random((n, l), dtype=np.float32) < prob_time
@@ -835,10 +922,15 @@ def apply_missingness(
     mask_observed = (~np.isnan(X_missing)).astype(np.float32)
 
     if return_stats:
+        observed_count = int(np.count_nonzero(~existing_missing))
+        removed_count = int(np.count_nonzero(sampled_missing & ~existing_missing))
         stats = {
             "fully_masked_before_floor": int(len(fully_masked_before_floor_indices)),
             "fully_masked_before_floor_indices": fully_masked_before_floor_indices,
             "n_sequences": int(n),
+            "rate_basis": rate_basis,
+            "requested_rate": float(rate),
+            "realized_rate": float(removed_count / observed_count) if observed_count else 0.0,
         }
         return X_missing, mask_observed, stats
     return X_missing, mask_observed
@@ -865,6 +957,7 @@ def preprocess(
     control_time_transform_state: Optional[dict] = None,
     return_control_time_transform: bool = False,
     build_coeffs: bool = True,
+    missingness_rate_basis: str = "grid",
 ):
     """Preprocess data and build interpolation features.
 
@@ -915,6 +1008,8 @@ def preprocess(
         build_coeffs: If false, return ``None`` as the fourth value without
             importing ``torchcde``. This additive path is for direct sequence
             models; the default remains coefficient construction.
+        missingness_rate_basis: ``grid`` (default) or ``observed`` for MAR, MNAR and
+            BLOCK. See ``apply_missingness``.
 
     Returns:
         X_missing: torch.Tensor [N, L, D]
@@ -922,6 +1017,7 @@ def preprocess(
         X_delta: torch.Tensor [N, L, D]
         coeffs: torch.Tensor interpolation coefficients
     """
+    missingness_rate_basis = _resolve_rate_basis(missingness_rate_basis)
     import torch
 
     resolved_interpolate = interpolate
@@ -1004,6 +1100,7 @@ def preprocess(
             seed=seed,
             channel_sync=channel_sync,
             reference_X=reference_np,
+            rate_basis=missingness_rate_basis,
         )
     else:
         X_missing_np = X_np.copy()

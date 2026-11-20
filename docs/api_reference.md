@@ -535,6 +535,7 @@ def preprocess(
 | `timestamps` | `Optional[Any]` | `None` | Optional timestamp grid `[N, L]`. It supplies timestamp deltas and, with `control_time_source="auto"`, an elapsed physical-time control channel. |
 | `timestamp_delta_scale` | `Optional[float]` | `None` | Positive scale for timestamp-based deltas. The scripts use the train split median positive timestamp step. |
 | `missingness_reference` | `Optional[Any]` | `None` | Optional reference array used by non-MCAR missingness mechanisms such as MAR/MNAR; script workflows pass train-split reference statistics. |
+| `missingness_rate_basis` | `str` | `"grid"` | Rate basis for `MAR`, `MNAR`, and `BLOCK`: `"grid"` or `"observed"`. See `apply_missingness`. |
 | `control_value_transform` | `Optional[str]` | `None` | Model-aware default: coefficient consumers request `"standardize"`; other models and calls without `model_name` use `"identity"`. Explicit `"standardize"` fits finite observed values from `control_value_train_indices`; `"train_standardize"` is accepted as an input alias. |
 | `control_value_train_indices` | `Optional[Any]` | `None` | Required training sample indices when fitting `"standardize"`. Validation and test samples do not contribute statistics. |
 | `control_value_transform_state` | `Optional[dict]` | `None` | Previously fitted state to reuse without refitting, for example across robustness conditions. |
@@ -623,7 +624,8 @@ def apply_missingness(
 | `seed` | `int` | `0` | Random seed |
 | `channel_sync` | `bool` | `False` | Synchronize temporal missingness across channels. `CHANNEL_DROP` does not use this axis and requires `False`. |
 | `reference_X` | `Optional[np.ndarray]` | `None` | Optional reference data used to derive MAR/MNAR probabilities; use training data when evaluating held-out data. |
-| `return_stats` | `bool` | `False` | Return a third dictionary with observation-floor or channel-outage statistics. |
+| `return_stats` | `bool` | `False` | Return a third dictionary with observation-floor or channel-outage statistics. For temporal mechanisms it also reports `rate_basis`, `requested_rate`, and `realized_rate` (the share of originally observed values removed). |
+| `rate_basis` | `str` | `"grid"` | Rate basis for `MAR`, `MNAR`, and `BLOCK`: `"grid"` or `"observed"`. `MCAR`, `BURST`, and `CHANNEL_DROP` do not depend on it. |
 
 #### Returns
 
@@ -660,7 +662,8 @@ print(np.isnan(X_missing).mean())  # ~0.3
 Missingness caveats:
 
 - **Rate realization**: synthetic missingness is deterministic for `MCAR`, `BLOCK`, and `BURST`, and probability-driven for `MAR` and `MNAR`. Native `NaN` values remain missing, so the final observed missingness can differ from the requested rate. When a sample has at least one native observation, synthetic missingness keeps at least one observed position.
-- **`channel_sync` semantics**: when `channel_sync=False` (default), missing indices are sampled independently per channel. When `channel_sync=True`, the same missing time indices are shared across all channels.
+- **Rate basis**: with the default `rate_basis="grid"`, `MAR` and `MNAR` scale their probabilities over every cell of the reference, counting missing cells as zero, and `BLOCK` sizes its gap from the full sequence length. On padded or natively missing data the share of observed values removed can therefore differ from the rate. With `rate_basis="observed"`, `MAR` and `MNAR` scale over the observed values of the reference (the input itself unless `reference_X` is given), so on that reference the expected share of observed values removed equals the rate before clipping at 0.99 and the one-observation floor; `BLOCK` sizes and places its gap within each sample's length through its last observed step. Both bases give the same result on data without missing values. The statistics returned with `return_stats=True` include the realized share.
+- **`channel_sync` semantics**: when `channel_sync=False` (default), missing indices are sampled independently per channel. When `channel_sync=True`, the same missing time indices are shared across all channels. With `rate_basis="observed"`, `MAR` and `MNAR` average the shared step probability over the channels observed at that step.
 
 ---
 
