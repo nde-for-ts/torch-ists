@@ -73,7 +73,10 @@ class _GRU(torch.nn.Module):
                 "sample_times must use the same clock as the coefficient time channel"
             )
 
-        x[:, 1:, 1 : 1 + half_num_channels] -= x[:, :-1, 1 : 1 + half_num_channels]
+        # Convert cumulative observation counts to per-step indicators. The source and
+        # destination slices overlap, so read the cumulative values before writing.
+        cumulative_masks = x[:, :, 1 : 1 + half_num_channels].clone()
+        x[:, 1:, 1 : 1 + half_num_channels] = cumulative_masks[:, 1:] - cumulative_masks[:, :-1]
         x[:, 0, 0] = control_times[:, 0] - runtime_times[:, 0]
         x[:, 1:, 0] = control_times[:, 1:] - control_times[:, :-1]
 
